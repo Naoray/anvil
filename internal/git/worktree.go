@@ -73,7 +73,8 @@ func RemoveWorktree(worktreePath string, force bool) error {
 		return fmt.Errorf("finding bare repository: %w", err)
 	}
 
-	cmd := exec.Command("git", append([]string{"-C", barePath}, args...)...)
+	basePath := filepath.Dir(barePath)
+	cmd := exec.Command("git", append([]string{"-C", basePath}, args...)...)
 	return cmd.Run()
 }
 
