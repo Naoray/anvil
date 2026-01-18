@@ -5,12 +5,17 @@ import (
 )
 
 type FileCopyStep struct {
-	from string
-	to   string
+	from     string
+	to       string
+	priority int
 }
 
-func NewFileCopyStep(from, to string) *FileCopyStep {
-	return &FileCopyStep{from: from, to: to}
+func NewFileCopyStep(from, to string, priority ...int) *FileCopyStep {
+	p := 15
+	if len(priority) > 0 {
+		p = priority[0]
+	}
+	return &FileCopyStep{from: from, to: to, priority: p}
 }
 
 func (s *FileCopyStep) Name() string {
@@ -22,7 +27,7 @@ func (s *FileCopyStep) Run(ctx types.ScaffoldContext, opts types.StepOptions) er
 }
 
 func (s *FileCopyStep) Priority() int {
-	return 50
+	return s.priority
 }
 
 func (s *FileCopyStep) Condition(ctx types.ScaffoldContext) bool {

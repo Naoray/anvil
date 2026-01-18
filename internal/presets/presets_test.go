@@ -63,14 +63,14 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, "node.npm", steps[1].Name)
 	assert.Equal(t, []string{"ci"}, steps[1].Args)
 
-	assert.Equal(t, "database.create", steps[2].Name)
+	assert.Equal(t, "file.copy", steps[2].Name)
+	assert.Equal(t, ".env.example", steps[2].From)
+	assert.Equal(t, ".env", steps[2].To)
 
-	assert.Equal(t, "php.laravel.artisan", steps[3].Name)
-	assert.Equal(t, []string{"key:generate"}, steps[3].Args)
+	assert.Equal(t, "database.create", steps[3].Name)
 
-	assert.Equal(t, "file.copy", steps[4].Name)
-	assert.Equal(t, ".env.example", steps[4].From)
-	assert.Equal(t, ".env", steps[4].To)
+	assert.Equal(t, "php.laravel.artisan", steps[4].Name)
+	assert.Equal(t, []string{"key:generate"}, steps[4].Args)
 }
 
 func TestLaravelPreset_CleanupSteps(t *testing.T) {

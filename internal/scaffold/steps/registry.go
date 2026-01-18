@@ -51,7 +51,11 @@ func init() {
 	}
 
 	Register("file.copy", func(cfg config.StepConfig) types.ScaffoldStep {
-		return NewFileCopyStep(cfg.From, cfg.To)
+		priority := 9
+		if cfg.Priority != 0 {
+			priority = cfg.Priority
+		}
+		return NewFileCopyStep(cfg.From, cfg.To, priority)
 	})
 	Register("bash.run", func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewBashRunStep(cfg.Command)
