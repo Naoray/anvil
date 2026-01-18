@@ -86,6 +86,8 @@ func (e *ConditionEvaluator) evaluateSingle(key string, value interface{}) (bool
 		return e.osMatches(value)
 	case "env_exists":
 		return e.envExists(value)
+	case "env_not_exists":
+		return e.envNotExists(value)
 	case "not":
 		result, err := e.evaluateCondition(value)
 		if err != nil {
@@ -224,4 +226,12 @@ func (e *ConditionEvaluator) envExists(value interface{}) (bool, error) {
 
 	_, exists := os.LookupEnv(envName)
 	return exists, nil
+}
+
+func (e *ConditionEvaluator) envNotExists(value interface{}) (bool, error) {
+	exists, err := e.envExists(value)
+	if err != nil {
+		return false, err
+	}
+	return !exists, nil
 }

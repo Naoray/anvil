@@ -128,6 +128,24 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 		assert.False(t, result)
 	})
 
+	t.Run("env_not_exists - env variable does not exist", func(t *testing.T) {
+		result, err := evaluator.Evaluate(map[string]interface{}{
+			"env_not_exists": "NONEXISTENT_VAR_123",
+		})
+		assert.NoError(t, err)
+		assert.True(t, result)
+	})
+
+	t.Run("env_not_exists - env variable exists", func(t *testing.T) {
+		t.Setenv("TEST_VAR", "value")
+
+		result, err := evaluator.Evaluate(map[string]interface{}{
+			"env_not_exists": "TEST_VAR",
+		})
+		assert.NoError(t, err)
+		assert.False(t, result)
+	})
+
 	t.Run("not condition - negates true condition", func(t *testing.T) {
 		os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644)
 

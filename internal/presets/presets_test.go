@@ -55,7 +55,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	preset := NewLaravel()
 	steps := preset.DefaultSteps()
 
-	assert.Len(t, steps, 8)
+	assert.Len(t, steps, 9)
 
 	assert.Equal(t, "php.composer", steps[0].Name)
 	assert.Equal(t, []string{"install"}, steps[0].Args)
@@ -63,12 +63,14 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, "node.npm", steps[1].Name)
 	assert.Equal(t, []string{"ci"}, steps[1].Args)
 
-	assert.Equal(t, "php.laravel.artisan", steps[2].Name)
-	assert.Equal(t, []string{"key:generate"}, steps[2].Args)
+	assert.Equal(t, "database.create", steps[2].Name)
 
-	assert.Equal(t, "file.copy", steps[3].Name)
-	assert.Equal(t, ".env.example", steps[3].From)
-	assert.Equal(t, ".env", steps[3].To)
+	assert.Equal(t, "php.laravel.artisan", steps[3].Name)
+	assert.Equal(t, []string{"key:generate"}, steps[3].Args)
+
+	assert.Equal(t, "file.copy", steps[4].Name)
+	assert.Equal(t, ".env.example", steps[4].From)
+	assert.Equal(t, ".env", steps[4].To)
 }
 
 func TestLaravelPreset_CleanupSteps(t *testing.T) {

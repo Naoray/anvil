@@ -59,4 +59,7 @@ func init() {
 	Register("command.run", func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewCommandRunStep(cfg.Command)
 	})
+	Register("database.create", func(cfg config.StepConfig) types.ScaffoldStep {
+		return NewDatabaseStep(8)
+	})
 }
