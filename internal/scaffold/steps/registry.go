@@ -46,7 +46,7 @@ func init() {
 			if cfg.Priority != 0 {
 				priority = cfg.Priority
 			}
-			return NewBinaryStep(name, binary, cfg.Args, priority)
+			return NewBinaryStepWithCondition(name, cfg, binary, priority)
 		})
 	}
 
