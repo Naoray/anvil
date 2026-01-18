@@ -37,9 +37,12 @@ func ExtractRepoName(url string) string {
 	return strings.TrimSuffix(url, ".git")
 }
 
-// IsGitShortFormat detects if the input is a GitHub short format (user/repo)
+// IsGitShortFormat detects if the input is a GitHub short format (user/repo or just name)
+// gh CLI can resolve single names against authenticated user, and user/repo format
 func IsGitShortFormat(repo string) bool {
-	return strings.Contains(repo, "/") &&
-		!strings.Contains(repo, "@") &&
-		!strings.Contains(repo, ":")
+	return !strings.Contains(repo, "@") &&
+		!strings.Contains(repo, ":") &&
+		!strings.HasPrefix(repo, "git@") &&
+		!strings.HasPrefix(repo, "https://") &&
+		!strings.HasPrefix(repo, "http://")
 }

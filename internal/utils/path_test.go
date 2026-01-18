@@ -102,6 +102,16 @@ func TestIsGitShortFormat(t *testing.T) {
 		{
 			name:     "Just repo name",
 			input:    "arbor",
+			expected: true,
+		},
+		{
+			name:     "Single name with dash",
+			input:    "my-repo-name",
+			expected: true,
+		},
+		{
+			name:     "HTTP URL",
+			input:    "http://github.com/user/repo",
 			expected: false,
 		},
 	}

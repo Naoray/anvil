@@ -166,6 +166,16 @@ func CloneRepo(repoURL, barePath string) error {
 	return cmd.Run()
 }
 
+// CloneRepoWithGH clones a repository using gh CLI (supports short format)
+func CloneRepoWithGH(repo, barePath string) error {
+	if err := os.MkdirAll(barePath, 0755); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("gh", "repo", "clone", repo, barePath, "--", "--bare")
+	return cmd.Run()
+}
+
 // IsMerged checks if a branch is merged into another branch
 func IsMerged(barePath, branch, targetBranch string) (bool, error) {
 	cmd := exec.Command("git", "-C", barePath, "merge-base", "--is-ancestor", branch, targetBranch)

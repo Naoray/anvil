@@ -39,17 +39,19 @@ Arguments:
 
 		ghAvailable := isCommandAvailable("gh")
 
-		repoURL := repo
-		if utils.IsGitShortFormat(repo) && ghAvailable {
-			fmt.Println("Using gh CLI for repository clone")
-			repoURL = repo
-		}
-
 		barePath := filepath.Join(absPath, ".bare")
 
 		fmt.Printf("Cloning repository to %s\n", barePath)
-		if err := git.CloneRepo(repoURL, barePath); err != nil {
-			return fmt.Errorf("cloning repository: %w", err)
+
+		var cloneErr error
+		if ghAvailable {
+			fmt.Println("Using gh CLI for repository clone")
+			cloneErr = git.CloneRepoWithGH(repo, barePath)
+		} else {
+			cloneErr = git.CloneRepo(repo, barePath)
+		}
+		if cloneErr != nil {
+			return fmt.Errorf("cloning repository: %w", cloneErr)
 		}
 
 		defaultBranch, err := git.GetDefaultBranch(barePath)

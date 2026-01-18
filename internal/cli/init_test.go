@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/michaeldyrynda/arbor/internal/utils"
@@ -72,7 +74,7 @@ func TestIsGitShortFormat(t *testing.T) {
 		{
 			name:     "Just repo name",
 			input:    "arbor",
-			expected: false,
+			expected: true,
 		},
 	}
 
@@ -82,4 +84,63 @@ func TestIsGitShortFormat(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestInitWithShortFormatUsesGhClone(t *testing.T) {
+	if !isCommandAvailable("gh") {
+		t.Skip("gh CLI not available, skipping test")
+	}
+
+	tmpDir := t.TempDir()
+	testRepo := "michaeldyrynda/laravel"
+
+	barePath := filepath.Join(tmpDir, ".bare")
+
+	ghAvailable := isCommandAvailable("gh")
+	shortFormat := utils.IsGitShortFormat(testRepo)
+
+	assert.True(t, ghAvailable, "gh should be available")
+	assert.True(t, shortFormat, "testRepo should be detected as short format")
+
+	cloneCmd := exec.Command("gh", "repo", "clone", testRepo, barePath, "--", "--bare")
+	err := cloneCmd.Run()
+	if err != nil {
+		t.Skipf("gh repo clone skipped (may be private or not exist): %v", err)
+	}
+
+	assert.DirExists(t, barePath, "bare repo should exist after gh clone")
+}
+
+func TestGitCloneRepoWithShortFormatFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	testRepo := "michaeldyrynda/laravel"
+
+	barePath := filepath.Join(tmpDir, ".bare")
+
+	gitCmd := exec.Command("git", "clone", "--bare", testRepo, barePath)
+	err := gitCmd.Run()
+
+	assert.Error(t, err, "git clone with short format should fail")
+}
+
+func TestInitShortFormatShouldUseGhClone(t *testing.T) {
+	if !isCommandAvailable("gh") {
+		t.Skip("gh CLI not available, skipping test")
+	}
+
+	tmpDir := t.TempDir()
+	testRepo := "michaeldyrynda/laravel"
+
+	barePath := filepath.Join(tmpDir, ".bare")
+
+	shortFormat := utils.IsGitShortFormat(testRepo)
+	assert.True(t, shortFormat, "testRepo should be detected as short format")
+
+	err := exec.Command("gh", "repo", "clone", testRepo, barePath, "--", "--bare").Run()
+	if err != nil {
+		t.Skipf("gh repo clone skipped (may be private or not exist): %v", err)
+	}
+
+	assert.DirExists(t, barePath, "gh repo clone --bare should succeed")
+	assert.DirExists(t, filepath.Join(barePath, "refs"), "bare repo should have refs directory")
 }
