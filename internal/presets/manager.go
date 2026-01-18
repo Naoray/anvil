@@ -17,8 +17,9 @@ func NewManager() *Manager {
 	m := &Manager{
 		presets: make(map[string]Preset),
 	}
-	m.Register(NewLaravel())
-	m.Register(NewPHP())
+	for _, p := range builtInPresets {
+		m.Register(p)
+	}
 	return m
 }
 
@@ -31,10 +32,17 @@ func (m *Manager) Get(name string) (Preset, bool) {
 	return preset, ok
 }
 
+// builtInPresets lists all available presets for automatic registration
+var builtInPresets = []Preset{
+	NewLaravel(),
+	NewPHP(),
+}
+
 // RegisterAllWithScaffold registers all built-in presets with a scaffold manager
 func RegisterAllWithScaffold(m *scaffold.ScaffoldManager) {
-	m.RegisterPreset(NewLaravel())
-	m.RegisterPreset(NewPHP())
+	for _, p := range builtInPresets {
+		m.RegisterPreset(p)
+	}
 }
 
 func (m *Manager) Detect(path string) string {
