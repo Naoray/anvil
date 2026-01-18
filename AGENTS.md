@@ -95,6 +95,36 @@ go test ./internal/utils/... -v
 - CLI commands require integration tests
 - All tests must pass before commit
 
+### Test-Driven Development (TDD)
+
+Before implementing new functionality:
+
+1. **Write failing tests first** - Create test cases that describe the expected behavior
+2. **Run tests to verify they fail** - Confirm the tests fail with current implementation
+3. **Implement the feature** - Write code until tests pass
+4. **Refactor if needed** - Improve implementation while keeping tests green
+5. **Run full test suite** - Ensure no regressions in existing functionality
+
+Example workflow for a new scaffold step:
+```bash
+# 1. Create test file for the step
+touch internal/scaffold/steps/composer_install_test.go
+
+# 2. Write failing tests that describe expected behavior
+# 3. Run tests to confirm they fail
+go test ./internal/scaffold/steps/... -v
+
+# 4. Implement the step
+# 5. Run tests again to verify they pass
+go test ./internal/scaffold/steps/... -v
+```
+
+This approach ensures:
+- Clear specification of expected behavior
+- Immediate feedback on implementation
+- Confidence when refactoring
+- Documentation through tests
+
 ## Common Tasks
 
 ### Add a New CLI Command
