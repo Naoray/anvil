@@ -68,9 +68,16 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 
 	assert.Equal(t, "node.npm", steps[3].Name)
 	assert.Equal(t, []string{"ci"}, steps[3].Args)
+	assert.NotNil(t, steps[3].Condition, "npm ci should have a condition")
+	assert.Equal(t, "package-lock.json", steps[3].Condition["file_exists"])
 
 	assert.Equal(t, "php.laravel.artisan", steps[4].Name)
 	assert.Equal(t, []string{"key:generate", "--no-interaction"}, steps[4].Args)
+
+	assert.Equal(t, "node.npm", steps[6].Name)
+	assert.Equal(t, []string{"run", "build"}, steps[6].Args)
+	assert.NotNil(t, steps[6].Condition, "npm run build should have a condition")
+	assert.Equal(t, "package-lock.json", steps[6].Condition["file_exists"])
 }
 
 func TestLaravelPreset_CleanupSteps(t *testing.T) {
