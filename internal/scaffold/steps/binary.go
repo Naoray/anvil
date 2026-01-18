@@ -1,7 +1,9 @@
 package steps
 
 import (
+	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 )
@@ -28,6 +30,10 @@ func (s *BinaryStep) Name() string {
 
 func (s *BinaryStep) Run(ctx types.ScaffoldContext, opts types.StepOptions) error {
 	allArgs := append(s.args, opts.Args...)
+	if opts.Verbose {
+		fullCmd := append([]string{s.binary}, allArgs...)
+		fmt.Printf("  Running: %s\n", strings.Join(fullCmd, " "))
+	}
 	cmd := exec.Command(s.binary, allArgs...)
 	cmd.Dir = ctx.WorktreePath
 	return cmd.Run()

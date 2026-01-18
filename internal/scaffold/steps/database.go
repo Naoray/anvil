@@ -47,6 +47,10 @@ func (s *DatabaseStep) Condition(ctx types.ScaffoldContext) bool {
 }
 
 func (s *DatabaseStep) Run(ctx types.ScaffoldContext, opts types.StepOptions) error {
+	if opts.Verbose {
+		fmt.Printf("  Checking database configuration...\n")
+	}
+
 	dbName := generateDatabaseName()
 	dbUser := getEnv("DB_USERNAME", "root")
 	dbPass := getEnv("DB_PASSWORD", "")
