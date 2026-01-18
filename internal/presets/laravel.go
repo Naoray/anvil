@@ -20,8 +20,8 @@ func NewLaravel() *Laravel {
 			defaultSteps: []config.StepConfig{
 				{Name: "php.composer", Args: []string{"install"}},
 				{Name: "node.npm", Args: []string{"ci"}},
-				{Name: "php.laravel.artisan", Args: []string{"key:generate"}},
 				{Name: "file.copy", From: ".env.example", To: ".env"},
+				{Name: "php.laravel.artisan", Args: []string{"key:generate"}},
 				{Name: "php.laravel.artisan", Args: []string{"migrate:fresh", "--seed"}, Condition: map[string]interface{}{"env_exists": "DB_CONNECTION"}},
 				{Name: "node.npm", Args: []string{"run", "build"}, Priority: 15},
 				{Name: "php.laravel.artisan", Args: []string{"storage:link"}},
