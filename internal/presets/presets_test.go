@@ -61,7 +61,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, []string{"install"}, steps[0].Args)
 
 	assert.Equal(t, "node.npm", steps[1].Name)
-	assert.Equal(t, []string{"install"}, steps[1].Args)
+	assert.Equal(t, []string{"ci"}, steps[1].Args)
 
 	assert.Equal(t, "php.laravel.artisan", steps[2].Name)
 	assert.Equal(t, []string{"key:generate"}, steps[2].Args)
