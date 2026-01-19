@@ -44,8 +44,11 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build binary
-        run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.os == 'windows-latest' && 'windows' || (matrix.os == 'macos-latest' && 'darwin' || 'linux') }} GOARCH=amd64 go build -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }} ./cmd/arbor
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.os == 'windows-latest' && 'windows' || (matrix.os == 'macos-latest' && 'darwin' || 'linux') }}
+          GOARCH: amd64
+        run: go build -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }} ./cmd/arbor
 
       - name: Create archive
         if: matrix.zip_extension == 'tar.gz'
