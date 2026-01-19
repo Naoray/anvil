@@ -51,15 +51,11 @@ func CreateWorktree(barePath, worktreePath, branch, baseBranch string) error {
 	}
 
 	// Branch doesn't exist, create from base
-	// Use the base name of the worktree path as the branch name to ensure
-	// the branch name matches the folder name (e.g., feature-test-change)
-	newBranch := filepath.Base(worktreePath)
-
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
 
-	gitArgs := []string{"-C", barePath, "worktree", "add", "-b", newBranch, worktreePath, baseBranch}
+	gitArgs := []string{"-C", barePath, "worktree", "add", "-b", branch, worktreePath, baseBranch}
 	cmd = exec.Command("git", gitArgs...)
 	return cmd.Run()
 }

@@ -360,7 +360,7 @@ func TestCreateWorktreeBranchNaming(t *testing.T) {
 
 	found := false
 	for _, wt := range worktrees {
-		if wt.Branch == "my-feature-branch" {
+		if wt.Branch == "original/slash/branch" {
 			found = true
 			if wt.Path != featurePath {
 				t.Errorf("worktree path expected %s, got %s", featurePath, wt.Path)
@@ -370,14 +370,45 @@ func TestCreateWorktreeBranchNaming(t *testing.T) {
 	}
 
 	if !found {
-		t.Error("worktree with branch name derived from folder should exist")
+		t.Error("worktree with original branch name should exist")
 	}
 
-	if BranchExists(barePath, "original/slash/branch") {
-		t.Error("original branch name with slashes should not exist")
+	if !BranchExists(barePath, "original/slash/branch") {
+		t.Error("original branch name with slashes should exist")
+	}
+}
+
+func TestFindWorktreeByFolderName(t *testing.T) {
+	barePath, _ := createTestRepo(t)
+	projectDir := filepath.Dir(barePath)
+
+	featurePath := filepath.Join(projectDir, "my-feature-branch")
+	if err := CreateWorktree(barePath, featurePath, "feature/test-change", "main"); err != nil {
+		t.Fatalf("creating worktree: %v", err)
 	}
 
-	if !BranchExists(barePath, "my-feature-branch") {
-		t.Error("derived branch name should exist")
+	worktrees, err := ListWorktrees(barePath)
+	if err != nil {
+		t.Fatalf("listing worktrees: %v", err)
+	}
+
+	var targetWorktree *Worktree
+	for _, wt := range worktrees {
+		if filepath.Base(wt.Path) == "my-feature-branch" {
+			targetWorktree = &wt
+			break
+		}
+	}
+
+	if targetWorktree == nil {
+		t.Fatal("should find worktree by folder name")
+	}
+
+	if targetWorktree.Branch != "feature/test-change" {
+		t.Errorf("expected branch 'feature/test-change', got '%s'", targetWorktree.Branch)
+	}
+
+	if targetWorktree.Path != featurePath {
+		t.Errorf("expected path %s, got %s", featurePath, targetWorktree.Path)
 	}
 }

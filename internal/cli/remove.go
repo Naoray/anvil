@@ -13,19 +13,19 @@ import (
 )
 
 var removeCmd = &cobra.Command{
-	Use:   "remove [BRANCH]",
+	Use:   "remove [FOLDER]",
 	Short: "Remove a worktree with cleanup",
 	Long: `Removes a worktree and runs preset-defined cleanup steps.
 
 Arguments:
-  BRANCH  Name of the branch/worktree to remove
+  FOLDER  Name of the worktree folder to remove (e.g., feature-test-change)
 
 Cleanup steps may include:
   - Removing Herd site links
   - Database cleanup prompts`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		branch := args[0]
+		folderName := args[0]
 
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -54,18 +54,18 @@ Cleanup steps may include:
 
 		var targetWorktree *git.Worktree
 		for _, wt := range worktrees {
-			if wt.Branch == branch {
+			if filepath.Base(wt.Path) == folderName {
 				targetWorktree = &wt
 				break
 			}
 		}
 
 		if targetWorktree == nil {
-			return fmt.Errorf("worktree '%s' not found", branch)
+			return fmt.Errorf("worktree '%s' not found", folderName)
 		}
 
 		if !force {
-			fmt.Printf("Remove worktree '%s' at %s?\n", branch, targetWorktree.Path)
+			fmt.Printf("Remove worktree '%s' at %s?\n", targetWorktree.Branch, targetWorktree.Path)
 			fmt.Print("This will run cleanup steps. Continue? [y/N]: ")
 
 			var response string
@@ -81,7 +81,7 @@ Cleanup steps may include:
 			}
 		}
 
-		fmt.Printf("Removing worktree: %s (%s)\n", branch, targetWorktree.Path)
+		fmt.Printf("Removing worktree: %s (%s)\n", targetWorktree.Branch, targetWorktree.Path)
 
 		if !dryRun {
 			presetManager := presets.NewManager()
@@ -95,7 +95,7 @@ Cleanup steps may include:
 
 			fmt.Printf("Running cleanup steps for preset: %s\n", preset)
 
-			if err := scaffoldManager.RunCleanup(targetWorktree.Path, branch, "", preset, cfg, false, verbose); err != nil {
+			if err := scaffoldManager.RunCleanup(targetWorktree.Path, targetWorktree.Branch, "", preset, cfg, false, verbose); err != nil {
 				fmt.Printf("Warning: cleanup steps failed: %v\n", err)
 			}
 
