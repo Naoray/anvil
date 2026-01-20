@@ -308,14 +308,18 @@ func TestListWorktrees(t *testing.T) {
 	for _, wt := range worktrees {
 		if wt.Branch == "main" {
 			mainFound = true
-			if wt.Path != mainPath {
-				t.Errorf("main worktree path expected %s, got %s", mainPath, wt.Path)
+			mainPathEval, _ := filepath.EvalSymlinks(mainPath)
+			wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+			if mainPathEval != wtPathEval {
+				t.Errorf("main worktree path expected %s (resolved: %s), got %s (resolved: %s)", mainPath, mainPathEval, wt.Path, wtPathEval)
 			}
 		}
 		if wt.Branch == "feature" {
 			featureFound = true
-			if wt.Path != featurePath {
-				t.Errorf("feature worktree path expected %s, got %s", featurePath, wt.Path)
+			featurePathEval, _ := filepath.EvalSymlinks(featurePath)
+			wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+			if featurePathEval != wtPathEval {
+				t.Errorf("feature worktree path expected %s (resolved: %s), got %s (resolved: %s)", featurePath, featurePathEval, wt.Path, wtPathEval)
 			}
 		}
 	}
@@ -388,8 +392,10 @@ func TestCreateWorktreeBranchNaming(t *testing.T) {
 	for _, wt := range worktrees {
 		if wt.Branch == "original/slash/branch" {
 			found = true
-			if wt.Path != featurePath {
-				t.Errorf("worktree path expected %s, got %s", featurePath, wt.Path)
+			featurePathEval, _ := filepath.EvalSymlinks(featurePath)
+			wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+			if featurePathEval != wtPathEval {
+				t.Errorf("worktree path expected %s (resolved: %s), got %s (resolved: %s)", featurePath, featurePathEval, wt.Path, wtPathEval)
 			}
 			break
 		}
@@ -434,8 +440,10 @@ func TestFindWorktreeByFolderName(t *testing.T) {
 		t.Errorf("expected branch 'feature/test-change', got '%s'", targetWorktree.Branch)
 	}
 
-	if targetWorktree.Path != featurePath {
-		t.Errorf("expected path %s, got %s", featurePath, targetWorktree.Path)
+	featurePathEval, _ := filepath.EvalSymlinks(featurePath)
+	wtPathEval, _ := filepath.EvalSymlinks(targetWorktree.Path)
+	if wtPathEval != featurePathEval {
+		t.Errorf("expected path %s (resolved: %s), got %s (resolved: %s)", featurePath, featurePathEval, targetWorktree.Path, wtPathEval)
 	}
 }
 
@@ -491,12 +499,17 @@ func TestListWorktreesDetailed(t *testing.T) {
 		t.Errorf("expected 2 worktrees, got %d", len(worktrees))
 	}
 
+	mainPathEval, _ := filepath.EvalSymlinks(mainPath)
 	for _, wt := range worktrees {
 		if wt.Branch == "main" {
 			if !wt.IsMain {
 				t.Error("main worktree should have IsMain=true")
 			}
-			if !wt.IsCurrent {
+			wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+			if wtPathEval != mainPathEval {
+				t.Errorf("main worktree path mismatch: expected %s (resolved: %s), got %s (resolved: %s)", mainPath, mainPathEval, wt.Path, wtPathEval)
+			}
+			if wtPathEval == mainPathEval && !wt.IsCurrent {
 				t.Error("main worktree should have IsCurrent=true when it's the current path")
 			}
 		} else if wt.Branch == "feature" {
@@ -506,7 +519,6 @@ func TestListWorktreesDetailed(t *testing.T) {
 			if wt.IsCurrent {
 				t.Error("feature worktree should have IsCurrent=false")
 			}
-			// feature at same commit as main should NOT be marked as merged
 			if wt.IsMerged {
 				t.Error("feature worktree should not be merged (at same commit as main)")
 			}
@@ -528,19 +540,22 @@ func TestListWorktreesDetailed_CurrentWorktree(t *testing.T) {
 		t.Fatalf("creating feature worktree: %v", err)
 	}
 
+	featurePathEval, _ := filepath.EvalSymlinks(featurePath)
+	mainPathEval, _ := filepath.EvalSymlinks(mainPath)
 	worktrees, err := ListWorktreesDetailed(barePath, featurePath, "main")
 	if err != nil {
 		t.Fatalf("listing worktrees detailed: %v", err)
 	}
 
 	for _, wt := range worktrees {
+		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
 		if wt.Branch == "main" {
-			if wt.IsCurrent {
+			if wtPathEval == mainPathEval && wt.IsCurrent {
 				t.Error("main worktree should not be current when feature path is passed")
 			}
 		} else if wt.Branch == "feature" {
-			if !wt.IsCurrent {
-				t.Error("feature worktree should be current when feature path is passed")
+			if wtPathEval != featurePathEval || !wt.IsCurrent {
+				t.Errorf("feature worktree should be current when feature path is passed (path: %s vs %s)", wtPathEval, featurePathEval)
 			}
 		}
 	}
@@ -804,9 +819,11 @@ func TestIsMerged_InvalidBranch(t *testing.T) {
 
 	merged, err := IsMerged(barePath, "nonexistent-branch-12345", "main")
 
-	t.Logf("Current behavior: IsMerged with invalid branch returns (%v, %v)", merged, err)
+	t.Logf("New behavior: IsMerged with invalid branch returns (%v, %v)", merged, err)
 
 	assert.False(t, merged, "invalid branch should return false for merged status")
+	assert.Error(t, err, "invalid branch should return an error")
+	assert.Contains(t, err.Error(), "git", "error should mention git failure")
 }
 
 func TestIsMerged_GitFailure(t *testing.T) {
@@ -814,9 +831,10 @@ func TestIsMerged_GitFailure(t *testing.T) {
 
 	merged, err := IsMerged(invalidPath, "main", "develop")
 
-	t.Logf("Current behavior: IsMerged with invalid repo path returns (%v, %v)", merged, err)
+	t.Logf("New behavior: IsMerged with invalid repo path returns (%v, %v)", merged, err)
 
 	assert.False(t, merged, "invalid repository should return false for merged status")
+	assert.Error(t, err, "invalid repository should return an error")
 }
 
 func TestListWorktrees_PorcelainParsing_AbsolutePaths(t *testing.T) {
@@ -845,7 +863,9 @@ func TestListWorktrees_PorcelainParsing_AbsolutePaths(t *testing.T) {
 		if wt.Branch == "main" {
 			found = true
 			t.Logf("Current path handling: got path %s", wt.Path)
-			assert.Equal(t, absMainPath, wt.Path, "absolute path should be preserved")
+			absMainPathEval, _ := filepath.EvalSymlinks(absMainPath)
+			wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+			assert.Equal(t, absMainPathEval, wtPathEval, "absolute path should be preserved")
 			break
 		}
 	}

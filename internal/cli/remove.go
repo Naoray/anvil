@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/michaeldyrynda/arbor/internal/git"
@@ -68,13 +70,13 @@ Cleanup steps may include:
 			fmt.Printf("Remove worktree '%s' at %s?\n", targetWorktree.Branch, targetWorktree.Path)
 			fmt.Print("This will run cleanup steps. Continue? [y/N]: ")
 
-			var response string
-			_, err := fmt.Scanln(&response)
+			reader := bufio.NewReader(os.Stdin)
+			response, err := reader.ReadString('\n')
 			if err != nil {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 
-			response = string(response[0])
+			response = strings.TrimSpace(response)
 			if response != "y" && response != "Y" {
 				fmt.Println("Cancelled.")
 				return nil

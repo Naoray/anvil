@@ -313,7 +313,9 @@ func TestListCommand_FolderNameMatchesArborRemove(t *testing.T) {
 		t.Errorf("expected branch 'feature/my-cool-feature', got '%s'", myFeatureWorktree.Branch)
 	}
 
-	if myFeatureWorktree.Path != featurePath {
-		t.Errorf("expected path %s, got %s", featurePath, myFeatureWorktree.Path)
+	featurePathEval, _ := filepath.EvalSymlinks(featurePath)
+	wtPathEval, _ := filepath.EvalSymlinks(myFeatureWorktree.Path)
+	if wtPathEval != featurePathEval {
+		t.Errorf("expected path %s (resolved: %s), got %s (resolved: %s)", featurePath, featurePathEval, myFeatureWorktree.Path, wtPathEval)
 	}
 }

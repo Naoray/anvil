@@ -20,6 +20,7 @@ type StepExecutor struct {
 	opts    types.StepOptions
 	results []ExecutionResult
 	mu      sync.Mutex
+	errMu   sync.Mutex
 }
 
 func NewStepExecutor(steps []types.ScaffoldStep, ctx types.ScaffoldContext, opts types.StepOptions) *StepExecutor {
@@ -101,12 +102,16 @@ func (e *StepExecutor) executeGroupParallel(group []types.ScaffoldStep) error {
 			defer wg.Done()
 
 			err := e.executeStep(s)
-			if err != nil && firstErr == nil {
-				select {
-				case errChan <- err:
+			if err != nil {
+				e.errMu.Lock()
+				if firstErr == nil {
 					firstErr = err
-				default:
+					select {
+					case errChan <- err:
+					default:
+					}
 				}
+				e.errMu.Unlock()
 			}
 		}(step)
 	}
@@ -118,9 +123,6 @@ func (e *StepExecutor) executeGroupParallel(group []types.ScaffoldStep) error {
 }
 
 func (e *StepExecutor) executeStep(step types.ScaffoldStep) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	enabled := true
 
 	stepConfig, ok := step.(interface{ IsEnabled() bool })
@@ -129,10 +131,12 @@ func (e *StepExecutor) executeStep(step types.ScaffoldStep) error {
 	}
 
 	if !enabled {
+		e.mu.Lock()
 		e.results = append(e.results, ExecutionResult{
 			Step:    step,
 			Skipped: true,
 		})
+		e.mu.Unlock()
 		if e.opts.Verbose {
 			fmt.Printf("Skipping step (disabled): %s\n", step.Name())
 		}
@@ -148,30 +152,38 @@ func (e *StepExecutor) executeStep(step types.ScaffoldStep) error {
 			if e.opts.Verbose {
 				fmt.Printf("[DRY-RUN] Would execute: %s\n", step.Name())
 			}
+			e.mu.Lock()
 			e.results = append(e.results, ExecutionResult{
 				Step: step,
 			})
+			e.mu.Unlock()
 			return nil
 		}
 
 		if err := step.Run(e.ctx, e.opts); err != nil {
+			e.mu.Lock()
 			e.results = append(e.results, ExecutionResult{
 				Step:  step,
 				Error: err,
 			})
+			e.mu.Unlock()
 			return fmt.Errorf("step %s failed: %w", step.Name(), err)
 		}
+		e.mu.Lock()
 		e.results = append(e.results, ExecutionResult{
 			Step: step,
 		})
+		e.mu.Unlock()
 	} else {
 		if e.opts.Verbose {
 			fmt.Printf("Skipping step (condition not met): %s\n", step.Name())
 		}
+		e.mu.Lock()
 		e.results = append(e.results, ExecutionResult{
 			Step:    step,
 			Skipped: true,
 		})
+		e.mu.Unlock()
 	}
 
 	return nil

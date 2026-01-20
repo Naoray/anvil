@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -104,8 +105,8 @@ func ListWorktrees(barePath string) ([]Worktree, error) {
 		if strings.HasPrefix(line, "worktree ") {
 			currentPath = strings.TrimPrefix(line, "worktree ")
 			currentPath = strings.TrimSpace(currentPath)
-			if parentDir != "" {
-				currentPath = filepath.Join(parentDir, filepath.Base(currentPath))
+			if !filepath.IsAbs(currentPath) && parentDir != "" {
+				currentPath = filepath.Join(parentDir, currentPath)
 			}
 		} else if strings.HasPrefix(line, "branch refs/heads/") {
 			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
@@ -130,12 +131,19 @@ func ListWorktreesDetailed(barePath, currentWorktreePath, defaultBranch string) 
 		return nil, err
 	}
 
+	currentWorktreePathEval, _ := filepath.EvalSymlinks(currentWorktreePath)
+
 	for i := range worktrees {
 		wt := &worktrees[i]
 		wt.IsMain = wt.Branch == defaultBranch
-		wt.IsCurrent = wt.Path == currentWorktreePath
+		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
+		wt.IsCurrent = wtPathEval == currentWorktreePathEval
 		if wt.Branch != defaultBranch {
-			featureInDefault, _ := IsMerged(barePath, wt.Branch, defaultBranch)
+			featureInDefault, err := IsMerged(barePath, wt.Branch, defaultBranch)
+			if err != nil {
+				wt.IsMerged = false
+				continue
+			}
 			defaultInFeature, _ := IsMerged(barePath, defaultBranch, wt.Branch)
 			wt.IsMerged = featureInDefault && !defaultInFeature
 		}
@@ -234,7 +242,16 @@ func IsMerged(barePath, branch, targetBranch string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	return false, nil
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("git merge-base check failed: %w", err)
+	}
+
+	return false, fmt.Errorf("git command failed: %w", err)
 }
 
 // BranchExists checks if a branch exists in the repository

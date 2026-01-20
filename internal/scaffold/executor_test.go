@@ -259,5 +259,24 @@ func TestStepExecutor_ParallelExecution_ErrorPropagation(t *testing.T) {
 }
 
 func TestStepExecutor_ParallelExecution_RaceCondition(t *testing.T) {
-	t.Skip("SKIP: Race condition test - data race exists until Phase 1.1 fixes it")
+	ctx := types.ScaffoldContext{
+		WorktreePath: "/tmp",
+		Branch:       "test",
+	}
+
+	step1 := &mockStep{name: "step1", priority: 10, conditionResult: true}
+	step2 := &mockStep{name: "step2", priority: 10, conditionResult: true}
+	step3 := &mockStep{name: "step3", priority: 10, conditionResult: true}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{step1, step2, step3}, ctx, types.StepOptions{
+		DryRun:  false,
+		Verbose: false,
+	})
+
+	err := executor.Execute()
+
+	assert.NoError(t, err)
+	assert.True(t, step1.runCalled)
+	assert.True(t, step2.runCalled)
+	assert.True(t, step3.runCalled)
 }
