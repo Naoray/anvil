@@ -8,8 +8,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/michaeldyrynda/arbor/internal/config"
 )
 
 var installCmd = &cobra.Command{

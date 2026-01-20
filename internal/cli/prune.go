@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
 	"github.com/spf13/cobra"
+
+	"github.com/michaeldyrynda/arbor/internal/git"
 )
 
 var pruneCmd = &cobra.Command{

@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	arborerrors "github.com/michaeldyrynda/arbor/internal/errors"
 	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/spf13/cobra"
 )
 
 var removeCmd = &cobra.Command{

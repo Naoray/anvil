@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 )
 
 type mockStep struct {

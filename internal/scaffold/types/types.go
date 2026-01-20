@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
+
 	"github.com/michaeldyrynda/arbor/internal/utils"
 )
 

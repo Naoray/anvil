@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/michaeldyrynda/arbor/internal/git"
 )
 
@@ -189,6 +191,56 @@ func TestPrintPorcelain(t *testing.T) {
 			t.Fatalf("porcelain line should have 5 fields, got %d: %s", len(parts), line)
 		}
 	}
+}
+
+func TestPrintTable_SingleWorktree(t *testing.T) {
+	worktrees := []git.Worktree{
+		{Path: "/test/feature", Branch: "feature", IsMain: false, IsCurrent: true, IsMerged: false},
+	}
+
+	var buf bytes.Buffer
+	err := printTable(&buf, worktrees)
+	if err != nil {
+		t.Fatalf("printTable failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "WORKTREE") {
+		t.Errorf("output should contain header, got: %s", output)
+	}
+	if !strings.Contains(output, "BRANCH") {
+		t.Errorf("output should contain header, got: %s", output)
+	}
+	if !strings.Contains(output, "STATUS") {
+		t.Errorf("output should contain header, got: %s", output)
+	}
+	if !strings.Contains(output, "feature") {
+		t.Errorf("output should contain feature, got: %s", output)
+	}
+	if !strings.Contains(output, "[current]") {
+		t.Errorf("output should contain [current], got: %s", output)
+	}
+	if strings.Contains(output, "No worktrees found") {
+		t.Error("should not show empty message when worktrees exist")
+	}
+}
+
+func TestPrintPorcelain_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	err := printPorcelain(&buf, []git.Worktree{})
+	if err != nil {
+		t.Fatalf("printPorcelain failed: %v", err)
+	}
+	assert.Equal(t, "", buf.String(), "empty worktree list should produce empty output")
+}
+
+func TestPrintJSON_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	err := printJSON(&buf, []git.Worktree{})
+	if err != nil {
+		t.Fatalf("printJSON failed: %v", err)
+	}
+	assert.Equal(t, "[]\n", buf.String(), "empty worktree list should produce empty JSON array")
 }
 
 func TestListCommand_Integration(t *testing.T) {

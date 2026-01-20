@@ -23,7 +23,6 @@ type ProjectContext struct {
 	presetManager   *presets.Manager
 	scaffoldManager *scaffold.ScaffoldManager
 	managersInit    sync.Once
-	managerErr      error
 }
 
 func OpenProjectFromCWD() (*ProjectContext, error) {

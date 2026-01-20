@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/michaeldyrynda/arbor/internal/utils"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/michaeldyrynda/arbor/internal/utils"
 )
 
 func TestIsCommandAvailable(t *testing.T) {

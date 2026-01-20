@@ -97,7 +97,7 @@ func TestOpenProjectFromCWD_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalCWD)
+	defer func() { _ = os.Chdir(originalCWD) }()
 
 	err = os.Chdir(worktreePath)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestProjectContext_Managers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalCWD)
+	defer func() { _ = os.Chdir(originalCWD) }()
 
 	err = os.Chdir(worktreePath)
 	if err != nil {
