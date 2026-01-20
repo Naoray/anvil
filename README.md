@@ -52,6 +52,9 @@ arbor remove feature/user-auth
 
 # Clean up merged worktrees
 arbor prune
+
+# Destroy the entire project (removes worktrees and bare repo)
+arbor destroy
 ```
 
 ## Documentation
