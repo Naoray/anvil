@@ -331,7 +331,14 @@ func ListAllBranches(barePath string) ([]string, error) {
 	var branches []string
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "* "))
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "*") {
+			line = strings.TrimPrefix(line, "* ")
+		}
+		if strings.HasPrefix(line, "+") {
+			line = strings.TrimPrefix(line, "+ ")
+		}
+		line = strings.TrimSpace(line)
 		if line != "" {
 			branches = append(branches, line)
 		}
