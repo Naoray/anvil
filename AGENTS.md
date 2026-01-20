@@ -206,5 +206,4 @@ When refactoring, enforce these standards:
 
 ## Notes
 
-- The `scripts/` directory contains example scripts and is not part of the repository
-- Review changes file-by-file before committing
+- The user will review changes file-by-file before committing, **always** wait for confirmation before committing code
