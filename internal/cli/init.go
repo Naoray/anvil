@@ -28,14 +28,14 @@ Arguments:
 
 		if len(args) > 0 {
 			repo = args[0]
-		} else if ui.ShouldPrompt(cmd, false) {
+		} else if ui.IsInteractive() {
 			input, err := ui.PromptRepoURL()
 			if err != nil {
 				return fmt.Errorf("prompting for repository: %w", err)
 			}
 			repo = input
 		} else {
-			return fmt.Errorf("repository URL required")
+			return fmt.Errorf("repository URL required (run interactively or provide repo as argument)")
 		}
 
 		path := ""

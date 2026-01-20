@@ -37,7 +37,7 @@ available branches or entering a new branch name.`,
 		var branch string
 		if len(args) > 0 {
 			branch = args[0]
-		} else if ui.ShouldPrompt(cmd, false) {
+		} else if ui.IsInteractive() {
 			localBranches, err := git.ListAllBranches(pc.BarePath)
 			if err != nil {
 				return fmt.Errorf("listing local branches: %w", err)
@@ -53,7 +53,7 @@ available branches or entering a new branch name.`,
 		}
 
 		if branch == "" {
-			return fmt.Errorf("branch name required (run without arguments for interactive mode)")
+			return fmt.Errorf("branch name required (run interactively or provide branch as argument)")
 		}
 
 		if baseBranch == "" {
