@@ -118,7 +118,7 @@ Cleanup steps may include:
 			ui.PrintSuccessPath("Removed", targetWorktree.Path)
 
 			if deleteBranch && git.BranchExists(pc.BarePath, targetWorktree.Branch) {
-				if err := git.DeleteBranch(pc.BarePath, targetWorktree.Branch, force); err != nil {
+				if err := git.DeleteBranch(pc.BarePath, targetWorktree.Branch, true); err != nil {
 					ui.PrintErrorWithHint("Failed to delete branch", err.Error())
 				} else {
 					ui.PrintSuccess(fmt.Sprintf("Deleted branch '%s'", targetWorktree.Branch))
