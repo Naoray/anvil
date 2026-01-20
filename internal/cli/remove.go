@@ -34,7 +34,17 @@ Cleanup steps may include:
 		dryRun := mustGetBool(cmd, "dry-run")
 		verbose := mustGetBool(cmd, "verbose")
 
-		worktrees, err := git.ListWorktrees(pc.BarePath)
+		currentWorktreePath, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting current directory: %w", err)
+		}
+
+		defaultBranch, err := git.GetDefaultBranch(pc.BarePath)
+		if err != nil {
+			return fmt.Errorf("getting default branch: %w", err)
+		}
+
+		worktrees, err := git.ListWorktreesDetailed(pc.BarePath, currentWorktreePath, defaultBranch)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}

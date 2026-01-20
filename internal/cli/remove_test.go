@@ -9,11 +9,104 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/michaeldyrynda/arbor/internal/git"
 )
+
+func TestRemoveCmd_PreventsMainWorktreeDeletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	barePath := filepath.Join(tmpDir, ".bare")
+
+	require.NoError(t, os.MkdirAll(repoDir, 0755))
+
+	runGitCmd(t, repoDir, "init", "-b", "main")
+	runGitCmd(t, repoDir, "config", "user.email", "test@example.com")
+	runGitCmd(t, repoDir, "config", "user.name", "Test User")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("test"), 0644))
+	runGitCmd(t, repoDir, "add", ".")
+	runGitCmd(t, repoDir, "commit", "-m", "Initial commit")
+	runGitCmd(t, repoDir, "clone", "--bare", repoDir, barePath)
+
+	mainPath := filepath.Join(tmpDir, "main")
+	require.NoError(t, git.CreateWorktree(barePath, mainPath, "main", ""))
+
+	featurePath := filepath.Join(tmpDir, "feature")
+	require.NoError(t, git.CreateWorktree(barePath, featurePath, "feature", "main"))
+
+	configPath := filepath.Join(tmpDir, "arbor.yaml")
+	configContent := `bare_path: .bare
+default_branch: main
+preset: ""
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+
+	t.Run("remove main worktree by folder name should fail", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("force", false, "")
+		cmd.Flags().Bool("dry-run", false, "")
+		cmd.Flags().Bool("verbose", false, "")
+		cmd.SetArgs([]string{"main"})
+
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		defer os.Chdir(originalDir)
+
+		err = os.Chdir(mainPath)
+		require.NoError(t, err)
+
+		err = removeCmd.RunE(cmd, []string{"main"})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot remove main worktree",
+			"error message should indicate main worktree cannot be removed")
+	})
+
+	t.Run("remove main worktree by path should fail", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("force", false, "")
+		cmd.Flags().Bool("dry-run", false, "")
+		cmd.Flags().Bool("verbose", false, "")
+		cmd.SetArgs([]string{filepath.Base(mainPath)})
+
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		defer os.Chdir(originalDir)
+
+		err = os.Chdir(mainPath)
+		require.NoError(t, err)
+
+		err = removeCmd.RunE(cmd, []string{filepath.Base(mainPath)})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot remove main worktree")
+	})
+
+	t.Run("remove feature worktree should succeed", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("force", true, "")
+		cmd.Flags().Bool("dry-run", false, "")
+		cmd.Flags().Bool("verbose", false, "")
+		cmd.Flags().Bool("delete-branch", false, "")
+
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		defer os.Chdir(originalDir)
+
+		err = os.Chdir(mainPath)
+		require.NoError(t, err)
+
+		_, err = os.Stat(featurePath)
+		assert.NoError(t, err, "feature worktree should exist before removal")
+
+		err = removeCmd.RunE(cmd, []string{filepath.Base(featurePath)})
+		assert.NoError(t, err)
+
+		_, err = os.Stat(featurePath)
+		assert.True(t, os.IsNotExist(err), "feature worktree should not exist after removal")
+	})
+}
 
 func TestRemoveCmd_EmptyInputBehavior(t *testing.T) {
 	tmpDir := t.TempDir()
