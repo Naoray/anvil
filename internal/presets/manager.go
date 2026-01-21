@@ -2,11 +2,13 @@ package presets
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/michaeldyrynda/arbor/internal/scaffold"
+	"github.com/michaeldyrynda/arbor/internal/ui"
 )
 
 type Manager struct {
@@ -84,8 +86,11 @@ func PromptForPreset(m *Manager, suggested string) (string, error) {
 
 	var choice string
 	_, err := fmt.Scanln(&choice)
-	if err != nil && !strings.Contains(err.Error(), "unexpected newline") {
-		return "", err
+	if err != nil && err != io.EOF && !strings.Contains(err.Error(), "unexpected newline") {
+		return "", ui.NormalizeAbort(err)
+	}
+	if err == io.EOF {
+		return "", ui.ErrUserAborted
 	}
 
 	choice = strings.TrimSpace(choice)

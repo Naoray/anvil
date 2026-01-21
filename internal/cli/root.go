@@ -55,7 +55,14 @@ func printBanner() {
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	rootCmd.SilenceUsage = true
+	if err := rootCmd.Execute(); err != nil {
+		if ui.IsAbort(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func init() {

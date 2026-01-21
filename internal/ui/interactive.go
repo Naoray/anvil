@@ -36,7 +36,7 @@ func SelectBranchInteractive(barePath string, localBranches, remoteBranches []st
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return "", err
+		return "", NormalizeAbort(err)
 	}
 
 	if selected == "__new__" {
@@ -60,7 +60,7 @@ func PromptNewBranch() (string, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return "", err
+		return "", NormalizeAbort(err)
 	}
 
 	return name, nil
@@ -99,7 +99,7 @@ func SelectWorktreesToPrune(removable []git.Worktree) ([]git.Worktree, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return nil, err
+		return nil, NormalizeAbort(err)
 	}
 
 	if len(selected) == 0 {
@@ -132,7 +132,7 @@ func ConfirmRemoval(count int) (bool, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return false, err
+		return false, NormalizeAbort(err)
 	}
 
 	return confirmed, nil
@@ -150,7 +150,7 @@ func Confirm(message string) (bool, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return false, err
+		return false, NormalizeAbort(err)
 	}
 
 	return confirmed, nil
@@ -171,7 +171,7 @@ func PromptRepoURL() (string, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return "", err
+		return "", NormalizeAbort(err)
 	}
 
 	return repo, nil
@@ -220,7 +220,7 @@ func SelectWorktreeToRemove(worktrees []git.Worktree) (*git.Worktree, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return nil, err
+		return nil, NormalizeAbort(err)
 	}
 
 	for _, wt := range removable {
@@ -276,7 +276,7 @@ func SelectProjectToDestroy(cwd string) (string, error) {
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return "", err
+		return "", NormalizeAbort(err)
 	}
 
 	return filepath.Join(cwd, selected), nil
@@ -300,7 +300,7 @@ func ConfirmDestroy(projectName string, worktrees []git.Worktree) (bool, error) 
 	).WithTheme(huh.ThemeCatppuccin())
 
 	if err := form.Run(); err != nil {
-		return false, err
+		return false, NormalizeAbort(err)
 	}
 
 	return confirmed, nil
