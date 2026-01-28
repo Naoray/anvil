@@ -85,10 +85,11 @@ Arguments:
 		ui.PrintSuccess(fmt.Sprintf("Created main worktree at %s", mainPath))
 
 		repoName := utils.SanitisePath(utils.ExtractRepoName(repo))
+		siteName := utils.SanitisePath(filepath.Base(path))
 
 		cfg := &config.Config{
 			DefaultBranch: defaultBranch,
-			SiteName:      repoName,
+			SiteName:      siteName,
 		}
 
 		preset := mustGetString(cmd, "preset")
