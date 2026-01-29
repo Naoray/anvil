@@ -120,13 +120,18 @@ Arguments:
 		}
 
 		verbose := mustGetBool(cmd, "verbose")
+		skipScaffold := mustGetBool(cmd, "skip-scaffold")
 
-		if cfg.Preset != "" && verbose {
+		if !skipScaffold && cfg.Preset != "" && verbose {
 			ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", cfg.Preset))
 		}
 
-		if err := scaffoldManager.RunScaffold(mainPath, defaultBranch, repoName, cfg.SiteName, cfg.Preset, cfg, false, verbose); err != nil {
-			ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
+		if !skipScaffold {
+			if err := scaffoldManager.RunScaffold(mainPath, defaultBranch, repoName, cfg.SiteName, cfg.Preset, cfg, false, verbose); err != nil {
+				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
+			}
+		} else {
+			ui.PrintInfo("Skipped scaffold (use 'arbor scaffold main' to scaffold manually)")
 		}
 
 		ui.PrintDone("Repository ready!")
@@ -141,4 +146,5 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 
 	initCmd.Flags().String("preset", "", "Project preset (laravel, php)")
+	initCmd.Flags().Bool("skip-scaffold", false, "Skip scaffold steps during init")
 }

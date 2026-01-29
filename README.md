@@ -53,6 +53,10 @@ arbor remove feature/user-auth
 # Clean up merged worktrees
 arbor prune
 
+# Run scaffold steps on an existing worktree
+arbor scaffold main
+arbor scaffold feature/user-auth
+
 # Destroy the entire project (removes worktrees and bare repo)
 arbor destroy
 ```
@@ -65,6 +69,40 @@ See [AGENTS.md](./AGENTS.md) for development guide.
 - Configuration files
 - Scaffold presets
 - Testing strategy
+
+## Commands
+
+### `arbor scaffold [PATH]`
+
+Run scaffold steps for an existing worktree. This is useful when:
+
+- You used `arbor init --skip-scaffold` to clone without running scaffold
+- You want to re-run scaffold steps on an existing worktree
+- You need to scaffold a worktree you're not currently in
+
+```bash
+# Scaffold a specific worktree by path
+arbor scaffold main
+arbor scaffold feature/user-auth
+
+# When inside a worktree, scaffold current (prompts for confirmation)
+arbor scaffold
+
+# When at project root without args, interactively select worktree
+arbor scaffold
+```
+
+### `arbor init` with `--skip-scaffold`
+
+Skip scaffold steps during init and run them manually later:
+
+```bash
+# Clone without scaffolding
+arbor init git@github.com:user/repo.git --skip-scaffold
+
+# Scaffold when ready
+arbor scaffold main
+```
 
 ## Configuration
 

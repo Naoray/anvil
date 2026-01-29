@@ -42,6 +42,7 @@ Commands:
   list      List all worktrees
   remove    Remove a worktree
   prune     Remove merged worktrees
+  scaffold  Run scaffold steps for a worktree
   destroy   Completely destroy an arbor project
   install   Setup global configuration
 

@@ -305,3 +305,64 @@ func ConfirmDestroy(projectName string, worktrees []git.Worktree) (bool, error) 
 
 	return confirmed, nil
 }
+
+// SelectWorktreeToScaffold allows selecting a worktree to scaffold
+func SelectWorktreeToScaffold(worktrees []git.Worktree) (*git.Worktree, error) {
+	if len(worktrees) == 0 {
+		return nil, fmt.Errorf("no worktrees available to scaffold")
+	}
+
+	options := make([]huh.Option[string], len(worktrees))
+	for i, wt := range worktrees {
+		label := fmt.Sprintf("%s (%s)", wt.Branch, filepath.Base(wt.Path))
+		if wt.IsCurrent {
+			label += " [current]"
+		}
+		if wt.IsMain {
+			label += " [main]"
+		}
+		options[i] = huh.NewOption(label, wt.Path)
+	}
+
+	var selected string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select worktree to scaffold").
+				Description("Choose a worktree to run scaffold steps").
+				Options(options...).
+				Value(&selected),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return nil, NormalizeAbort(err)
+	}
+
+	for _, wt := range worktrees {
+		if wt.Path == selected {
+			return &wt, nil
+		}
+	}
+
+	return nil, fmt.Errorf("worktree not found")
+}
+
+// ConfirmScaffold prompts user to confirm scaffolding current worktree
+func ConfirmScaffold(branch string) (bool, error) {
+	var confirmed bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Scaffold current worktree").
+				Description(fmt.Sprintf("Run scaffold steps for worktree %q?", branch)).
+				Value(&confirmed),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return false, NormalizeAbort(err)
+	}
+
+	return confirmed, nil
+}
