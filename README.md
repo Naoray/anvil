@@ -26,7 +26,12 @@ arbor remove feature-new-feature
 # Clone and build
 git clone git@github.com:michaeldyrynda/arbor.git
 cd arbor
+
+# Linux/macOS
 go build -o arbor ./cmd/arbor
+
+# Windows
+go build -o arbor.exe ./cmd/arbor
 
 # Or install via Homebrew (coming soon)
 brew install arbor
