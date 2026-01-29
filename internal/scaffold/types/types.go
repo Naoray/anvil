@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -326,15 +327,26 @@ func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 	snapshot := map[string]string{
-		"Path":     ctx.Path,
-		"RepoPath": ctx.RepoPath,
-		"RepoName": ctx.RepoName,
-		"SiteName": ctx.SiteName,
-		"Branch":   ctx.Branch,
-		"DbSuffix": ctx.DbSuffix,
+		"Path":              ctx.Path,
+		"RepoPath":          ctx.RepoPath,
+		"RepoName":          ctx.RepoName,
+		"SiteName":          ctx.SiteName,
+		"SanitizedSiteName": sanitizeSiteName(ctx.SiteName),
+		"Branch":            ctx.Branch,
+		"DbSuffix":          ctx.DbSuffix,
 	}
 	for k, v := range ctx.Vars {
 		snapshot[k] = v
 	}
 	return snapshot
+}
+
+func sanitizeSiteName(name string) string {
+	name = strings.ToLower(name)
+	re := regexp.MustCompile(`[^a-z0-9_]`)
+	name = re.ReplaceAllString(name, "_")
+	re = regexp.MustCompile(`_+`)
+	name = re.ReplaceAllString(name, "_")
+	name = strings.Trim(name, "_")
+	return name
 }

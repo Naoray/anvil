@@ -376,3 +376,49 @@ APP_NAME=myapp
 		assert.True(t, strings.HasPrefix(createCalls[2], "knowledge_"), "Third db should use 'knowledge' prefix")
 	})
 }
+
+func TestIntegration_SanitizedSiteNameForDatabase(t *testing.T) {
+	t.Run("db.create with hyphenated sitename → env.write with SanitizedSiteName matches", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		envContent := `DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_USERNAME=root
+DB_PASSWORD=root
+APP_NAME=some-feature
+`
+		envFile := filepath.Join(tmpDir, ".env")
+		require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
+
+		ctx := &types.ScaffoldContext{
+			WorktreePath: tmpDir,
+			SiteName:     "some-feature",
+			Branch:       "test",
+		}
+
+		mockClient := steps.NewMockDatabaseClient()
+		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, steps.MockClientFactory(mockClient))
+		require.NotNil(t, dbStep)
+		err := dbStep.Run(ctx, types.StepOptions{Verbose: false})
+		require.NoError(t, err)
+
+		suffix := ctx.GetDbSuffix()
+		assert.NotEmpty(t, suffix)
+
+		createCalls := mockClient.GetCreateCalls()
+		require.Len(t, createCalls, 1)
+		actualDbName := createCalls[0]
+		assert.True(t, strings.HasPrefix(actualDbName, "some_feature_"), "Database should be created with sanitized name (underscores)")
+
+		writeStep := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}"})
+		require.NotNil(t, writeStep)
+		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(envFile)
+		require.NoError(t, err)
+		expectedDbName := "some_feature_" + suffix
+		assert.Contains(t, string(content), "DB_DATABASE="+expectedDbName, "env.write should use SanitizedSiteName to match actual database name")
+		assert.Equal(t, actualDbName, expectedDbName, "Database name from db.create should match env.write value")
+	})
+}

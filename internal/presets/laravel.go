@@ -22,7 +22,7 @@ func NewLaravel() *Laravel {
 				{Name: "file.copy", From: ".env.example", To: ".env"},
 				{Name: "php.laravel.artisan", Args: []string{"key:generate", "--no-interaction"}, Condition: map[string]interface{}{"env_file_missing": "APP_KEY"}},
 				{Name: "db.create", Condition: map[string]interface{}{"env_file_contains": map[string]interface{}{"file": ".env", "key": "DB_CONNECTION"}}},
-				{Name: "env.write", Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}", Condition: map[string]interface{}{"env_file_contains": map[string]interface{}{"file": ".env", "key": "DB_CONNECTION"}}},
+				{Name: "env.write", Key: "DB_DATABASE", Value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}", Condition: map[string]interface{}{"env_file_contains": map[string]interface{}{"file": ".env", "key": "DB_CONNECTION"}}},
 				{Name: "node.npm", Args: []string{"ci"}, Condition: map[string]interface{}{"file_exists": "package-lock.json"}},
 				{Name: "php.laravel.artisan", Args: []string{"migrate:fresh", "--seed", "--no-interaction"}},
 				{Name: "node.npm", Args: []string{"run", "build"}, Condition: map[string]interface{}{"file_exists": "package-lock.json"}},

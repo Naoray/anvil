@@ -92,6 +92,24 @@ func TestReplaceTemplateVars(t *testing.T) {
 			ctx:      &types.ScaffoldContext{SiteName: "myapp", DbSuffix: "swift_runner"},
 			expected: "myapp_swift_runner",
 		},
+		{
+			name:     "sanitized database name pattern",
+			input:    "{{ .SanitizedSiteName }}_{{ .DbSuffix }}",
+			ctx:      &types.ScaffoldContext{SiteName: "my-app", DbSuffix: "swift_runner"},
+			expected: "my_app_swift_runner",
+		},
+		{
+			name:     "SanitizedSiteName removes hyphens",
+			input:    "{{ .SanitizedSiteName }}",
+			ctx:      &types.ScaffoldContext{SiteName: "feature-auth-system"},
+			expected: "feature_auth_system",
+		},
+		{
+			name:     "SanitizedSiteName removes special characters",
+			input:    "{{ .SanitizedSiteName }}",
+			ctx:      &types.ScaffoldContext{SiteName: "My Test-App!"},
+			expected: "my_test_app",
+		},
 	}
 
 	for _, tt := range tests {

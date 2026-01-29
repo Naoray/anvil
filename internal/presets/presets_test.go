@@ -82,7 +82,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 
 	assert.Equal(t, "env.write", steps[5].Name)
 	assert.Equal(t, "DB_DATABASE", steps[5].Key)
-	assert.Equal(t, "{{ .SiteName }}_{{ .DbSuffix }}", steps[5].Value)
+	assert.Equal(t, "{{ .SanitizedSiteName }}_{{ .DbSuffix }}", steps[5].Value)
 
 	assert.Equal(t, "node.npm", steps[6].Name)
 	assert.Equal(t, []string{"ci"}, steps[6].Args)
