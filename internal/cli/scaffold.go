@@ -128,7 +128,14 @@ a worktree to scaffold.`,
 		repoName := filepath.Base(pc.ProjectPath)
 		worktreeName := filepath.Base(selectedWorktree.Path)
 
-		if err := pc.ScaffoldManager().RunScaffold(selectedWorktree.Path, selectedWorktree.Branch, repoName, worktreeName, preset, pc.Config, dryRun, verbose); err != nil {
+		// For the default branch, use the saved SiteName from project config
+		// For feature branches, use the worktree folder name
+		siteName := worktreeName
+		if selectedWorktree.Branch == pc.DefaultBranch && pc.Config.SiteName != "" {
+			siteName = pc.Config.SiteName
+		}
+
+		if err := pc.ScaffoldManager().RunScaffold(selectedWorktree.Path, selectedWorktree.Branch, repoName, siteName, preset, pc.Config, dryRun, verbose); err != nil {
 			ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			return err
 		}
