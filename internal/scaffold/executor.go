@@ -19,7 +19,6 @@ type StepExecutor struct {
 	opts    types.StepOptions
 	results []ExecutionResult
 	mu      sync.Mutex
-	errMu   sync.Mutex
 }
 
 func NewStepExecutor(steps []types.ScaffoldStep, ctx *types.ScaffoldContext, opts types.StepOptions) *StepExecutor {
