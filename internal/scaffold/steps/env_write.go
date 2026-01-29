@@ -30,29 +30,23 @@ func getFileLock(path string) *sync.Mutex {
 }
 
 type EnvWriteStep struct {
-	name     string
-	key      string
-	value    string
-	file     string
-	priority int
+	name  string
+	key   string
+	value string
+	file  string
 }
 
 func NewEnvWriteStep(cfg config.StepConfig) *EnvWriteStep {
 	return &EnvWriteStep{
-		name:     "env.write",
-		key:      cfg.Key,
-		value:    cfg.Value,
-		file:     cfg.File,
-		priority: cfg.Priority,
+		name:  "env.write",
+		key:   cfg.Key,
+		value: cfg.Value,
+		file:  cfg.File,
 	}
 }
 
 func (s *EnvWriteStep) Name() string {
 	return s.name
-}
-
-func (s *EnvWriteStep) Priority() int {
-	return s.priority
 }
 
 func (s *EnvWriteStep) Condition(ctx *types.ScaffoldContext) bool {
@@ -128,19 +122,19 @@ func (s *EnvWriteStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmpFileName := tmpFile.Name()
-	
+
 	// Write content and close the file
 	if _, err := tmpFile.Write(content); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpFileName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
-	
+
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpFileName)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
-	
+
 	// Set permissions
 	if err := os.Chmod(tmpFileName, oldPerms); err != nil {
 		os.Remove(tmpFileName)

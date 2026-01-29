@@ -16,11 +16,6 @@ func TestBashRunStep_TemplateReplacement(t *testing.T) {
 		assert.Equal(t, "bash.run", step.Name())
 	})
 
-	t.Run("priority returns 100", func(t *testing.T) {
-		step := NewBashRunStep("echo hello")
-		assert.Equal(t, 100, step.Priority())
-	})
-
 	t.Run("condition always returns true", func(t *testing.T) {
 		step := NewBashRunStep("echo hello")
 		ctx := &types.ScaffoldContext{WorktreePath: "/tmp"}

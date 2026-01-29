@@ -2,7 +2,6 @@ package scaffold
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
@@ -34,92 +33,15 @@ func NewStepExecutor(steps []types.ScaffoldStep, ctx *types.ScaffoldContext, opt
 func (e *StepExecutor) Execute() error {
 	e.results = make([]ExecutionResult, 0, len(e.steps))
 
-	sortedSteps := e.sortByPriority()
-
-	groups := e.groupByPriority(sortedSteps)
-
-	for _, group := range groups {
-		if err := e.executeGroup(group); err != nil {
+	// Execute steps sequentially in the order they were provided
+	// Preset steps come first, followed by config steps
+	for _, step := range e.steps {
+		if err := e.executeStep(step); err != nil {
 			return err
 		}
 	}
 
 	return nil
-}
-
-func (e *StepExecutor) sortByPriority() []types.ScaffoldStep {
-	sorted := make([]types.ScaffoldStep, len(e.steps))
-	copy(sorted, e.steps)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Priority() < sorted[j].Priority()
-	})
-
-	return sorted
-}
-
-func (e *StepExecutor) groupByPriority(steps []types.ScaffoldStep) [][]types.ScaffoldStep {
-	if len(steps) == 0 {
-		return nil
-	}
-
-	var groups [][]types.ScaffoldStep
-	var currentGroup []types.ScaffoldStep
-	currentPriority := steps[0].Priority()
-
-	for _, step := range steps {
-		if step.Priority() != currentPriority {
-			groups = append(groups, currentGroup)
-			currentGroup = []types.ScaffoldStep{}
-			currentPriority = step.Priority()
-		}
-		currentGroup = append(currentGroup, step)
-	}
-
-	if len(currentGroup) > 0 {
-		groups = append(groups, currentGroup)
-	}
-
-	return groups
-}
-
-func (e *StepExecutor) executeGroup(group []types.ScaffoldStep) error {
-	if len(group) == 1 {
-		return e.executeStep(group[0])
-	}
-
-	return e.executeGroupParallel(group)
-}
-
-func (e *StepExecutor) executeGroupParallel(group []types.ScaffoldStep) error {
-	var wg sync.WaitGroup
-	var firstErr error
-	errChan := make(chan error, len(group))
-
-	for _, step := range group {
-		wg.Add(1)
-		go func(s types.ScaffoldStep) {
-			defer wg.Done()
-
-			err := e.executeStep(s)
-			if err != nil {
-				e.errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-					select {
-					case errChan <- err:
-					default:
-					}
-				}
-				e.errMu.Unlock()
-			}
-		}(step)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	return firstErr
 }
 
 func (e *StepExecutor) executeStep(step types.ScaffoldStep) error {

@@ -14,36 +14,29 @@ type BinaryStep struct {
 	name      string
 	binary    string
 	args      []string
-	priority  int
 	condition map[string]interface{}
 }
 
-func NewBinaryStep(name, binary string, args []string, priority int) *BinaryStep {
+func NewBinaryStep(name, binary string, args []string) *BinaryStep {
 	return &BinaryStep{
 		name:      name,
 		binary:    binary,
 		args:      args,
-		priority:  priority,
 		condition: nil,
 	}
 }
 
-func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary string, priority int) *BinaryStep {
+func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary string) *BinaryStep {
 	return &BinaryStep{
 		name:      name,
 		binary:    binary,
 		args:      cfg.Args,
-		priority:  priority,
 		condition: cfg.Condition,
 	}
 }
 
 func (s *BinaryStep) Name() string {
 	return s.name
-}
-
-func (s *BinaryStep) Priority() int {
-	return s.priority
 }
 
 func (s *BinaryStep) Condition(ctx *types.ScaffoldContext) bool {

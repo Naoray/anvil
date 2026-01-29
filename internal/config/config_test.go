@@ -112,7 +112,6 @@ scaffold:
       store_as: DatabaseName
       file: .env
       type: mysql
-      priority: 10
       args: ["--force"]
       enabled: true
       condition:
@@ -135,7 +134,6 @@ scaffold:
 	assert.Equal(t, "DatabaseName", step.StoreAs)
 	assert.Equal(t, ".env", step.File)
 	assert.Equal(t, "mysql", step.Type)
-	assert.Equal(t, 10, step.Priority)
 	assert.Equal(t, []string{"--force"}, step.Args)
 	assert.NotNil(t, step.Enabled)
 	assert.True(t, *step.Enabled)
@@ -165,7 +163,6 @@ scaffold:
 	assert.Empty(t, step.StoreAs)
 	assert.Empty(t, step.File)
 	assert.Empty(t, step.Type)
-	assert.Equal(t, 0, step.Priority)
 	assert.Nil(t, step.Args)
 	assert.Nil(t, step.Enabled)
 }

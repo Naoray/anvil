@@ -43,18 +43,6 @@ func TestRegistry_StepRegistration(t *testing.T) {
 		assert.Equal(t, []string{"install"}, binaryStep.args)
 	})
 
-	t.Run("node.bun default priority is 10", func(t *testing.T) {
-		step := Create("node.bun", config.StepConfig{})
-		assert.Equal(t, 10, step.Priority())
-	})
-
-	t.Run("node.bun custom priority override", func(t *testing.T) {
-		step := Create("node.bun", config.StepConfig{
-			Priority: 20,
-		})
-		assert.Equal(t, 20, step.Priority())
-	})
-
 	t.Run("db.create step is registered", func(t *testing.T) {
 		step := Create("db.create", config.StepConfig{})
 

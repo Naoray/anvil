@@ -96,14 +96,4 @@ func TestFileCopyStep(t *testing.T) {
 		step := NewFileCopyStep("from", "to")
 		assert.Equal(t, "file.copy", step.Name())
 	})
-
-	t.Run("priority returns correct value", func(t *testing.T) {
-		step := NewFileCopyStep("from", "to", 25)
-		assert.Equal(t, 25, step.Priority())
-	})
-
-	t.Run("default priority is 15", func(t *testing.T) {
-		step := NewFileCopyStep("from", "to")
-		assert.Equal(t, 15, step.Priority())
-	})
 }

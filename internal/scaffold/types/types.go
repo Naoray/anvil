@@ -36,7 +36,6 @@ type StepOptions struct {
 type ScaffoldStep interface {
 	Name() string
 	Run(ctx *ScaffoldContext, opts StepOptions) error
-	Priority() int
 	Condition(ctx *ScaffoldContext) bool
 }
 

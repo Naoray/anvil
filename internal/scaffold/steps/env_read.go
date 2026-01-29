@@ -28,10 +28,6 @@ func (s *EnvReadStep) Name() string {
 	return s.name
 }
 
-func (s *EnvReadStep) Priority() int {
-	return 0
-}
-
 func (s *EnvReadStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }

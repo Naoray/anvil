@@ -19,16 +19,6 @@ func TestEnvWriteStep(t *testing.T) {
 		assert.Equal(t, "env.write", step.Name())
 	})
 
-	t.Run("priority returns 0", func(t *testing.T) {
-		step := NewEnvWriteStep(config.StepConfig{})
-		assert.Equal(t, 0, step.Priority())
-	})
-
-	t.Run("priority returns configured value", func(t *testing.T) {
-		step := NewEnvWriteStep(config.StepConfig{Priority: 7})
-		assert.Equal(t, 7, step.Priority())
-	})
-
 	t.Run("condition always returns true", func(t *testing.T) {
 		step := NewEnvWriteStep(config.StepConfig{})
 		ctx := types.ScaffoldContext{WorktreePath: t.TempDir()}

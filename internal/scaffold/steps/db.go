@@ -14,26 +14,23 @@ import (
 type DbCreateStep struct {
 	name          string
 	args          []string
-	priority      int
 	dbType        string
 	clientFactory DatabaseClientFactory
 }
 
-func NewDbCreateStep(cfg config.StepConfig, priority int) *DbCreateStep {
+func NewDbCreateStep(cfg config.StepConfig) *DbCreateStep {
 	return &DbCreateStep{
 		name:          "db.create",
 		args:          cfg.Args,
-		priority:      priority,
 		dbType:        cfg.Type,
 		clientFactory: DefaultDatabaseClientFactory,
 	}
 }
 
-func NewDbCreateStepWithFactory(cfg config.StepConfig, priority int, factory DatabaseClientFactory) *DbCreateStep {
+func NewDbCreateStepWithFactory(cfg config.StepConfig, factory DatabaseClientFactory) *DbCreateStep {
 	return &DbCreateStep{
 		name:          "db.create",
 		args:          cfg.Args,
-		priority:      priority,
 		dbType:        cfg.Type,
 		clientFactory: factory,
 	}
@@ -41,10 +38,6 @@ func NewDbCreateStepWithFactory(cfg config.StepConfig, priority int, factory Dat
 
 func (s *DbCreateStep) Name() string {
 	return s.name
-}
-
-func (s *DbCreateStep) Priority() int {
-	return s.priority
 }
 
 func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) bool {
@@ -287,10 +280,6 @@ func NewDbDestroyStepWithFactory(cfg config.StepConfig, factory DatabaseClientFa
 
 func (s *DbDestroyStep) Name() string {
 	return s.name
-}
-
-func (s *DbDestroyStep) Priority() int {
-	return 0
 }
 
 func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {

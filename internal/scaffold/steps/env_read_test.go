@@ -18,11 +18,6 @@ func TestEnvReadStep(t *testing.T) {
 		assert.Equal(t, "env.read", step.Name())
 	})
 
-	t.Run("priority returns 0", func(t *testing.T) {
-		step := NewEnvReadStep(config.StepConfig{})
-		assert.Equal(t, 0, step.Priority())
-	})
-
 	t.Run("condition always returns true", func(t *testing.T) {
 		step := NewEnvReadStep(config.StepConfig{})
 		ctx := types.ScaffoldContext{WorktreePath: t.TempDir()}

@@ -21,42 +21,32 @@ func Create(name string, cfg config.StepConfig) types.ScaffoldStep {
 }
 
 type binaryDefinition struct {
-	name     string
-	binary   string
-	priority int
+	name   string
+	binary string
 }
 
 var binaries = []binaryDefinition{
-	{"php", "php", 5},
-	{"php.composer", "composer", 10},
-	{"php.laravel.artisan", "php artisan", 20},
-	{"node.npm", "npm", 10},
-	{"node.yarn", "yarn", 10},
-	{"node.pnpm", "pnpm", 10},
-	{"node.bun", "bun", 10},
-	{"herd", "herd", 60},
+	{"php", "php"},
+	{"php.composer", "composer"},
+	{"php.laravel.artisan", "php artisan"},
+	{"node.npm", "npm"},
+	{"node.yarn", "yarn"},
+	{"node.pnpm", "pnpm"},
+	{"node.bun", "bun"},
+	{"herd", "herd"},
 }
 
 func init() {
 	for _, b := range binaries {
 		name := b.name
 		binary := b.binary
-		defaultPriority := b.priority
 		Register(name, func(cfg config.StepConfig) types.ScaffoldStep {
-			priority := defaultPriority
-			if cfg.Priority != 0 {
-				priority = cfg.Priority
-			}
-			return NewBinaryStepWithCondition(name, cfg, binary, priority)
+			return NewBinaryStepWithCondition(name, cfg, binary)
 		})
 	}
 
 	Register("file.copy", func(cfg config.StepConfig) types.ScaffoldStep {
-		priority := 9
-		if cfg.Priority != 0 {
-			priority = cfg.Priority
-		}
-		return NewFileCopyStep(cfg.From, cfg.To, priority)
+		return NewFileCopyStep(cfg.From, cfg.To)
 	})
 	Register("bash.run", func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewBashRunStep(cfg.Command)
@@ -71,11 +61,7 @@ func init() {
 		return NewEnvWriteStep(cfg)
 	})
 	Register("db.create", func(cfg config.StepConfig) types.ScaffoldStep {
-		priority := 8
-		if cfg.Priority != 0 {
-			priority = cfg.Priority
-		}
-		return NewDbCreateStep(cfg, priority)
+		return NewDbCreateStep(cfg)
 	})
 	Register("db.destroy", func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewDbDestroyStep(cfg)

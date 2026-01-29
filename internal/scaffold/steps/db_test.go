@@ -16,17 +16,12 @@ import (
 
 func TestDbCreateStep(t *testing.T) {
 	t.Run("name returns db.create", func(t *testing.T) {
-		step := NewDbCreateStep(config.StepConfig{}, 8)
+		step := NewDbCreateStep(config.StepConfig{})
 		assert.Equal(t, "db.create", step.Name())
 	})
 
-	t.Run("priority returns correct value", func(t *testing.T) {
-		step := NewDbCreateStep(config.StepConfig{}, 8)
-		assert.Equal(t, 8, step.Priority())
-	})
-
 	t.Run("condition always returns true - controlled by preset", func(t *testing.T) {
-		step := NewDbCreateStep(config.StepConfig{}, 8)
+		step := NewDbCreateStep(config.StepConfig{})
 		ctx := &types.ScaffoldContext{
 			WorktreePath: t.TempDir(),
 		}
@@ -41,7 +36,7 @@ func TestDbCreateStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		step := NewDbCreateStep(config.StepConfig{}, 8)
+		step := NewDbCreateStep(config.StepConfig{})
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 		}
@@ -59,7 +54,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -80,7 +75,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -100,7 +95,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -120,7 +115,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -140,7 +135,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "my-app",
@@ -169,7 +164,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -195,7 +190,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "",
@@ -219,7 +214,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "My Test-App!",
@@ -242,7 +237,7 @@ func TestDbCreateStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		step := NewDbCreateStep(config.StepConfig{}, 8)
+		step := NewDbCreateStep(config.StepConfig{})
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 		}
@@ -262,7 +257,7 @@ func TestDbCreateStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		step := NewDbCreateStep(config.StepConfig{}, 8)
+		step := NewDbCreateStep(config.StepConfig{})
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 		}
@@ -283,7 +278,7 @@ func TestDbCreateStep(t *testing.T) {
 		mockClient := NewMockDatabaseClient()
 		step := NewDbCreateStepWithFactory(config.StepConfig{
 			Args: []string{"--prefix", "mycustom"},
-		}, 8, MockClientFactory(mockClient))
+		}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -313,7 +308,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "myapp",
@@ -336,7 +331,7 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -373,7 +368,7 @@ func TestDbCreateStep(t *testing.T) {
 
 		step := NewDbCreateStepWithFactory(config.StepConfig{
 			Args: []string{"--prefix", "app"},
-		}, 8, MockClientFactory(mockClient))
+		}, MockClientFactory(mockClient))
 
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
 		assert.NoError(t, err)
@@ -395,7 +390,7 @@ func TestDbCreateStep(t *testing.T) {
 		mockClient := NewMockDatabaseClient()
 		mockClient.SetExistsOnFirstNCalls(2)
 
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -420,7 +415,7 @@ func TestDbCreateStep(t *testing.T) {
 		mockClient := NewMockDatabaseClient()
 		mockClient.SetExistsOnFirstNCalls(10)
 
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",
@@ -442,7 +437,7 @@ func TestDbCreateStep(t *testing.T) {
 		mockClient := NewMockDatabaseClient()
 		mockClient.SetPingError(errors.New("connection refused"))
 
-		step := NewDbCreateStepWithFactory(config.StepConfig{}, 8, MockClientFactory(mockClient))
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 			SiteName:     "testapp",

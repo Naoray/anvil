@@ -35,10 +35,6 @@ func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 	return nil
 }
 
-func (s *BashRunStep) Priority() int {
-	return 100
-}
-
 func (s *BashRunStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }

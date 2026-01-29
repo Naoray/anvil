@@ -59,30 +59,6 @@ func TestBinaryStep_CommandConstruction(t *testing.T) {
 	})
 }
 
-func TestBinaryStep_Priority(t *testing.T) {
-	t.Run("default priority for php.laravel.artisan", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{})
-		assert.Equal(t, 20, step.Priority())
-	})
-
-	t.Run("default priority for php.composer", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{})
-		assert.Equal(t, 10, step.Priority())
-	})
-
-	t.Run("default priority for php", func(t *testing.T) {
-		step := Create("php", config.StepConfig{})
-		assert.Equal(t, 5, step.Priority())
-	})
-
-	t.Run("custom priority override", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
-			Priority: 50,
-		})
-		assert.Equal(t, 50, step.Priority())
-	})
-}
-
 func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 	t.Run("php.composer command construction", func(t *testing.T) {
 		step := Create("php.composer", config.StepConfig{

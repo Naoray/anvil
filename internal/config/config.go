@@ -46,7 +46,6 @@ type StepConfig struct {
 	Args      []string               `mapstructure:"args"`
 	Command   string                 `mapstructure:"command"`
 	Condition map[string]interface{} `mapstructure:"condition"`
-	Priority  int                    `mapstructure:"priority"`
 	From      string                 `mapstructure:"from"`
 	To        string                 `mapstructure:"to"`
 	Key       string                 `mapstructure:"key"`

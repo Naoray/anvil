@@ -70,7 +70,7 @@ APP_NAME=myapp
 		}
 
 		mockClient := steps.NewMockDatabaseClient()
-		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, 8, steps.MockClientFactory(mockClient))
+		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, steps.MockClientFactory(mockClient))
 		require.NotNil(t, dbStep)
 		err := dbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -139,7 +139,7 @@ APP_NAME=myapp
 		}
 
 		mockClient := steps.NewMockDatabaseClient()
-		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, 8, steps.MockClientFactory(mockClient))
+		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, steps.MockClientFactory(mockClient))
 		require.NotNil(t, dbStep)
 		err := dbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -197,7 +197,6 @@ func TestIntegration_BunIntegration(t *testing.T) {
 
 		assert.NotNil(t, step)
 		assert.Equal(t, "node.bun", step.Name())
-		assert.Equal(t, 10, step.Priority())
 	})
 }
 
@@ -222,7 +221,7 @@ APP_NAME=myapp
 		}
 
 		mockClient := steps.NewMockDatabaseClient()
-		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, 8, steps.MockClientFactory(mockClient))
+		dbStep := steps.NewDbCreateStepWithFactory(config.StepConfig{}, steps.MockClientFactory(mockClient))
 		require.NotNil(t, dbStep)
 		err := dbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -339,7 +338,7 @@ APP_NAME=myapp
 		mockClient := steps.NewMockDatabaseClient()
 		factory := steps.MockClientFactory(mockClient)
 
-		appStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "app"}, Priority: 8}, 8, factory)
+		appStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "app"}}, factory)
 		require.NotNil(t, appStep)
 		err := appStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -347,7 +346,7 @@ APP_NAME=myapp
 		firstSuffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, firstSuffix, "First db.create should set suffix")
 
-		quotesStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "quotes"}, Priority: 8}, 8, factory)
+		quotesStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "quotes"}}, factory)
 		require.NotNil(t, quotesStep)
 		err = quotesStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -355,7 +354,7 @@ APP_NAME=myapp
 		secondSuffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, secondSuffix, "Second db.create should set suffix")
 
-		knowledgeStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "knowledge"}, Priority: 8}, 8, factory)
+		knowledgeStep := steps.NewDbCreateStepWithFactory(config.StepConfig{Args: []string{"--prefix", "knowledge"}}, factory)
 		require.NotNil(t, knowledgeStep)
 		err = knowledgeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
