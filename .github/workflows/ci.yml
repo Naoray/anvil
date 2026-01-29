@@ -53,11 +53,12 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h localhost -proot" 
-          --health-interval=10s 
-          --health-timeout=5s 
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
           --health-retries=3
-        command: --default-authentication-plugin=mysql_native_password
+        args:
+          - --default-authentication-plugin=mysql_native_password
       postgres:
         image: postgres:16
         env:
