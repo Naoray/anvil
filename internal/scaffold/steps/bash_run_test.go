@@ -23,7 +23,7 @@ func TestBashRunStep_TemplateReplacement(t *testing.T) {
 
 	t.Run("condition always returns true", func(t *testing.T) {
 		step := NewBashRunStep("echo hello")
-		ctx := types.ScaffoldContext{WorktreePath: "/tmp"}
+		ctx := &types.ScaffoldContext{WorktreePath: "/tmp"}
 		assert.True(t, step.Condition(ctx))
 	})
 

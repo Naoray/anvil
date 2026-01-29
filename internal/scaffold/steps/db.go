@@ -37,7 +37,7 @@ func (s *DbCreateStep) Priority() int {
 	return s.priority
 }
 
-func (s *DbCreateStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }
 
@@ -287,7 +287,7 @@ func (s *DbDestroyStep) Priority() int {
 	return 0
 }
 
-func (s *DbDestroyStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }
 
@@ -407,7 +407,7 @@ func (s *DbDestroyStep) destroyMysqlDatabases(pattern string, opts types.StepOpt
 	databases := []string{}
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line != "" && line != fmt.Sprintf("%s", pattern) {
+		if line != "" && line != pattern {
 			databases = append(databases, line)
 		}
 	}

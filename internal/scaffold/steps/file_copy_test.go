@@ -66,7 +66,7 @@ func TestFileCopyStep(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		assert.True(t, step.Condition(*ctx))
+		assert.True(t, step.Condition(ctx))
 	})
 
 	t.Run("condition returns false when source file does not exist", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestFileCopyStep(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		assert.False(t, step.Condition(*ctx))
+		assert.False(t, step.Condition(ctx))
 	})
 
 	t.Run("returns error when source file does not exist", func(t *testing.T) {

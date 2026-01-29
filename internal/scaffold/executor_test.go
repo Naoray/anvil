@@ -30,7 +30,7 @@ func (s *mockStep) Priority() int {
 	return s.priority
 }
 
-func (s *mockStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *mockStep) Condition(ctx *types.ScaffoldContext) bool {
 	return s.conditionResult
 }
 

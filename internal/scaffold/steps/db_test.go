@@ -30,7 +30,7 @@ func TestDbCreateStep(t *testing.T) {
 		ctx := &types.ScaffoldContext{
 			WorktreePath: t.TempDir(),
 		}
-		assert.True(t, step.Condition(*ctx))
+		assert.True(t, step.Condition(ctx))
 	})
 
 	t.Run("skips when no DB_CONNECTION in env file and no type config", func(t *testing.T) {
@@ -273,7 +273,7 @@ func TestDbDestroyStep(t *testing.T) {
 		ctx := &types.ScaffoldContext{
 			WorktreePath: t.TempDir(),
 		}
-		assert.True(t, step.Condition(*ctx))
+		assert.True(t, step.Condition(ctx))
 	})
 
 	t.Run("returns nil when no DbSuffix in context or worktree config", func(t *testing.T) {

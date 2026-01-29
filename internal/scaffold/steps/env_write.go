@@ -35,7 +35,7 @@ func (s *EnvWriteStep) Priority() int {
 	return 0
 }
 
-func (s *EnvWriteStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *EnvWriteStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }
 

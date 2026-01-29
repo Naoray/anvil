@@ -15,7 +15,7 @@ import (
 func TestConditionEvaluator_Evaluate(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	ctx := types.ScaffoldContext{
+	ctx := &types.ScaffoldContext{
 		WorktreePath: tmpDir,
 		Branch:       "test-branch",
 		Preset:       "php",
@@ -331,7 +331,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 func TestConditionEvaluator_fileHasScript(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	ctx := types.ScaffoldContext{
+	ctx := &types.ScaffoldContext{
 		WorktreePath: tmpDir,
 		Branch:       "test-branch",
 		Preset:       "php",

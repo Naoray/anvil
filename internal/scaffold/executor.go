@@ -143,7 +143,7 @@ func (e *StepExecutor) executeStep(step types.ScaffoldStep) error {
 		return nil
 	}
 
-	if step.Condition(*e.ctx) {
+	if step.Condition(e.ctx) {
 		if e.opts.Verbose {
 			fmt.Printf("Executing step: %s\n", step.Name())
 		}

@@ -33,6 +33,6 @@ func (s *CommandRunStep) Priority() int {
 	return 100
 }
 
-func (s *CommandRunStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *CommandRunStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }

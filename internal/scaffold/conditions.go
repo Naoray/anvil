@@ -5,10 +5,10 @@ import (
 )
 
 type ConditionEvaluator struct {
-	ctx types.ScaffoldContext
+	ctx *types.ScaffoldContext
 }
 
-func NewConditionEvaluator(ctx types.ScaffoldContext) *ConditionEvaluator {
+func NewConditionEvaluator(ctx *types.ScaffoldContext) *ConditionEvaluator {
 	return &ConditionEvaluator{ctx: ctx}
 }
 

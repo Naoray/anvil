@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+
 	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 	"github.com/michaeldyrynda/arbor/internal/utils"
@@ -31,7 +32,7 @@ func (s *EnvReadStep) Priority() int {
 	return 0
 }
 
-func (s *EnvReadStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *EnvReadStep) Condition(ctx *types.ScaffoldContext) bool {
 	return true
 }
 

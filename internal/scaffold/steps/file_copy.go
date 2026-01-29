@@ -50,7 +50,7 @@ func (s *FileCopyStep) Priority() int {
 	return s.priority
 }
 
-func (s *FileCopyStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *FileCopyStep) Condition(ctx *types.ScaffoldContext) bool {
 	fromPath := filepath.Join(ctx.WorktreePath, s.from)
 	_, err := os.Stat(fromPath)
 	return err == nil

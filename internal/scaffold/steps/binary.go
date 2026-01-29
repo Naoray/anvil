@@ -46,7 +46,7 @@ func (s *BinaryStep) Priority() int {
 	return s.priority
 }
 
-func (s *BinaryStep) Condition(ctx types.ScaffoldContext) bool {
+func (s *BinaryStep) Condition(ctx *types.ScaffoldContext) bool {
 	if len(s.condition) > 0 {
 		result, err := ctx.EvaluateCondition(s.condition)
 		if err != nil {

@@ -37,7 +37,7 @@ type ScaffoldStep interface {
 	Name() string
 	Run(ctx *ScaffoldContext, opts StepOptions) error
 	Priority() int
-	Condition(ctx ScaffoldContext) bool
+	Condition(ctx *ScaffoldContext) bool
 }
 
 func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]interface{}) (bool, error) {

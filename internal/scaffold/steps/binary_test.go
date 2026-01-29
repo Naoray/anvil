@@ -154,7 +154,7 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 			WorktreePath: "/tmp",
 		}
 
-		result := step.Condition(ctx)
+		result := step.Condition(&ctx)
 		assert.Equal(t, hasPHP, result, "Condition should check if 'php' exists")
 	})
 }
@@ -173,7 +173,7 @@ func joinArgs(args []string) string {
 func TestConditionEvaluator_viaContext(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	ctx := types.ScaffoldContext{
+	ctx := &types.ScaffoldContext{
 		WorktreePath: tmpDir,
 		Branch:       "test-branch",
 		Preset:       "php",
@@ -576,7 +576,7 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 func TestConditionEvaluator_fileHasScript(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	ctx := types.ScaffoldContext{
+	ctx := &types.ScaffoldContext{
 		WorktreePath: tmpDir,
 		Branch:       "test",
 	}
