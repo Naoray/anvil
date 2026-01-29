@@ -23,6 +23,29 @@ jobs:
           - os: windows-latest
             platform: windows/amd64
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Run tests
+        run: go test ./... -v -race -cover
+
+      - name: Upload coverage
+        if: runner.os == 'Linux'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+  test-with-databases:
+    name: Test with Databases (Linux)
+    runs-on: ubuntu-latest
     services:
       mysql:
         image: mysql:8.0
@@ -49,18 +72,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: '1.24'
           cache: true
 
       - name: Run tests
         run: go test ./... -v -race -cover
-
-      - name: Upload coverage
-        if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
 
   lint:
     name: Lint
