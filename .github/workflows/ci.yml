@@ -44,25 +44,11 @@ jobs:
   test-with-databases:
     name: Test with Databases (Linux)
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: test
-          MYSQL_DEFAULT_AUTHENTICATION_PLUGIN: mysql_native_password
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping -h localhost -proot" --health-interval=10s --health-timeout=5s --health-retries=3
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: --health-cmd="pg_isready -U postgres" --health-interval=10s --health-timeout=5s --health-retries=3
+    env:
+      DB_PASSWORD: root
+      MYSQL_PASSWORD: root
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: postgres
 
     steps:
       - name: Checkout code
@@ -74,15 +60,33 @@ jobs:
           go-version: '1.24'
           cache: true
 
-      - name: Install MySQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mysql-client
+      - name: Start MySQL
+        run: sudo systemctl start mysql.service
 
-      - name: Install PostgreSQL client
+      - name: Start PostgreSQL
+        run: sudo systemctl start postgresql.service
+
+      - name: Wait for MySQL
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          for i in {1..30}; do
+            if mysql -h 127.0.0.1 -u root -proot -e "SELECT 1" &> /dev/null; then
+              echo "MySQL is ready"
+              break
+            fi
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -c "SELECT 1" &> /dev/null; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
 
       - name: Run tests
         run: go test ./... -v -race -cover
