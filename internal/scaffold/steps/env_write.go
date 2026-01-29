@@ -5,25 +5,45 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/template"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 )
 
+// fileLocks ensures only one goroutine modifies a given file at a time
+var (
+	fileLocks   = make(map[string]*sync.Mutex)
+	fileLocksMu sync.Mutex
+)
+
+// getFileLock returns a mutex for the given file path, creating one if needed
+func getFileLock(path string) *sync.Mutex {
+	fileLocksMu.Lock()
+	defer fileLocksMu.Unlock()
+
+	if _, exists := fileLocks[path]; !exists {
+		fileLocks[path] = &sync.Mutex{}
+	}
+	return fileLocks[path]
+}
+
 type EnvWriteStep struct {
-	name  string
-	key   string
-	value string
-	file  string
+	name     string
+	key      string
+	value    string
+	file     string
+	priority int
 }
 
 func NewEnvWriteStep(cfg config.StepConfig) *EnvWriteStep {
 	return &EnvWriteStep{
-		name:  "env.write",
-		key:   cfg.Key,
-		value: cfg.Value,
-		file:  cfg.File,
+		name:     "env.write",
+		key:      cfg.Key,
+		value:    cfg.Value,
+		file:     cfg.File,
+		priority: cfg.Priority,
 	}
 }
 
@@ -32,7 +52,7 @@ func (s *EnvWriteStep) Name() string {
 }
 
 func (s *EnvWriteStep) Priority() int {
-	return 0
+	return s.priority
 }
 
 func (s *EnvWriteStep) Condition(ctx *types.ScaffoldContext) bool {
@@ -51,6 +71,16 @@ func (s *EnvWriteStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 	}
 
 	filePath := filepath.Join(ctx.WorktreePath, file)
+
+	// Lock this specific file to prevent concurrent modifications
+	lock := getFileLock(filePath)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Ensure the parent directory exists
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return fmt.Errorf("creating parent directory: %w", err)
+	}
 
 	var oldPerms os.FileMode
 	if info, err := os.Stat(filePath); err == nil {
@@ -91,13 +121,34 @@ func (s *EnvWriteStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 		}
 	}
 
-	tmpFile := filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, content, oldPerms); err != nil {
+	// Use a unique temp file name to avoid race conditions when multiple
+	// env.write steps run in parallel with the same priority
+	tmpFile, err := os.CreateTemp(filepath.Dir(filePath), filepath.Base(filePath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpFileName := tmpFile.Name()
+	
+	// Write content and close the file
+	if _, err := tmpFile.Write(content); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFileName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
+	
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpFileName)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	
+	// Set permissions
+	if err := os.Chmod(tmpFileName, oldPerms); err != nil {
+		os.Remove(tmpFileName)
+		return fmt.Errorf("setting permissions: %w", err)
+	}
 
-	if err := os.Rename(tmpFile, filePath); err != nil {
-		os.Remove(tmpFile)
+	if err := os.Rename(tmpFileName, filePath); err != nil {
+		os.Remove(tmpFileName)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 

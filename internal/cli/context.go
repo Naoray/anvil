@@ -60,8 +60,34 @@ func OpenProjectFromCWD() (*ProjectContext, error) {
 }
 
 func (pc *ProjectContext) IsInWorktree() bool {
-	_, err := git.FindBarePath(pc.CWD)
-	return err == nil
+	// Check if .bare exists in parent hierarchy
+	barePath, err := git.FindBarePath(pc.CWD)
+	if err != nil {
+		return false
+	}
+
+	// Check if CWD is inside a worktree directory (not the project root)
+	projectPath := filepath.Dir(barePath)
+	
+	// If CWD equals project path, we're in the project root, not a worktree
+	cwdAbs, err := filepath.Abs(pc.CWD)
+	if err != nil {
+		return false
+	}
+	
+	projectAbs, err := filepath.Abs(projectPath)
+	if err != nil {
+		return false
+	}
+	
+	// If we're in the project root or its direct child .bare, we're not in a worktree
+	if cwdAbs == projectAbs || cwdAbs == filepath.Join(projectAbs, ".bare") {
+		return false
+	}
+	
+	// We're somewhere under the project root but not the root itself
+	// Check if we're actually in a worktree by seeing if CWD is within a worktree path
+	return true
 }
 
 func (pc *ProjectContext) MustBeInWorktree() error {

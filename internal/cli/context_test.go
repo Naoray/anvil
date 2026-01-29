@@ -140,22 +140,60 @@ func TestOpenProjectFromCWD_Success(t *testing.T) {
 }
 
 func TestProjectContext_IsInWorktree(t *testing.T) {
-	tmpDir := t.TempDir()
+	t.Run("returns false for non-worktree directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
 
-	pc := &ProjectContext{
-		CWD: tmpDir,
-	}
+		pc := &ProjectContext{
+			CWD: tmpDir,
+		}
 
-	if pc.IsInWorktree() {
-		t.Error("IsInWorktree() = true, want false for non-worktree directory")
-	}
+		if pc.IsInWorktree() {
+			t.Error("IsInWorktree() = true, want false for non-worktree directory")
+		}
+	})
 
-	worktreePath, _ := createTestWorktree(t)
+	t.Run("returns true for worktree directory", func(t *testing.T) {
+		worktreePath, _ := createTestWorktree(t)
 
-	pc.CWD = worktreePath
-	if !pc.IsInWorktree() {
-		t.Error("IsInWorktree() = false, want true for worktree directory")
-	}
+		pc := &ProjectContext{
+			CWD: worktreePath,
+		}
+
+		if !pc.IsInWorktree() {
+			t.Error("IsInWorktree() = false, want true for worktree directory")
+		}
+	})
+
+	t.Run("returns false for project root (where .bare is located)", func(t *testing.T) {
+		worktreePath, barePath := createTestWorktree(t)
+		projectRoot := filepath.Dir(barePath)
+
+		pc := &ProjectContext{
+			CWD: projectRoot,
+		}
+
+		if pc.IsInWorktree() {
+			t.Error("IsInWorktree() = true, want false for project root")
+		}
+
+		// Also verify that the worktree does work
+		pc.CWD = worktreePath
+		if !pc.IsInWorktree() {
+			t.Error("IsInWorktree() = false, want true for worktree (sanity check)")
+		}
+	})
+
+	t.Run("returns false for .bare directory itself", func(t *testing.T) {
+		_, barePath := createTestWorktree(t)
+
+		pc := &ProjectContext{
+			CWD: barePath,
+		}
+
+		if pc.IsInWorktree() {
+			t.Error("IsInWorktree() = true, want false for .bare directory")
+		}
+	})
 }
 
 func TestProjectContext_MustBeInWorktree(t *testing.T) {
