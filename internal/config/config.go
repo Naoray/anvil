@@ -23,6 +23,15 @@ const DefaultBranch = "main"
 
 var DefaultBranchCandidates = []string{"main", "master", "develop"}
 
+// Condition key constants for use in step configurations
+const (
+	ConditionFileExists      = "file_exists"
+	ConditionCommandExists   = "command_exists"
+	ConditionOS              = "os"
+	ConditionEnvFileContains = "env_file_contains"
+	ConditionNot             = "not"
+)
+
 // Config represents the project configuration
 type Config struct {
 	SiteName      string                `mapstructure:"site_name"`
@@ -55,10 +64,76 @@ type StepConfig struct {
 	Type      string                 `mapstructure:"type"`
 }
 
+// GetConditionString returns a string value from the condition map for the given key.
+// Returns empty string if the key doesn't exist or the value is not a string.
+func (s StepConfig) GetConditionString(key string) string {
+	if s.Condition == nil {
+		return ""
+	}
+	if v, ok := s.Condition[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// GetConditionMap returns a map value from the condition map for the given key.
+// Returns nil if the key doesn't exist or the value is not a map.
+func (s StepConfig) GetConditionMap(key string) map[string]interface{} {
+	if s.Condition == nil {
+		return nil
+	}
+	if v, ok := s.Condition[key].(map[string]interface{}); ok {
+		return v
+	}
+	return nil
+}
+
+// HasCondition checks if a condition key exists in the condition map.
+func (s StepConfig) HasCondition(key string) bool {
+	if s.Condition == nil {
+		return false
+	}
+	_, exists := s.Condition[key]
+	return exists
+}
+
 // CleanupStep represents a cleanup step configuration
 type CleanupStep struct {
 	Name      string                 `mapstructure:"name"`
 	Condition map[string]interface{} `mapstructure:"condition"`
+}
+
+// GetConditionString returns a string value from the condition map for the given key.
+// Returns empty string if the key doesn't exist or the value is not a string.
+func (s CleanupStep) GetConditionString(key string) string {
+	if s.Condition == nil {
+		return ""
+	}
+	if v, ok := s.Condition[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// GetConditionMap returns a map value from the condition map for the given key.
+// Returns nil if the key doesn't exist or the value is not a map.
+func (s CleanupStep) GetConditionMap(key string) map[string]interface{} {
+	if s.Condition == nil {
+		return nil
+	}
+	if v, ok := s.Condition[key].(map[string]interface{}); ok {
+		return v
+	}
+	return nil
+}
+
+// HasCondition checks if a condition key exists in the condition map.
+func (s CleanupStep) HasCondition(key string) bool {
+	if s.Condition == nil {
+		return false
+	}
+	_, exists := s.Condition[key]
+	return exists
 }
 
 // CleanupConfig represents cleanup configuration

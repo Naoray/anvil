@@ -11,7 +11,8 @@ import (
 )
 
 type ScaffoldManager struct {
-	presets map[string]Preset
+	presets     map[string]Preset
+	presetOrder []string
 }
 
 type Preset interface {
@@ -23,12 +24,14 @@ type Preset interface {
 
 func NewScaffoldManager() *ScaffoldManager {
 	return &ScaffoldManager{
-		presets: make(map[string]Preset),
+		presets:     make(map[string]Preset),
+		presetOrder: make([]string, 0),
 	}
 }
 
 func (m *ScaffoldManager) RegisterPreset(preset Preset) {
 	m.presets[preset.Name()] = preset
+	m.presetOrder = append(m.presetOrder, preset.Name())
 }
 
 func (m *ScaffoldManager) GetPreset(name string) (Preset, bool) {
@@ -37,8 +40,8 @@ func (m *ScaffoldManager) GetPreset(name string) (Preset, bool) {
 }
 
 func (m *ScaffoldManager) DetectPreset(path string) string {
-	for _, preset := range m.presets {
-		if preset.Detect(path) {
+	for _, name := range m.presetOrder {
+		if preset, ok := m.presets[name]; ok && preset.Detect(path) {
 			return preset.Name()
 		}
 	}
@@ -90,20 +93,7 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 
 	if preset, ok := m.GetPreset(presetName); ok {
 		for _, cleanupConfig := range preset.CleanupSteps() {
-			stepConfig := config.StepConfig{
-				Name: cleanupConfig.Name,
-				Args: nil,
-			}
-			if cleanupConfig.Name == "herd" {
-				stepConfig.Args = []string{"unlink"}
-			}
-			for k, v := range cleanupConfig.Condition {
-				if k == "command" {
-					if cmd, ok := v.(string); ok {
-						stepConfig.Command = cmd
-					}
-				}
-			}
+			stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
 			step, err := steps.Create(cleanupConfig.Name, stepConfig)
 			if err != nil {
 				return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
@@ -113,20 +103,7 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 	}
 
 	for _, cleanupConfig := range cfg.Cleanup.Steps {
-		stepConfig := config.StepConfig{
-			Name: cleanupConfig.Name,
-			Args: nil,
-		}
-		if cleanupConfig.Name == "herd" {
-			stepConfig.Args = []string{"unlink"}
-		}
-		for k, v := range cleanupConfig.Condition {
-			if k == "command" {
-				if cmd, ok := v.(string); ok {
-					stepConfig.Command = cmd
-				}
-			}
-		}
+		stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
 		step, err := steps.Create(cleanupConfig.Name, stepConfig)
 		if err != nil {
 			return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
@@ -135,6 +112,24 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 	}
 
 	return stepsList, nil
+}
+
+func (m *ScaffoldManager) cleanupConfigToStepConfig(cleanupConfig config.CleanupStep) config.StepConfig {
+	stepConfig := config.StepConfig{
+		Name: cleanupConfig.Name,
+		Args: nil,
+	}
+	if cleanupConfig.Name == "herd" {
+		stepConfig.Args = []string{"unlink"}
+	}
+	for k, v := range cleanupConfig.Condition {
+		if k == "command" {
+			if cmd, ok := v.(string); ok {
+				stepConfig.Command = cmd
+			}
+		}
+	}
+	return stepConfig
 }
 
 func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]types.ScaffoldStep, error) {
@@ -152,19 +147,7 @@ func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]ty
 }
 
 func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
-	path := filepath.Base(worktreePath)
-	repoPath := filepath.Base(filepath.Dir(worktreePath))
-	ctx := types.ScaffoldContext{
-		WorktreePath: worktreePath,
-		Branch:       branch,
-		RepoName:     repoName,
-		SiteName:     siteName,
-		Preset:       preset,
-		Env:          make(map[string]string),
-		Path:         path,
-		RepoPath:     repoPath,
-		Vars:         make(map[string]string),
-	}
+	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
 
 	worktreeConfig, err := config.ReadWorktreeConfig(worktreePath)
 	if err != nil {
@@ -188,11 +171,7 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 		return fmt.Errorf("getting scaffold steps: %w", err)
 	}
 
-	opts := types.StepOptions{
-		DryRun:  dryRun,
-		Verbose: verbose,
-		Quiet:   quiet,
-	}
+	opts := m.stepOptionsFromFlags(dryRun, verbose, quiet)
 
 	executor := NewStepExecutor(stepsList, &ctx, opts)
 	if err := executor.Execute(); err != nil {
@@ -203,9 +182,27 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 }
 
 func (m *ScaffoldManager) RunCleanup(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
+	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
+
+	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch)
+	if err != nil {
+		return fmt.Errorf("getting cleanup steps: %w", err)
+	}
+
+	opts := m.stepOptionsFromFlags(dryRun, verbose, quiet)
+
+	executor := NewStepExecutor(stepsList, &ctx, opts)
+	if err := executor.Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *ScaffoldManager) newScaffoldContext(worktreePath, branch, repoName, siteName, preset string) types.ScaffoldContext {
 	path := filepath.Base(worktreePath)
 	repoPath := filepath.Base(filepath.Dir(worktreePath))
-	ctx := types.ScaffoldContext{
+	return types.ScaffoldContext{
 		WorktreePath: worktreePath,
 		Branch:       branch,
 		RepoName:     repoName,
@@ -216,22 +213,12 @@ func (m *ScaffoldManager) RunCleanup(worktreePath, branch, repoName, siteName, p
 		RepoPath:     repoPath,
 		Vars:         make(map[string]string),
 	}
+}
 
-	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch)
-	if err != nil {
-		return fmt.Errorf("getting cleanup steps: %w", err)
-	}
-
-	opts := types.StepOptions{
+func (m *ScaffoldManager) stepOptionsFromFlags(dryRun, verbose, quiet bool) types.StepOptions {
+	return types.StepOptions{
 		DryRun:  dryRun,
 		Verbose: verbose,
 		Quiet:   quiet,
 	}
-
-	executor := NewStepExecutor(stepsList, &ctx, opts)
-	if err := executor.Execute(); err != nil {
-		return err
-	}
-
-	return nil
 }
