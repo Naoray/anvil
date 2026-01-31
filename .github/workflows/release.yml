@@ -9,24 +9,42 @@ permissions:
   contents: write
   packages: write
 
+env:
+  GO_VERSION: '1.24'
+
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.24']
         include:
           - os: ubuntu-latest
-            artifact_suffix: linux_amd64
+            target: linux_amd64
+            goos: linux
+            goarch: amd64
+            zip_extension: tar.gz
+          - os: ubuntu-latest
+            target: linux_arm64
+            goos: linux
+            goarch: arm64
             zip_extension: tar.gz
           - os: macos-latest
-            artifact_suffix: darwin_amd64
+            target: darwin_amd64
+            goos: darwin
+            goarch: amd64
+            zip_extension: tar.gz
+          - os: macos-latest
+            target: darwin_arm64
+            goos: darwin
+            goarch: arm64
             zip_extension: tar.gz
           - os: windows-latest
-            artifact_suffix: windows_amd64
+            target: windows_amd64
+            goos: windows
+            goarch: amd64
+            binary_ext: .exe
             zip_extension: zip
 
     steps:
@@ -36,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Get version
@@ -47,26 +65,35 @@ jobs:
       - name: Build binary
         env:
           CGO_ENABLED: 0
-          GOOS: ${{ matrix.os == 'windows-latest' && 'windows' || (matrix.os == 'macos-latest' && 'darwin' || 'linux') }}
-          GOARCH: amd64
-        run: go build -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }} ./cmd/arbor
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -trimpath -ldflags "-X main.version=${{ steps.version.outputs.VERSION }}" \
+            -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }} ./cmd/arbor
 
-      - name: Create archive
+      - name: Create archive (tar.gz)
         if: matrix.zip_extension == 'tar.gz'
-        run: tar -czf arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }}.${{ matrix.zip_extension }} arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }}
+        run: tar -czf arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }}
 
-      - name: Create zip
+      - name: Create archive (zip)
         if: matrix.zip_extension == 'zip'
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          7z a "arbor-$version-${{ matrix.artifact_suffix }}.zip" "arbor-$version-${{ matrix.artifact_suffix }}"
+          $target = "${{ matrix.target }}"
+          7z a "arbor-$version-$target.zip" "arbor-$version-$target.exe"
+
+      - name: Generate checksum
+        shell: bash
+        run: sha256sum arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} > arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arbor-${{ matrix.artifact_suffix }}
-          path: arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.artifact_suffix }}.${{ matrix.zip_extension }}
+          name: arbor-${{ matrix.target }}
+          path: |
+            arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }}
+            arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
 
   create-release:
     name: Create Release
@@ -119,6 +146,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate checksums file
+        run: |
+          cd release-artifacts
+          cat *.sha256 > checksums.txt
+          cat checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -126,6 +160,6 @@ jobs:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: v${{ steps.version.outputs.VERSION }}
           body: ${{ steps.release_body.outputs.BODY }}
-          files: release-artifacts/**
+          files: release-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
