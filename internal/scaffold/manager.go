@@ -103,7 +103,7 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 		}
 	}
 
-	for _, cleanupConfig := range cfg.Cleanup {
+	for _, cleanupConfig := range cfg.Cleanup.Steps {
 		stepConfig := config.StepConfig{
 			Name: cleanupConfig.Name,
 			Args: nil,

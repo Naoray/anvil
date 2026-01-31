@@ -33,8 +33,11 @@ go build -o arbor ./cmd/arbor
 # Windows
 go build -o arbor.exe ./cmd/arbor
 
-# Or install via Homebrew (coming soon)
-brew install arbor
+# Or install using go install
+go install github.com/michaeldyrynda/arbor/cmd/arbor@latest
+
+# Or download pre-built binary from GitHub Releases
+# https://github.com/michaeldyrynda/arbor/releases
 ```
 
 ## Quick Start
@@ -130,7 +133,6 @@ scaffold:
   steps:
     - name: step.name
       enabled: true
-      priority: 10
       args: ["--option"]
       condition:
         env_file_contains:
@@ -234,7 +236,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.npm
   args: ["install"]
-  priority: 10
 ```
 
 **`node.yarn`** - Yarn package manager
@@ -242,7 +243,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.yarn
   args: ["install"]
-  priority: 10
 ```
 
 **`node.pnpm`** - pnpm package manager
@@ -250,7 +250,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.pnpm
   args: ["install"]
-  priority: 10
 ```
 
 **`node.bun`** - Bun package manager
@@ -258,7 +257,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.bun
   args: ["install"]
-  priority: 10
 ```
 
 #### PHP Steps
@@ -268,7 +266,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: php.composer
   args: ["install"]
-  priority: 10
 ```
 
 **`php.laravel.artisan`** - Laravel Artisan commands
@@ -276,7 +273,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: php.laravel.artisan
   args: ["migrate:fresh", "--no-interaction"]
-  priority: 20
 ```
 
 Capture command output:
@@ -353,10 +349,11 @@ All steps support these configuration options:
 | Option | Type | Description |
 |--------|------|-------------|
 | `enabled` | boolean | Enable/disable step (default: true) |
-| `priority` | integer | Execution order (lower runs first, default: 0) |
 | `condition` | object | Conditional execution rules |
 | `args` | array | Arguments passed to the step (e.g., `["--prefix", "app"]`) |
 | `store_as` | string | Store command output as template variable (trimmed, on success only) |
+
+Steps execute in the order they appear in the configuration file.
 
 ### Conditions
 
@@ -378,7 +375,6 @@ scaffold:
   steps:
     # Create database if DB_CONNECTION is set
     - name: db.create
-      priority: 5
       condition:
         env_file_contains:
           file: .env
@@ -386,33 +382,27 @@ scaffold:
 
     # Write database name to .env
     - name: env.write
-      priority: 6
       key: DB_DATABASE
       value: "{{ .SiteName }}_{{ .DbSuffix }}"
 
     # Install dependencies
     - name: php.composer
-      priority: 10
       args: ["install"]
 
     - name: node.npm
-      priority: 11
       args: ["install"]
 
     # Run migrations
     - name: php.laravel.artisan
-      priority: 20
       args: ["migrate:fresh", "--no-interaction"]
 
     # Set domain based on worktree path
     - name: env.write
-      priority: 21
       key: APP_DOMAIN
       value: "app.{{ .Path }}.test"
 
     # Generate application key
     - name: php.laravel.artisan
-      priority: 22
       args: ["key:generate"]
 
 cleanup:
@@ -431,30 +421,24 @@ scaffold:
     # Create three databases with different prefixes but shared suffix
     - name: db.create
       args: ["--prefix", "app"]
-      priority: 5
 
     - name: db.create
       args: ["--prefix", "quotes"]
-      priority: 6
 
     - name: db.create
       args: ["--prefix", "knowledge"]
-      priority: 7
 
     # Write the main database name to .env
     - name: env.write
-      priority: 10
       key: DB_DATABASE
       value: "app_{{ .DbSuffix }}"
 
     # Write other database names to .env (optional)
     - name: env.write
-      priority: 11
       key: DB_QUOTES_DATABASE
       value: "quotes_{{ .DbSuffix }}"
 
     - name: env.write
-      priority: 12
       key: DB_KNOWLEDGE_DATABASE
       value: "knowledge_{{ .DbSuffix }}"
 ```

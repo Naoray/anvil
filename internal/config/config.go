@@ -29,7 +29,7 @@ type Config struct {
 	Preset        string                `mapstructure:"preset"`
 	DefaultBranch string                `mapstructure:"default_branch"`
 	Scaffold      ScaffoldConfig        `mapstructure:"scaffold"`
-	Cleanup       []CleanupStep         `mapstructure:"cleanup"`
+	Cleanup       CleanupConfig         `mapstructure:"cleanup"`
 	Tools         map[string]ToolConfig `mapstructure:"tools"`
 }
 
@@ -59,6 +59,11 @@ type StepConfig struct {
 type CleanupStep struct {
 	Name      string                 `mapstructure:"name"`
 	Condition map[string]interface{} `mapstructure:"condition"`
+}
+
+// CleanupConfig represents cleanup configuration
+type CleanupConfig struct {
+	Steps []CleanupStep `mapstructure:"steps"`
 }
 
 // ToolConfig represents tool-specific configuration
