@@ -83,11 +83,34 @@ Steps use dot notation: `language.tool.command`
 # All tests
 go test ./... -v
 
+# With race detector
+go test ./... -race
+
 # With coverage
 go test ./... -cover
 
 # Specific package
 go test ./internal/utils/... -v
+```
+
+### Linting
+
+Install golangci-lint (pinned to v1.62.0):
+
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
+```
+
+Ensure `~/go/bin` is in your PATH:
+
+```bash
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+Run linter:
+
+```bash
+golangci-lint run ./...
 ```
 
 ### Test Requirements
@@ -182,6 +205,8 @@ When working on the idiomatic refactor (`.ai/plans/idiomatic-refactor.md`):
    ```bash
    go test ./... -v
    go test ./... -race
+   go vet ./...
+   go mod tidy && git diff --exit-code go.mod go.sum
    golangci-lint run ./...
    ```
 
@@ -203,6 +228,41 @@ When refactoring, enforce these standards:
 4. **Single source of truth** - No duplicated logic or constants
 5. **Dependency injection** - Prefer passing dependencies over global state
 6. **Testability** - Write code that can be unit tested
+
+#### Error Handling Conventions
+
+**Return errors for:**
+- User input validation failures (unknown step names, invalid config)
+- I/O operations (file read/write, network calls, database operations)
+- Business logic failures that callers should handle
+
+**Panic for:**
+- Programmer errors that indicate code bugs (duplicate step registration, nil pointer dereference)
+- Invalid assumptions that should never happen in production
+- Initialization failures that prevent the program from functioning
+
+**Guideline:** If the error could be triggered by user input or external conditions, return it. If it indicates a programming mistake or unrecoverable state, panic.
+
+#### Deterministic Iteration
+
+Go map iteration order is random. For deterministic behavior:
+
+- Maintain an ordered slice alongside maps when iteration order matters
+- Use the slice for iteration, the map for O(1) lookups
+- Example: `presetOrder []string` in ScaffoldManager ensures consistent preset detection
+
+```go
+// Good: Deterministic iteration
+type Manager struct {
+    presets     map[string]Preset
+    presetOrder []string  // Maintains registration order
+}
+
+// Bad: Random iteration order
+for _, preset := range m.presets {  // Order varies between runs
+    // ...
+}
+```
 
 ## Release Management
 
