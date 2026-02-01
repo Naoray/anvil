@@ -2,19 +2,16 @@
 
 This file provides important context for developing the Arbor project.
 
-## Source of Truth
+## Documentation
 
-The complete specification and development workflow is located at:
-```
-.ai/plans/arbor.md
-```
+The project documentation is split between user-facing and development documentation:
 
-**Always read `.ai/plans/arbor.md` before starting work.** It contains:
-- Command specifications
-- Configuration file formats
-- Scaffold step definitions
-- Preset configurations
-- Detailed development workflow
+**User Documentation** (kept up-to-date via release process):
+- [README.md](./README.md) - Complete command reference, configuration guide, and scaffold step documentation
+
+**Development Documentation:**
+- This file (AGENTS.md) - Development workflow, architecture, and contribution guidelines
+- `.ai/plans/arbor.md` - Historical development plan (phases 1-5, complete). Note: This file is gitignored and contains the original implementation plan.
 
 ## Development Location
 
@@ -53,15 +50,30 @@ arbor remove feature-my-feature  # When done
 |--------|----------|---------|
 | Project | `arbor.yaml` in worktree root | Project-specific settings |
 | Global | `~/.config/arbor/arbor.yaml` | User defaults |
-| Plan | `.ai/plans/arbor.md` | Complete specification |
 
 ### Step Naming
 
-Steps use dot notation: `language.tool.command`
-- `php.composer.install`
-- `node.npm.run`
-- `herd.link`
-- `bash.run`
+Steps use simplified dot notation where the tool namespace maps to the binary:
+
+**Binary Steps:** Execute the corresponding tool with configured arguments
+- `php` - Run PHP with args
+- `php.composer` - Run composer (e.g., `install`, `update`)
+- `php.laravel` - Run artisan commands
+- `node.npm` - Run npm (e.g., `ci`, `run build`)
+- `node.yarn` - Run yarn
+- `node.pnpm` - Run pnpm
+- `node.bun` - Run bun
+- `herd` - Run herd (e.g., `link --secure`, `unlink`)
+
+**Special Steps:** Perform scaffold operations
+- `file.copy` - Copy files
+- `env.read` - Read .env values
+- `env.write` - Write .env values
+- `env.copy` - Copy between env files
+- `db.create` - Create database
+- `db.destroy` - Drop database
+- `bash.run` - Run bash commands
+- `command.run` - Run arbitrary commands
 
 ### Exit Codes
 
@@ -159,23 +171,22 @@ This approach ensures:
 3. Add command to root in `internal/cli/root.go` init function
 4. Add tests in `internal/cli/commandname_test.go`
 5. Update documentation:
-   - Update `.ai/plans/arbor.md` command table
-   - Add full command documentation in `.ai/plans/arbor.md`
-   - Update `README.md` quick start section if needed
+   - Update `README.md` with command reference and examples
+   - Update AGENTS.md quick reference section if needed
 
 ### Add a New Scaffold Step
 
 1. Create step implementation in `internal/scaffold/steps/`
 2. Register in step executor
 3. Add tests
-4. Document in `.ai/plans/arbor.md`
+4. Document in `README.md` scaffold steps section
 
 ### Add a New Preset
 
 1. Create `internal/presets/presetname.go`
 2. Implement Preset interface
 3. Register in preset manager
-4. Document in `.ai/plans/arbor.md`
+4. Document in `README.md`
 
 ## Current Phase
 
@@ -187,7 +198,7 @@ All phases 1-5 are complete. The project has:
 - Interactive commands (work, prune)
 - Distribution via GitHub Actions
 
-See `.ai/plans/arbor.md` for the detailed phase history and learnings.
+See `.ai/plans/arbor.md` for the detailed phase history and learnings (gitignored file).
 
 ## Refactoring Work
 

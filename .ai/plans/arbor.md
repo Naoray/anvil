@@ -21,7 +21,15 @@ Arbor is a self-contained binary for managing git worktrees to assist with agent
 | `arbor.yaml` | `$XDG_CONFIG_HOME/arbor/` or `~/.config/arbor/` | Global settings |
 
 ### Step Identifier Format
-Steps use dot notation: `php.composer.install`, `node.npm.run`, `bash.run`
+
+Steps use simplified dot notation where the tool namespace maps directly to the binary:
+
+**Binary Steps:** `php`, `php.composer`, `php.laravel`, `node.npm`, `node.yarn`, `node.pnpm`, `node.bun`, `herd`
+- These execute the corresponding binary with configured arguments
+- The step name is the binary identifier, not the full command
+
+**Special Steps:** `file.copy`, `bash.run`, `command.run`, `env.read`, `env.write`, `env.copy`, `db.create`, `db.destroy`
+- These perform specific scaffold operations beyond simple command execution
 
 ---
 
@@ -166,27 +174,38 @@ Lists all worktrees with their status.
 - `--reverse` - Reverse sort order
 
 **Status Indicators:**
-- `[current]` - The currently checked-out worktree
-- `[main]` - The main/default branch worktree
-- `[merged]` - Branch has commits that were merged into default branch
-- `[not merged]` - Branch has unique commits not in default branch
+- `● current` - The currently checked-out worktree (bold, highlighted)
+- `★ main` - The main/default branch worktree
+- `✓ merged` - Branch has commits that were merged into default branch
+- `○ active` - Branch has unique commits not in default branch
 
 **Examples:**
 ```bash
-arbor list                      # List all worktrees in table format
+arbor list                      # List all worktrees in styled table format
 arbor list --json               # Output as JSON for picklist integration
 arbor list --sort-by branch     # Sort by branch name
 arbor list --reverse            # Reverse sort order
 ```
 
 **Output Format (default):**
+Styled table output with colors and symbols (via Charm Lipgloss):
+
 ```
-WORKTREE        BRANCH                  STATUS
------------------------------------------------------------------
-main            main                    [current] [main]
-feature-auth    feature/auth            [not merged]
-bugfix-123      bugfix/issue-123        [merged]
+🌳 Arbor Worktrees
+
+WORKTREE    BRANCH           STATUS
+feature-x   feature/x        ● current  ★ main
+feature-y   feature/y        ○ active
+bugfix-123  bugfix/issue-123 ✓ merged
+
+3 worktrees • 1 merged
 ```
+
+**Output Features:**
+- Color-coded status badges (green for current, muted for merged)
+- Bold highlighting for current worktree row
+- Unicode symbols (●, ★, ✓, ○)
+- Summary line with worktree count and merged count
 
 ---
 
@@ -202,8 +221,8 @@ Removes a worktree and runs preset-defined cleanup steps.
 1. Verifies the worktree exists
 2. Interactive confirmation (skipped with `--force`)
 3. Runs preset-defined cleanup steps:
-   - `herd.unlink` - Remove Herd site link
-   - Database cleanup prompts (MySQL, PostgreSQL, Redis)
+   - `herd` - Remove Herd site link (runs `herd unlink`)
+   - `db.destroy` - Remove worktree-specific databases
    - Custom cleanup steps defined in preset
 4. Removes worktree via `git worktree remove`
 5. Cleans up empty directory
@@ -217,9 +236,8 @@ arbor remove feature/user-auth --force
 **Preset Cleanup Steps:**
 ```yaml
 cleanup:
-  - name: herd.unlink
-    condition:
-      command_exists: herd
+  - name: herd
+  - name: db.destroy
   - name: bash.run
     command: |
       echo "Consider cleaning database: {{ .DB_DATABASE }}"
@@ -299,9 +317,10 @@ default_branch: main
 scaffold:
   # Add steps to the preset defaults
   steps:
-    - name: php.composer.install
+    - name: php.composer
+      args: ["install"]
       enabled: false  # Disable specific step
-    - name: php.laravel.artisan
+    - name: php.laravel
       args: ["migrate", "--seed"]
     - name: bash.run
       command: "custom-post-setup-command"
@@ -313,7 +332,7 @@ scaffold:
 
 # Cleanup steps to run when removing worktrees
 cleanup:
-  - name: herd.unlink
+  - name: herd
   - name: bash.run
     command: "echo 'Consider cleaning {{ .DB_DATABASE }}'"
     condition:
@@ -341,6 +360,40 @@ Configuration is inherited from the project root. Worktrees can add or override 
 | `scaffold.override` | bool | Replace preset defaults entirely |
 | `cleanup` | list | Cleanup steps on worktree removal |
 | `tools.*.version_file` | string | File containing tool version |
+
+---
+
+### Worktree-Local Configuration (`arbor.yaml` in worktree)
+
+Each worktree can have its own `arbor.yaml` file for worktree-specific settings. These settings are scoped to the individual worktree and do not affect other worktrees.
+
+**Location:** Inside the worktree directory (sibling to project files like `.env`, `composer.json`).
+
+**Purpose:** Store worktree-local data that persists across scaffold runs, such as:
+- Database suffix for this worktree's databases
+- Worktree-specific environment overrides
+- Custom variables for template substitution
+
+**Structure:**
+```yaml
+# Worktree-local settings (stored in worktree/arbor.yaml)
+db_suffix: "happy_sunset"  # Auto-generated for database naming
+```
+
+**Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `db_suffix` | string | Suffix for database naming (auto-generated) |
+
+**Usage in Templates:**
+Worktree config values are available in template substitutions:
+```yaml
+scaffold:
+  steps:
+    - name: env.write
+      key: DB_DATABASE
+      value: "{{ .SiteName }}_{{ .DbSuffix }}"  # Uses worktree's db_suffix
+```
 
 ---
 
@@ -404,50 +457,52 @@ preset: laravel
 
 scaffold:
   steps:
-    - name: php.composer.install
-      priority: 10
-    - name: node.npm.install
-      priority: 10
-    - name: php.laravel.artisan
-      args: ["key:generate"]
-      priority: 20
-    - name: php.laravel.artisan
-      args: ["migrate:fresh", "--seed"]
-      priority: 30
+    - name: php.composer
+      args: ["install"]
       condition:
-        file_contains:
-          file: ".env"
-          pattern: "DB_CONNECTION"
+        file_exists: "composer.lock"
+    - name: php.composer
+      args: ["update"]
+      condition:
+        not:
+          file_exists: "composer.lock"
     - name: file.copy
       from: ".env.example"
       to: ".env"
+    - name: php.laravel
+      args: ["key:generate", "--no-interaction"]
       condition:
-        - file_exists: ".env.example"
-        - not: file_exists: ".env"
-    - name: node.npm.run
-      args: ["build"]
-      priority: 40
+        env_file_missing: "APP_KEY"
+    - name: db.create
       condition:
-        file_has_script: "build"
-    - name: php.laravel.artisan
-      args: ["storage:link"]
-      priority: 50
+        env_file_contains:
+          file: ".env"
+          key: "DB_CONNECTION"
+    - name: env.write
+      key: "DB_DATABASE"
+      value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}"
+      condition:
+        env_file_contains:
+          file: ".env"
+          key: "DB_CONNECTION"
+    - name: node.npm
+      args: ["ci"]
+      condition:
+        file_exists: "package-lock.json"
+    - name: php.laravel
+      args: ["migrate:fresh", "--seed", "--no-interaction"]
+    - name: node.npm
+      args: ["run", "build"]
+      condition:
+        file_exists: "package-lock.json"
+    - name: php.laravel
+      args: ["storage:link", "--no-interaction"]
     - name: herd
-      args: ["link", "--secure"]
-      priority: 60
-      condition:
-        command_exists: herd
+      args: ["link", "--secure", "{{ .SiteName }}"]
 
 cleanup:
   - name: herd
-    args: ["unlink"]
-    condition:
-      command_exists: herd
-  - name: bash.run
-    command: |
-      echo "Consider cleaning up database: {{ .DB_DATABASE }}"
-    condition:
-      env_exists: DB_CONNECTION
+  - name: db.destroy
 ```
 
 **Generic PHP Preset:**
@@ -456,8 +511,8 @@ preset: php
 
 scaffold:
   steps:
-    - name: php.composer.install
-      priority: 10
+    - name: php.composer
+      args: ["install"]
 
 cleanup: []
 ```
@@ -471,7 +526,7 @@ Steps are namespaced by language and tool using dot notation: `language.tool.com
 ### Step Configuration
 
 ```yaml
-- name: php.laravel.artisan
+- name: php.laravel
   args: ["migrate", "--fresh", "--seed"]
   condition:
     file_exists: "artisan"
@@ -485,7 +540,7 @@ Steps are namespaced by language and tool using dot notation: `language.tool.com
 **Step Fields:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Step identifier (e.g., `php.composer.install`) |
+| `name` | string | Step identifier (e.g., `php.composer`, `file.copy`) |
 | `args` | list | Arguments to pass to command |
 | `condition` | map | Execution conditions |
 | `priority` | int | Execution order (lower = earlier) |
@@ -509,41 +564,37 @@ type ScaffoldStep interface {
 Steps with the same priority execute in parallel when independent:
 
 **Parallel-safe pairs:**
-- `php.composer.install` + `node.npm.install`
+- `php.composer` + `node.npm` (dependency installation)
 - Independent file operations
 
 **Sequential requirements:**
-- `node.npm.run` requires `node.npm.install`
-- `php.laravel.artisan` requires `php.composer.install`
-- `herd.link` requires PHP environment
+- `node.npm` with `run` args requires earlier `node.npm` with `install`
+- `php.laravel` requires `php.composer` to have run first
+- `herd` requires PHP environment setup
 
 ### Built-in Steps
 
-#### PHP Steps
-| Step | Description |
-|------|-------------|
-| `php.composer.install` | Runs `composer install` |
-| `php.composer.update` | Runs `composer update` |
-| `php.laravel.artisan` | Runs `php artisan` with args |
-| `php.laravel.artisan.storage:link` | Creates storage symlink |
-| `herd` | Runs `herd` with args (e.g., `link --secure`, `unlink`) |
+#### Binary Steps
+Binary steps execute the corresponding tool with configured arguments. The step name is the tool identifier.
 
-#### Node.js Steps
-| Step | Description |
-|------|-------------|
-| `node.npm.install` | Runs `npm ci` or `npm install` |
-| `node.npm.run` | Runs `npm run` with script name |
-| `node.yarn.install` | Runs `yarn install` |
-| `node.pnpm.install` | Runs `pnpm install` |
-| `node.bun` | Runs `bun` with args |
+| Step | Binary | Description |
+|------|--------|-------------|
+| `php` | `php` | Runs PHP with args |
+| `php.composer` | `composer` | Runs composer with args (e.g., `install`, `update`) |
+| `php.laravel` | `php artisan` | Runs artisan commands |
+| `node.npm` | `npm` | Runs npm with args (e.g., `ci`, `run build`) |
+| `node.yarn` | `yarn` | Runs yarn with args |
+| `node.pnpm` | `pnpm` | Runs pnpm with args |
+| `node.bun` | `bun` | Runs bun with args |
+| `herd` | `herd` | Runs herd with args (e.g., `link --secure`, `unlink`) |
 
 #### File Operations
 | Step | Description |
 |------|-------------|
-| `file.copy` | Copies files |
-| `file.template` | Templates files with variables |
+| `file.copy` | Copies files from `from` to `to` |
 | `env.read` | Read key from .env file and store as context variable |
 | `env.write` | Write or update key=value in .env file |
+| `env.copy` | Copy environment variables between files |
 
 #### Database Steps
 | Step | Description |
@@ -616,25 +667,27 @@ type Preset interface {
 - `composer.json` contains `laravel/framework`
 
 **Default Steps:**
-1. `php.composer.install`
-2. `node.npm.install`
-3. `php.laravel.artisan key:generate`
-4. `file.copy .env.example → .env`
-5. `php.laravel.artisan migrate:fresh --seed`
-6. `node.npm.run build` (if build script exists)
-7. `php.laravel.artisan storage:link`
-8. `herd.link` (if herd available)
+1. `php.composer install` (if composer.lock exists) or `php.composer update`
+2. `file.copy .env.example → .env`
+3. `php.laravel key:generate` (if APP_KEY missing)
+4. `db.create` (if DB_CONNECTION in .env)
+5. `env.write DB_DATABASE` with generated name
+6. `node.npm ci` (if package-lock.json exists)
+7. `php.laravel migrate:fresh --seed`
+8. `node.npm run build` (if package-lock.json exists)
+9. `php.laravel storage:link`
+10. `herd link --secure {{ .SiteName }}`
 
 **Cleanup Steps:**
-1. `herd.unlink` (if herd available)
-2. Database cleanup prompts
+1. `herd` (runs unlink automatically)
+2. `db.destroy` (removes worktree-specific databases)
 
 #### Generic PHP Preset
 **Detection (for suggestions):**
 - `composer.json` exists
 
 **Default Steps:**
-1. `php.composer.install`
+1. `php.composer` with args `["install"]`
 
 **Cleanup Steps:**
 1. None by default
@@ -648,8 +701,8 @@ preset: laravel
 scaffold:
   steps:
     # Disable specific step from preset
-    - name: node.npm.run
-      args: ["build"]
+    - name: node.npm
+      args: ["run", "build"]
       enabled: false
 
     # Add custom step
@@ -676,7 +729,7 @@ scaffold:
       value: "{{ .SiteName }}_{{ .DbSuffix }}"
 
     # Run migrations
-    - name: php.laravel.artisan
+    - name: php.laravel
       args: ["migrate:fresh", "--no-interaction"]
 
     # Set domain based on worktree path
@@ -685,7 +738,7 @@ scaffold:
       value: "app.{{ .Path }}.test"
 
     # Generate Passport keys
-    - name: php.laravel.artisan
+    - name: php.laravel
       args: ["passport:keys", "--no-interaction"]
 
 cleanup:
@@ -727,7 +780,7 @@ scaffold:
       value: "{{ .SiteName }}_{{ .DbSuffix }}"
 
     # Use both old and new in migration
-    - name: php.laravel.artisan
+    - name: php.laravel
       args: ["db:seed", "--class=TestSeeder", "--database={{ .OriginalDb }}"]
 
 cleanup:
@@ -838,6 +891,80 @@ arbor init arbor                   # Assumes current user/org
 **Detection logic:**
 - Contains `/` but not `@` or `:` → GH short format
 - Otherwise → direct git URL
+
+---
+
+## UI and Output Format
+
+Arbor uses the Charmbracelet library suite for rich terminal output with colors, styling, and interactive elements.
+
+### Output Libraries
+
+- **Lipgloss**: Styled text, colors, borders, and table formatting
+- **Log**: Structured logging with emoji prefixes and color-coded levels
+- **Huh/Spinner**: Interactive loading spinners for long-running operations
+
+### Visual Indicators
+
+**Status Symbols:**
+| Symbol | Meaning | Usage |
+|--------|---------|-------|
+| ✓ | Success | Completed operations, successful steps |
+| ✗ | Error | Failed operations, errors |
+| ⚠ | Warning | Warnings, non-fatal issues |
+| ℹ | Info | Informational messages |
+| → | Step | Current/ongoing step indicator |
+| ● | Current | Current worktree indicator |
+| ★ | Main | Main branch indicator |
+| ○ | Active | Active (not merged) worktree |
+
+**Color Scheme:**
+| Color | Usage |
+|-------|-------|
+| Green (#4CAF50) | Primary accent, headers |
+| Light Green (#66BB6A) | Success states |
+| Orange (#FFA726) | Warnings |
+| Red (#EF5350) | Errors |
+| Blue (#29B6F6) | Info, code |
+| Gray (#9E9E9E) | Muted text, summaries |
+
+### Output Functions
+
+```go
+// Success messages with checkmark
+ui.PrintSuccess("Worktree created")
+
+// Error messages with X
+ui.PrintError("Failed to create worktree")
+
+// Warning messages with triangle
+ui.PrintWarning("Directory already exists")
+
+// Info messages with info icon
+ui.PrintInfo("Using preset: laravel")
+
+// Step indicator
+ui.PrintStep("Running composer install...")
+
+// Styled success with path
+ui.PrintSuccessPath("Created", "/path/to/worktree")
+
+// Error with hint
+ui.PrintErrorWithHint("Command failed", "Check your internet connection")
+
+// Spinner for long operations
+ui.RunWithSpinner("Installing dependencies...", func() error {
+    return runInstall()
+})
+```
+
+### Table Output
+
+Worktree listings use styled tables with:
+- Bordered table layout with rounded corners
+- Color-coded headers
+- Bold highlighting for current worktree row
+- Status badges with appropriate colors
 
 ---
 
@@ -1043,14 +1170,22 @@ type ToolDetector interface {
 - [x] Parallel execution engine
 - [x] Condition evaluation
 - [x] Built-in steps:
-  - [x] php.composer.install
-  - [x] php.composer.update
-  - [x] node.npm.install
-  - [x] node.npm.run
-  - [x] php.laravel.artisan
-  - [x] herd (with args like "link --secure" or "unlink")
+  - [x] php (binary step)
+  - [x] php.composer (binary step)
+  - [x] php.laravel (binary step)
+  - [x] node.npm (binary step)
+  - [x] node.yarn (binary step)
+  - [x] node.pnpm (binary step)
+  - [x] node.bun (binary step)
+  - [x] herd (binary step)
   - [x] file.copy
   - [x] bash.run
+  - [x] command.run
+  - [x] env.read
+  - [x] env.write
+  - [x] env.copy
+  - [x] db.create
+  - [x] db.destroy
 
 **Learnings (Phase 2):**
 - The Step interface with Name(), Run(), Priority(), and Condition() methods provides a clean, extensible foundation for scaffold steps
@@ -1062,7 +1197,7 @@ type ToolDetector interface {
 - The executor uses a mutex to protect results access, which is important for parallel step execution
 - Dry-run mode skips step.Run() but still adds results to track what would have been executed
 - Condition checks are performed before running each step, allowing conditional execution based on file existence, environment variables, OS, etc.
-- **Limitation**: `Condition` only checks if a binary exists in PATH. It does not handle step dependencies. For example, if `composer` is not available, `php.composer` is skipped but `php.laravel.artisan` will still run and fail because `vendor/autoload.php` doesn't exist. Phase 3 (presets) needs to address this by either:
+- **Limitation**: `Condition` only checks if a binary exists in PATH. It does not handle step dependencies. For example, if `composer` is not available, `php.composer` is skipped but `php.laravel` will still run and fail because `vendor/autoload.php` doesn't exist. Phase 3 (presets) needs to address this by either:
   1. Adding explicit step dependencies
   2. Having conditions that check for previous step artifacts (e.g., `file_exists: "vendor/autoload.php"`)
   3. Implementing a step dependency graph where steps fail fast if prerequisites aren't met
@@ -1082,7 +1217,7 @@ type ToolDetector interface {
 - Helper functions in steps package (ComposerInstall, Artisan, HerdLink, etc.) make preset step creation clean
 - Init command auto-detects preset after cloning, with --interactive flag for manual selection
 - Preset manager centralizes registration and detection logic
-- Cleanup steps include herd.unlink and database cleanup prompts for Laravel
+- Cleanup steps include `herd` (unlink) and `db.destroy` for Laravel
 - Tests verify detection logic and step composition for each preset
 
 ---
