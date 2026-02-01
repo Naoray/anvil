@@ -106,6 +106,42 @@ func TestValidateStepConfig(t *testing.T) {
 			errMsg:  "env.write: 'key' is required",
 		},
 		{
+			name:     "env.copy with source and key",
+			stepName: "env.copy",
+			cfg: StepConfig{
+				Source: "../main",
+				Key:    "API_KEY",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "env.copy with source and keys",
+			stepName: "env.copy",
+			cfg: StepConfig{
+				Source: "../main",
+				Keys:   []string{"API_KEY", "API_SECRET"},
+			},
+			wantErr: false,
+		},
+		{
+			name:     "env.copy missing source",
+			stepName: "env.copy",
+			cfg: StepConfig{
+				Key: "API_KEY",
+			},
+			wantErr: true,
+			errMsg:  "env.copy: 'source' is required",
+		},
+		{
+			name:     "env.copy missing key and keys",
+			stepName: "env.copy",
+			cfg: StepConfig{
+				Source: "../main",
+			},
+			wantErr: true,
+			errMsg:  "env.copy: either 'key' or 'keys' must be specified",
+		},
+		{
 			name:     "db.create with optional fields",
 			stepName: "db.create",
 			cfg: StepConfig{
@@ -386,6 +422,71 @@ func TestEnvWriteConfig_Validate(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "env.write: 'key' is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error but got nil")
+					return
+				}
+				if tt.errMsg != "" && err.Error() != tt.errMsg {
+					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Validate() unexpected error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestEnvCopyConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  EnvCopyConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid config with source and key",
+			config: EnvCopyConfig{
+				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
+				Source:         "../main",
+				Key:            "API_KEY",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with source and keys",
+			config: EnvCopyConfig{
+				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
+				Source:         "../main",
+				Keys:           []string{"API_KEY", "API_SECRET"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing source",
+			config: EnvCopyConfig{
+				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
+				Key:            "API_KEY",
+			},
+			wantErr: true,
+			errMsg:  "env.copy: 'source' is required",
+		},
+		{
+			name: "missing key and keys",
+			config: EnvCopyConfig{
+				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
+				Source:         "../main",
+			},
+			wantErr: true,
+			errMsg:  "env.copy: either 'key' or 'keys' must be specified",
 		},
 	}
 

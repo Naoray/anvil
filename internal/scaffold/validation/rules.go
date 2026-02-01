@@ -193,3 +193,22 @@ func NewEnvWriteValidator() *Validator {
 			FieldName: "key",
 		})
 }
+
+// NewEnvCopyValidator creates a validator for env.copy step.
+func NewEnvCopyValidator() *Validator {
+	return NewValidator("env.copy").
+		AddRule(RequiredField{
+			Field:     "source",
+			GetValue:  func(cfg config.StepConfig) string { return cfg.Source },
+			FieldName: "source",
+		}).
+		AddRule(CustomRule{
+			Name: "key_or_keys",
+			ValidateFn: func(cfg config.StepConfig) error {
+				if cfg.Key == "" && len(cfg.Keys) == 0 {
+					return fmt.Errorf("either \"key\" or \"keys\" must be specified")
+				}
+				return nil
+			},
+		})
+}

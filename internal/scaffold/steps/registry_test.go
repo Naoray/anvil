@@ -254,7 +254,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 		registry.RegisterDefaults()
 
 		registered := registry.ListRegistered()
-		assert.Len(t, registered, 15) // 8 binary steps + 7 other steps
+		assert.Len(t, registered, 16) // 8 binary steps + 8 other steps
 
 		// Verify all expected steps are present
 		expectedSteps := []string{
@@ -262,6 +262,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 			"command.run",
 			"db.create",
 			"db.destroy",
+			"env.copy",
 			"env.read",
 			"env.write",
 			"file.copy",

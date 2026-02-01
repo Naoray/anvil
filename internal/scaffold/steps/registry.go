@@ -112,6 +112,10 @@ func (r *Registry) RegisterDefaults() {
 		return NewEnvWriteStep(cfg)
 	}, validation.NewEnvWriteValidator())
 
+	r.RegisterWithValidator("env.copy", func(cfg config.StepConfig) types.ScaffoldStep {
+		return NewEnvCopyStep(cfg)
+	}, validation.NewEnvCopyValidator())
+
 	// Steps without custom validators (use built-in validation)
 	r.Register("db.create", func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewDbCreateStep(cfg)

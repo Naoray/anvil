@@ -232,6 +232,31 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 - Preserves comments, blank lines, and ordering
 - Supports template variables
 
+**`env.copy`** - Copy keys from another worktree's `.env` file
+
+```yaml
+# Copy a single key
+- name: env.copy
+  source: ../main           # Source worktree path (relative or absolute)
+  key: API_KEY
+
+# Copy multiple keys
+- name: env.copy
+  source: ../main
+  keys:
+    - API_KEY
+    - API_SECRET
+    - STRIPE_KEY
+  source_file: .env         # optional, defaults to .env
+  file: .env                # optional target file, defaults to .env
+```
+
+- Copies environment variables from a source worktree to the current worktree
+- Useful for copying API keys, secrets, or other values from main to feature branches
+- Creates target `.env` if missing
+- Updates existing keys in-place
+- Supports relative paths (resolved from worktree) or absolute paths
+
 #### Node.js Steps
 
 **`node.npm`** - npm package manager

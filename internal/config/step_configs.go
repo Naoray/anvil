@@ -113,6 +113,27 @@ func (c EnvWriteConfig) Validate() error {
 	return nil
 }
 
+// EnvCopyConfig represents configuration for env.copy step
+type EnvCopyConfig struct {
+	BaseStepConfig
+	Source     string   `mapstructure:"source"`
+	SourceFile string   `mapstructure:"source_file"`
+	Key        string   `mapstructure:"key"`
+	Keys       []string `mapstructure:"keys"`
+	File       string   `mapstructure:"file"`
+}
+
+// Validate checks that required fields are present for env.copy step
+func (c EnvCopyConfig) Validate() error {
+	if c.Source == "" {
+		return fmt.Errorf("env.copy: 'source' is required")
+	}
+	if c.Key == "" && len(c.Keys) == 0 {
+		return fmt.Errorf("env.copy: either 'key' or 'keys' must be specified")
+	}
+	return nil
+}
+
 // DbCreateConfig represents configuration for db.create step
 type DbCreateConfig struct {
 	BaseStepConfig
@@ -180,6 +201,15 @@ func ValidateStepConfig(stepName string, cfg StepConfig) error {
 			BaseStepConfig: base,
 			Key:            cfg.Key,
 			Value:          cfg.Value,
+			File:           cfg.File,
+		}.Validate()
+	case "env.copy":
+		return EnvCopyConfig{
+			BaseStepConfig: base,
+			Source:         cfg.Source,
+			SourceFile:     cfg.SourceFile,
+			Key:            cfg.Key,
+			Keys:           cfg.Keys,
 			File:           cfg.File,
 		}.Validate()
 	case "db.create":

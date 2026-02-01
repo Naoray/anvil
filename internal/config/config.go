@@ -51,18 +51,21 @@ type ScaffoldConfig struct {
 
 // StepConfig represents a scaffold step configuration
 type StepConfig struct {
-	Name      string                 `mapstructure:"name"`
-	Enabled   *bool                  `mapstructure:"enabled"`
-	Args      []string               `mapstructure:"args"`
-	Command   string                 `mapstructure:"command"`
-	Condition map[string]interface{} `mapstructure:"condition"`
-	From      string                 `mapstructure:"from"`
-	To        string                 `mapstructure:"to"`
-	Key       string                 `mapstructure:"key"`
-	Value     string                 `mapstructure:"value"`
-	StoreAs   string                 `mapstructure:"store_as"`
-	File      string                 `mapstructure:"file"`
-	Type      string                 `mapstructure:"type"`
+	Name       string                 `mapstructure:"name"`
+	Enabled    *bool                  `mapstructure:"enabled"`
+	Args       []string               `mapstructure:"args"`
+	Command    string                 `mapstructure:"command"`
+	Condition  map[string]interface{} `mapstructure:"condition"`
+	From       string                 `mapstructure:"from"`
+	To         string                 `mapstructure:"to"`
+	Key        string                 `mapstructure:"key"`
+	Keys       []string               `mapstructure:"keys"`
+	Value      string                 `mapstructure:"value"`
+	StoreAs    string                 `mapstructure:"store_as"`
+	File       string                 `mapstructure:"file"`
+	Source     string                 `mapstructure:"source"`
+	SourceFile string                 `mapstructure:"source_file"`
+	Type       string                 `mapstructure:"type"`
 }
 
 // GetConditionString returns a string value from the condition map for the given key.
