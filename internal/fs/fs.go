@@ -23,6 +23,9 @@ type FS interface {
 	// Stat returns file info for the given path.
 	Stat(path string) (os.FileInfo, error)
 
+	// Exists returns true if the path exists (file or directory).
+	Exists(path string) bool
+
 	// Remove removes the file or directory at path.
 	Remove(path string) error
 
@@ -33,6 +36,8 @@ type FS interface {
 	Chmod(path string, mode os.FileMode) error
 
 	// CreateTemp creates a temporary file in dir with the given pattern.
+	// Note: MockFS cannot fully support this as it returns *os.File.
+	// Code using CreateTemp should use the useRealFS pattern for testing.
 	CreateTemp(dir, pattern string) (*os.File, error)
 }
 
@@ -58,6 +63,12 @@ func (r *RealFS) MkdirAll(path string, perm os.FileMode) error {
 // Stat returns file info for the given path.
 func (r *RealFS) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
+}
+
+// Exists returns true if the path exists.
+func (r *RealFS) Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // Remove removes the file or directory at path.

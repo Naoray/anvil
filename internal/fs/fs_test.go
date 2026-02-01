@@ -214,6 +214,50 @@ func TestMockFS_DirExists(t *testing.T) {
 	}
 }
 
+func TestMockFS_Exists(t *testing.T) {
+	m := NewMockFS()
+	m.AddFile("/test/file.txt", []byte("content"), 0644)
+	m.AddDir("/test/dir")
+
+	// File exists
+	if !m.Exists("/test/file.txt") {
+		t.Error("expected Exists to return true for existing file")
+	}
+
+	// Directory exists
+	if !m.Exists("/test/dir") {
+		t.Error("expected Exists to return true for existing directory")
+	}
+
+	// Non-existent path
+	if m.Exists("/nonexistent") {
+		t.Error("expected Exists to return false for non-existent path")
+	}
+}
+
+func TestRealFS_Exists(t *testing.T) {
+	fs := &RealFS{}
+
+	// Create a temp file
+	tmpFile, err := fs.CreateTemp("", "exists-test-*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer fs.Remove(tmpPath)
+
+	// File exists
+	if !fs.Exists(tmpPath) {
+		t.Error("expected Exists to return true for existing file")
+	}
+
+	// Non-existent path
+	if fs.Exists("/this/path/should/not/exist/ever") {
+		t.Error("expected Exists to return false for non-existent path")
+	}
+}
+
 func TestRealFS(t *testing.T) {
 	// Skip if not running on a real filesystem
 	fs := &RealFS{}

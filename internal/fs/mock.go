@@ -131,7 +131,7 @@ func (m *MockFS) Stat(path string) (os.FileInfo, error) {
 
 	// Check if it's a file
 	if data, ok := m.files[cleanPath]; ok {
-		perm, _ := m.perms[cleanPath]
+		perm := m.perms[cleanPath]
 		if perm == 0 {
 			perm = 0644
 		}
@@ -156,6 +156,21 @@ func (m *MockFS) Stat(path string) (os.FileInfo, error) {
 	}
 
 	return nil, &os.PathError{Op: "stat", Path: path, Err: errors.New("file not found")}
+}
+
+// Exists returns true if the path exists (file or directory).
+func (m *MockFS) Exists(path string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cleanPath := filepath.Clean(path)
+	if _, ok := m.files[cleanPath]; ok {
+		return true
+	}
+	if m.dirs[cleanPath] || cleanPath == "." {
+		return true
+	}
+	return false
 }
 
 // Remove removes the file or directory at path.

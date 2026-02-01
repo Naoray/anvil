@@ -47,10 +47,18 @@ func (r RequiredFields) Validate(cfg config.StepConfig) error {
 	return nil
 }
 
+// StatFunc is a function type for checking if a path exists.
+// This allows injection of the file system for testing.
+type StatFunc func(path string) (os.FileInfo, error)
+
+// DefaultStatFunc uses os.Stat for real file system checks.
+var DefaultStatFunc StatFunc = os.Stat
+
 // FileExists validates that a file path exists.
 type FileExists struct {
 	GetPath   func(config.StepConfig) string
 	FieldName string
+	StatFn    StatFunc // Optional: defaults to os.Stat if nil
 }
 
 // Validate checks that the specified file exists.
@@ -60,7 +68,12 @@ func (f FileExists) Validate(cfg config.StepConfig) error {
 		return nil // Empty path is considered valid (optional file)
 	}
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	statFn := f.StatFn
+	if statFn == nil {
+		statFn = DefaultStatFunc
+	}
+
+	if _, err := statFn(path); os.IsNotExist(err) {
 		fieldName := f.FieldName
 		if fieldName == "" {
 			fieldName = "file"

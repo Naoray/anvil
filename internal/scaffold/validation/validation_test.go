@@ -2,6 +2,8 @@ package validation
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/michaeldyrynda/arbor/internal/config"
@@ -42,11 +44,13 @@ func TestValidator(t *testing.T) {
 		if err == nil {
 			t.Error("expected error for missing required field")
 		}
-		if !errors.Is(err, errors.New("")) {
-			// Error should contain step name
-			if err.Error() == "" {
-				t.Error("expected error message to contain context")
-			}
+		// Error should contain step name context
+		errStr := err.Error()
+		if !contains(errStr, "test.step") {
+			t.Errorf("expected error to contain step name, got: %s", errStr)
+		}
+		if !contains(errStr, "name") {
+			t.Errorf("expected error to mention field name, got: %s", errStr)
 		}
 	})
 
@@ -311,6 +315,64 @@ func TestCustomRule(t *testing.T) {
 	})
 }
 
+func TestFileExists(t *testing.T) {
+	t.Run("passes when path is empty (optional)", func(t *testing.T) {
+		rule := FileExists{
+			GetPath:   func(c config.StepConfig) string { return c.From },
+			FieldName: "source",
+		}
+
+		err := rule.Validate(config.StepConfig{})
+		if err != nil {
+			t.Errorf("expected no error for empty path, got: %v", err)
+		}
+	})
+
+	t.Run("uses injected StatFn", func(t *testing.T) {
+		mockStat := func(path string) (os.FileInfo, error) {
+			if path == "/exists/file.txt" {
+				return nil, nil // File exists
+			}
+			return nil, os.ErrNotExist
+		}
+
+		rule := FileExists{
+			GetPath:   func(c config.StepConfig) string { return c.From },
+			FieldName: "source",
+			StatFn:    mockStat,
+		}
+
+		// File exists
+		err := rule.Validate(config.StepConfig{From: "/exists/file.txt"})
+		if err != nil {
+			t.Errorf("expected no error for existing file, got: %v", err)
+		}
+
+		// File does not exist
+		err = rule.Validate(config.StepConfig{From: "/missing/file.txt"})
+		if err == nil {
+			t.Error("expected error for missing file")
+		}
+		if !contains(err.Error(), "source") {
+			t.Errorf("expected error to mention field name, got: %v", err)
+		}
+	})
+
+	t.Run("defaults to os.Stat when StatFn is nil", func(t *testing.T) {
+		rule := FileExists{
+			GetPath:   func(c config.StepConfig) string { return c.From },
+			FieldName: "source",
+			// StatFn is nil, should use DefaultStatFunc
+		}
+
+		// Non-existent path should error
+		err := rule.Validate(config.StepConfig{From: "/this/path/should/not/exist/ever"})
+		if err == nil {
+			t.Error("expected error for non-existent path")
+		}
+	})
+}
+
 func TestStepValidators(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -369,16 +431,7 @@ func TestStepValidators(t *testing.T) {
 	}
 }
 
-// Helper function
+// contains wraps strings.Contains for readability in tests.
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }
