@@ -125,24 +125,24 @@ func (s *EnvWriteStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 
 	// Write content and close the file
 	if _, err := tmpFile.Write(content); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFileName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFileName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	// Set permissions
 	if err := os.Chmod(tmpFileName, oldPerms); err != nil {
-		os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName)
 		return fmt.Errorf("setting permissions: %w", err)
 	}
 
 	if err := os.Rename(tmpFileName, filePath); err != nil {
-		os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 

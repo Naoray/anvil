@@ -51,8 +51,8 @@ and main branch highlighting.`,
 
 func printTable(w io.Writer, worktrees []git.Worktree) error {
 	if len(worktrees) == 0 {
-		fmt.Fprintln(w, "No worktrees found.")
-		return nil
+		_, err := fmt.Fprintln(w, "No worktrees found.")
+		return err
 	}
 
 	_, err := fmt.Fprintln(w, ui.RenderWorktreeTable(worktrees))
@@ -103,7 +103,9 @@ func printPorcelain(w io.Writer, worktrees []git.Worktree) error {
 			merged = "-"
 		}
 
-		fmt.Fprintf(w, "%s %s %s %s %s\n", wt.Path, wt.Branch, main, current, merged)
+		if _, err := fmt.Fprintf(w, "%s %s %s %s %s\n", wt.Path, wt.Branch, main, current, merged); err != nil {
+			return err
+		}
 	}
 
 	return nil

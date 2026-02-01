@@ -154,7 +154,7 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine string
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {
@@ -244,7 +244,9 @@ func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, o
 	if err != nil {
 		return fmt.Errorf("creating SQLite file: %w", err)
 	}
-	file.Close()
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing SQLite file: %w", err)
+	}
 
 	if opts.Verbose {
 		fmt.Printf("  SQLite database created at: %s\n", dbPath)
@@ -390,7 +392,7 @@ func (s *DbDestroyStep) destroyDatabases(engine, suffix string, opts types.StepO
 		}
 		return nil
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {

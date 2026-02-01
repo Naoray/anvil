@@ -100,7 +100,7 @@ func (c *MySQLClient) ListDatabases(pattern string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing databases: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var databases []string
 	for rows.Next() {
@@ -185,7 +185,7 @@ func (c *PostgreSQLClient) ListDatabases(pattern string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing databases: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var databases []string
 	for rows.Next() {
