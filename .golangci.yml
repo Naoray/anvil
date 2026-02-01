@@ -19,8 +19,6 @@ linters:
     - unused
     
     # Additional recommended linters
-    - gofmt
-    - goimports
     - unconvert
     - whitespace
 
@@ -34,9 +32,6 @@ linters:
       disable:
         - fieldalignment  # Too strict for this codebase
         - shadow          # Too many false positives in test files and short-lived err vars
-        
-    goimports:
-      local-prefixes: github.com/michaeldyrynda/arbor
 
   exclusions:
     rules:
@@ -49,6 +44,19 @@ linters:
       - path: cmd/arbor/main\.go
         linters:
           - forbidigo
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  
+  settings:
+    gofmt:
+      simplify: false
+    
+    goimports:
+      local-prefixes:
+        - github.com/michaeldyrynda/arbor
 
 issues:
   max-issues-per-linter: 50
