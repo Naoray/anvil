@@ -13,6 +13,7 @@ import (
 	"github.com/michaeldyrynda/arbor/internal/git"
 	"github.com/michaeldyrynda/arbor/internal/presets"
 	"github.com/michaeldyrynda/arbor/internal/scaffold"
+	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
 	"github.com/michaeldyrynda/arbor/internal/ui"
 )
 
@@ -103,7 +104,11 @@ This operation cannot be undone.`,
 
 		preset := cfg.Preset
 		presetManager := presets.NewManager()
-		scaffoldManager := scaffold.NewScaffoldManager()
+
+		// Create explicit step registry with default steps
+		stepRegistry := steps.NewRegistry()
+		stepRegistry.RegisterDefaults()
+		scaffoldManager := scaffold.NewScaffoldManagerWithRegistry(stepRegistry)
 		presets.RegisterAllWithScaffold(scaffoldManager)
 
 		allCleanupFailed := true

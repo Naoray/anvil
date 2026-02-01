@@ -126,3 +126,190 @@ func TestRegistry_DuplicateRegistration(t *testing.T) {
 		})
 	})
 }
+
+// mockStep is a test double for scaffold steps
+type mockStep struct {
+	name string
+}
+
+func (m *mockStep) Name() string {
+	return m.name
+}
+
+func (m *mockStep) Description() string {
+	return "mock step"
+}
+
+func (m *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	return nil
+}
+
+func (m *mockStep) Condition(ctx *types.ScaffoldContext) bool {
+	return true
+}
+
+// Tests for the explicit Registry struct
+func TestExplicitRegistry_NewRegistry(t *testing.T) {
+	t.Run("creates empty registry", func(t *testing.T) {
+		registry := NewRegistry()
+
+		require.NotNil(t, registry)
+		assert.Empty(t, registry.ListRegistered())
+	})
+}
+
+func TestExplicitRegistry_Register(t *testing.T) {
+	t.Run("registers step successfully", func(t *testing.T) {
+		registry := NewRegistry()
+
+		factory := func(cfg config.StepConfig) types.ScaffoldStep {
+			return &mockStep{name: cfg.Name}
+		}
+
+		registry.Register("test.step", factory)
+
+		registered := registry.ListRegistered()
+		assert.Len(t, registered, 1)
+		assert.Contains(t, registered, "test.step")
+	})
+
+	t.Run("maintains registration order", func(t *testing.T) {
+		registry := NewRegistry()
+
+		factory := func(cfg config.StepConfig) types.ScaffoldStep {
+			return &mockStep{name: cfg.Name}
+		}
+
+		registry.Register("zebra.step", factory)
+		registry.Register("alpha.step", factory)
+		registry.Register("mike.step", factory)
+
+		registered := registry.ListRegistered()
+		// Should be sorted alphabetically
+		assert.Equal(t, []string{"alpha.step", "mike.step", "zebra.step"}, registered)
+	})
+
+	t.Run("panics on duplicate registration", func(t *testing.T) {
+		registry := NewRegistry()
+
+		factory := func(cfg config.StepConfig) types.ScaffoldStep {
+			return &mockStep{name: cfg.Name}
+		}
+
+		registry.Register("duplicate.test", factory)
+
+		assert.Panics(t, func() {
+			registry.Register("duplicate.test", factory)
+		})
+	})
+}
+
+func TestExplicitRegistry_Create(t *testing.T) {
+	t.Run("creates registered step", func(t *testing.T) {
+		registry := NewRegistry()
+
+		factory := func(cfg config.StepConfig) types.ScaffoldStep {
+			return &mockStep{name: cfg.Name}
+		}
+
+		registry.Register("create.test", factory)
+
+		cfg := config.StepConfig{Name: "create.test"}
+		step, err := registry.Create("create.test", cfg)
+
+		require.NoError(t, err)
+		assert.NotNil(t, step)
+		assert.Equal(t, "create.test", step.Name())
+	})
+
+	t.Run("returns error for unknown step", func(t *testing.T) {
+		registry := NewRegistry()
+
+		cfg := config.StepConfig{Name: "unknown.step"}
+		step, err := registry.Create("unknown.step", cfg)
+
+		assert.Error(t, err)
+		assert.Nil(t, step)
+		assert.Contains(t, err.Error(), "unknown step")
+	})
+}
+
+func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
+	t.Run("registers all default steps", func(t *testing.T) {
+		registry := NewRegistry()
+		registry.RegisterDefaults()
+
+		registered := registry.ListRegistered()
+		assert.Len(t, registered, 15) // 8 binary steps + 7 other steps
+
+		// Verify all expected steps are present
+		expectedSteps := []string{
+			"bash.run",
+			"command.run",
+			"db.create",
+			"db.destroy",
+			"env.read",
+			"env.write",
+			"file.copy",
+			"herd",
+			"node.bun",
+			"node.npm",
+			"node.pnpm",
+			"node.yarn",
+			"php",
+			"php.composer",
+			"php.laravel",
+		}
+
+		for _, stepName := range expectedSteps {
+			assert.Contains(t, registered, stepName, "Step '%s' should be registered", stepName)
+		}
+	})
+
+	t.Run("can create steps after registering defaults", func(t *testing.T) {
+		registry := NewRegistry()
+		registry.RegisterDefaults()
+
+		testCases := []struct {
+			name string
+			cfg  config.StepConfig
+		}{
+			{"php", config.StepConfig{Name: "php", Args: []string{"-v"}}},
+			{"file.copy", config.StepConfig{Name: "file.copy", From: "a.txt", To: "b.txt"}},
+			{"bash.run", config.StepConfig{Name: "bash.run", Command: "echo hello"}},
+			{"env.read", config.StepConfig{Name: "env.read", Key: "TEST_KEY"}},
+			{"db.create", config.StepConfig{Name: "db.create", Type: "mysql"}},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				step, err := registry.Create(tc.name, tc.cfg)
+				require.NoError(t, err, "Failed to create step %s", tc.name)
+				assert.NotNil(t, step)
+			})
+		}
+	})
+}
+
+func TestExplicitRegistry_Isolation(t *testing.T) {
+	t.Run("registries are isolated from each other", func(t *testing.T) {
+		registry1 := NewRegistry()
+		registry2 := NewRegistry()
+
+		factory := func(cfg config.StepConfig) types.ScaffoldStep {
+			return &mockStep{name: cfg.Name}
+		}
+
+		// Register step in registry1 only
+		registry1.Register("isolated.step", factory)
+
+		// registry2 should not have it
+		_, err := registry2.Create("isolated.step", config.StepConfig{Name: "isolated.step"})
+		assert.Error(t, err, "Expected error when creating step from isolated registry2")
+
+		// registry1 should have it
+		step, err := registry1.Create("isolated.step", config.StepConfig{Name: "isolated.step"})
+		require.NoError(t, err)
+		assert.NotNil(t, step)
+	})
+}

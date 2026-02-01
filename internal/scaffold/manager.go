@@ -13,6 +13,14 @@ import (
 type ScaffoldManager struct {
 	presets     map[string]Preset
 	presetOrder []string
+	registry    StepRegistry
+}
+
+// StepRegistry defines the interface for step creation.
+// This abstraction allows for dependency injection and testing.
+type StepRegistry interface {
+	Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error)
+	ListRegistered() []string
 }
 
 type Preset interface {
@@ -22,11 +30,35 @@ type Preset interface {
 	CleanupSteps() []config.CleanupStep
 }
 
+// NewScaffoldManager creates a new scaffold manager using the global step registry.
+// Deprecated: Use NewScaffoldManagerWithRegistry instead for explicit dependency injection.
 func NewScaffoldManager() *ScaffoldManager {
+	return NewScaffoldManagerWithRegistry(nil)
+}
+
+// NewScaffoldManagerWithRegistry creates a new scaffold manager with the given step registry.
+// If registry is nil, the global registry is used for backward compatibility.
+func NewScaffoldManagerWithRegistry(registry StepRegistry) *ScaffoldManager {
+	if registry == nil {
+		registry = &globalStepRegistryAdapter{}
+	}
 	return &ScaffoldManager{
 		presets:     make(map[string]Preset),
 		presetOrder: make([]string, 0),
+		registry:    registry,
 	}
+}
+
+// globalStepRegistryAdapter adapts the global step functions to the StepRegistry interface.
+// This provides backward compatibility during the migration to explicit registry.
+type globalStepRegistryAdapter struct{}
+
+func (a *globalStepRegistryAdapter) Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
+	return steps.Create(name, cfg)
+}
+
+func (a *globalStepRegistryAdapter) ListRegistered() []string {
+	return steps.ListRegistered()
 }
 
 func (m *ScaffoldManager) RegisterPreset(preset Preset) {
@@ -58,7 +90,7 @@ func (m *ScaffoldManager) GetStepsForWorktree(cfg *config.Config, worktreePath, 
 
 	if preset, ok := m.GetPreset(presetName); ok {
 		for _, stepConfig := range preset.DefaultSteps() {
-			step, err := steps.Create(stepConfig.Name, stepConfig)
+			step, err := m.registry.Create(stepConfig.Name, stepConfig)
 			if err != nil {
 				return nil, fmt.Errorf("creating step %q: %w", stepConfig.Name, err)
 			}
@@ -94,7 +126,7 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 	if preset, ok := m.GetPreset(presetName); ok {
 		for _, cleanupConfig := range preset.CleanupSteps() {
 			stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
-			step, err := steps.Create(cleanupConfig.Name, stepConfig)
+			step, err := m.registry.Create(cleanupConfig.Name, stepConfig)
 			if err != nil {
 				return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
 			}
@@ -104,7 +136,7 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 
 	for _, cleanupConfig := range cfg.Cleanup.Steps {
 		stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
-		step, err := steps.Create(cleanupConfig.Name, stepConfig)
+		step, err := m.registry.Create(cleanupConfig.Name, stepConfig)
 		if err != nil {
 			return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
 		}
@@ -136,7 +168,7 @@ func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]ty
 	stepsList := make([]types.ScaffoldStep, 0, len(stepConfigs))
 
 	for _, cfg := range stepConfigs {
-		step, err := steps.Create(cfg.Name, cfg)
+		step, err := m.registry.Create(cfg.Name, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("creating step %q: %w", cfg.Name, err)
 		}
