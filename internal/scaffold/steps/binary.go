@@ -1,11 +1,13 @@
 package steps
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/michaeldyrynda/arbor/internal/config"
+	arbor_exec "github.com/michaeldyrynda/arbor/internal/exec"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/template"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 )
@@ -16,18 +18,32 @@ type BinaryStep struct {
 	args      []string
 	condition map[string]interface{}
 	storeAs   string
+	executor  *arbor_exec.CommandExecutor
 }
 
+// NewBinaryStep creates a binary step with the default command executor.
 func NewBinaryStep(name, binary string, args []string, storeAs string) *BinaryStep {
+	return NewBinaryStepWithExecutor(name, binary, args, storeAs, nil)
+}
+
+// NewBinaryStepWithExecutor creates a binary step with a custom command executor.
+// This is useful for testing with mock executors.
+func NewBinaryStepWithExecutor(name, binary string, args []string, storeAs string, executor *arbor_exec.CommandExecutor) *BinaryStep {
+	if executor == nil {
+		executor = arbor_exec.NewCommandExecutor(nil)
+	}
 	return &BinaryStep{
 		name:      name,
 		binary:    binary,
 		args:      args,
 		condition: nil,
 		storeAs:   storeAs,
+		executor:  executor,
 	}
 }
 
+// NewBinaryStepWithCondition creates a binary step with condition evaluation.
+// This is the factory function used by the registry.
 func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary string) *BinaryStep {
 	return &BinaryStep{
 		name:      name,
@@ -35,6 +51,7 @@ func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary strin
 		args:      cfg.Args,
 		condition: cfg.Condition,
 		storeAs:   cfg.StoreAs,
+		executor:  arbor_exec.NewCommandExecutor(nil),
 	}
 }
 
@@ -71,9 +88,9 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 		fullCmd := append(binaryParts, allArgs...)
 		fmt.Printf("  Running: %s\n", strings.Join(fullCmd, " "))
 	}
-	cmd := exec.Command(strings.Fields(s.binary)[0], append(strings.Fields(s.binary)[1:], allArgs...)...)
-	cmd.Dir = ctx.WorktreePath
-	output, err := cmd.CombinedOutput()
+
+	// Use the command executor for testability
+	output, err := s.executor.RunBinary(context.Background(), ctx.WorktreePath, s.binary, allArgs)
 	if err != nil {
 		return fmt.Errorf("%s failed: %w\n%s", s.name, err, string(output))
 	}
