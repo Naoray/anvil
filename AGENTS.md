@@ -46,10 +46,12 @@ arbor remove feature-my-feature  # When done
 
 ### Config Files
 
-| Config | Location | Purpose |
-|--------|----------|---------|
-| Project | `arbor.yaml` in worktree root | Project-specific settings |
-| Global | `~/.config/arbor/arbor.yaml` | User defaults |
+| Config | Location | Purpose | Versioned? |
+|--------|----------|---------|------------|
+| Project | `<project-root>/arbor.yaml` | Project-specific settings, scaffold config | No (not in a repo) |
+| Repository | `<worktree>/arbor.yaml` | Team defaults (copied during init) | Yes (committed to git) |
+| Local State | `<worktree>/.arbor.local` | Runtime state (db_suffix) | No (gitignored) |
+| Global | `~/.config/arbor/arbor.yaml` | User defaults | No (local machine) |
 
 ### Step Naming
 

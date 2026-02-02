@@ -181,21 +181,29 @@ func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]ty
 func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
 
-	worktreeConfig, err := config.ReadWorktreeConfig(worktreePath)
-	if err != nil {
-		return fmt.Errorf("reading worktree config: %w", err)
+	// Migrate db_suffix from arbor.yaml to .arbor.local if present
+	if !dryRun {
+		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
+			return fmt.Errorf("migrating db_suffix: %w", err)
+		}
 	}
 
-	if worktreeConfig.DbSuffix == "" {
+	// Load local state instead of worktree config
+	localState, err := config.ReadLocalState(worktreePath)
+	if err != nil {
+		return fmt.Errorf("reading local state: %w", err)
+	}
+
+	if localState.DbSuffix == "" {
 		newSuffix := words.GenerateSuffix()
 		ctx.SetDbSuffix(newSuffix)
 		if !dryRun {
-			if err := config.WriteWorktreeConfig(worktreePath, map[string]string{"db_suffix": newSuffix}); err != nil {
-				return fmt.Errorf("writing db_suffix to worktree config: %w", err)
+			if err := config.WriteLocalState(worktreePath, config.LocalState{DbSuffix: newSuffix}); err != nil {
+				return fmt.Errorf("writing db_suffix to local state: %w", err)
 			}
 		}
 	} else {
-		ctx.SetDbSuffix(worktreeConfig.DbSuffix)
+		ctx.SetDbSuffix(localState.DbSuffix)
 	}
 
 	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch)

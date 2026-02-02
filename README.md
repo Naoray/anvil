@@ -184,7 +184,81 @@ arbor scaffold main
 
 ## Configuration
 
-Arbor uses a configuration file to define scaffold steps for `init` and `work` commands. Configuration is read from `arbor.yaml` in your project root.
+Arbor uses a three-tier configuration system to separate team configuration from local state.
+
+### Configuration Hierarchy
+
+#### 1. Project Config (`<project-root>/arbor.yaml`)
+
+Located at the project root (alongside `.bare/`), this file contains:
+- Scaffold steps and cleanup steps
+- Preset selection
+- Tool configurations
+- Project-wide settings
+
+This file is **not versioned** (the project root is not a git repository).
+
+During `arbor init`, if an `arbor.yaml` file is found in the repository, you'll be prompted to copy it to the project root.
+
+#### 2. Repository Config (`<worktree>/arbor.yaml`)
+
+Located inside each worktree and **committed to git**, this file contains:
+- Team default scaffold steps
+- Shared cleanup steps
+- Tool configurations
+
+This file serves as the source of truth for team configuration and is copied to the project root during `arbor init`.
+
+#### 3. Local State (`<worktree>/.arbor.local`)
+
+Located inside each worktree and **NOT versioned** (should be in `.gitignore`), this file contains:
+- `db_suffix` - unique database suffix for the worktree
+- Other worktree-specific runtime state
+
+This file is automatically created by Arbor and should never be committed.
+
+**Example `.gitignore` entry:**
+```
+.arbor.local
+```
+
+**Example `.arbor.local` file:**
+```yaml
+db_suffix: "sunset"
+```
+
+### Sharing Team Configuration
+
+To share scaffold configuration with your team:
+
+1. Create `arbor.yaml` in your repository with scaffold steps:
+```yaml
+preset: laravel
+scaffold:
+  steps:
+    - name: file.copy
+      from: .env.example
+      to: .env
+    - name: db.create
+    - name: php.composer
+      args: ["install"]
+```
+
+2. Commit and push to git:
+```bash
+git add arbor.yaml
+git commit -m "Add Arbor scaffold configuration"
+git push
+```
+
+3. Team members run `arbor init`:
+```bash
+arbor init user/repo
+# → Found arbor.yaml in repository. Copy to project root for team config? [Y/n]
+# → Press Enter to use team config
+```
+
+The config will be automatically copied to their project root and used for all worktrees.
 
 ### Scaffold Steps
 
@@ -244,7 +318,7 @@ All steps support template variables that are replaced at runtime:
 - Suffix is generated once per `init` or `work` invocation and shared across all `db.create` steps
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
-- Persists suffix to worktree-local `arbor.yaml` for cleanup
+- Persists suffix to `.arbor.local` for cleanup
 
 **Multiple databases with shared suffix:**
 

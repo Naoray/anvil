@@ -134,6 +134,11 @@ available branches or entering a new branch name.`,
 			if err := pc.ScaffoldManager().RunScaffold(absWorktreePath, branch, repoName, siteName, preset, pc.Config, false, verbose, quiet); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			}
+
+			// Check if .arbor.local should be gitignored
+			if !quiet {
+				checkArborLocalGitignore(absWorktreePath)
+			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would run scaffold steps")
 		}

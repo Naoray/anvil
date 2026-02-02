@@ -215,13 +215,8 @@ func (s *DbCreateStep) persistDbSuffix(ctx *types.ScaffoldContext) error {
 		return nil
 	}
 
-	if err := config.WriteWorktreeConfig(ctx.WorktreePath, map[string]string{
-		"db_suffix": suffix,
-	}); err != nil {
-		return fmt.Errorf("writing worktree config: %w", err)
-	}
-
-	return nil
+	// Write to .arbor.local instead of arbor.yaml
+	return config.WriteLocalState(ctx.WorktreePath, config.LocalState{DbSuffix: suffix})
 }
 
 func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, opts types.StepOptions) error {
@@ -291,11 +286,11 @@ func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {
 func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
 	suffix := ctx.GetDbSuffix()
 	if suffix == "" {
-		cfg, err := config.ReadWorktreeConfig(ctx.WorktreePath)
+		localState, err := config.ReadLocalState(ctx.WorktreePath)
 		if err != nil {
 			return nil
 		}
-		suffix = cfg.DbSuffix
+		suffix = localState.DbSuffix
 	}
 
 	if suffix == "" {

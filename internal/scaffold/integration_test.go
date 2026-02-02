@@ -78,9 +78,9 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix, "DbSuffix should be set after db.create")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, cfg.DbSuffix, "DbSuffix should be persisted to worktree arbor.yaml")
+		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .arbor.local")
 
 		parts := strings.Split(suffix, "_")
 		assert.Len(t, parts, 2, "Suffix should be in format {adjective}_{noun}")
@@ -172,7 +172,7 @@ APP_NAME=myapp
 		envFile := filepath.Join(tmpDir, ".env")
 		require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
 
-		err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "swift_runner"})
+		err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "swift_runner"})
 		require.NoError(t, err)
 
 		ctx := &types.ScaffoldContext{
@@ -272,7 +272,7 @@ APP_NAME=myapp
 		require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
 
 		existingSuffix := "existing_suffix"
-		err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": existingSuffix})
+		err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: existingSuffix})
 		require.NoError(t, err)
 
 		cfg := &config.Config{Preset: ""}
@@ -281,9 +281,9 @@ APP_NAME=myapp
 		err = manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
 		require.NoError(t, err)
 
-		cfgAfter, err := config.ReadWorktreeConfig(tmpDir)
+		localStateAfter, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, existingSuffix, cfgAfter.DbSuffix, "RunScaffold should preserve existing suffix from worktree config")
+		assert.Equal(t, existingSuffix, localStateAfter.DbSuffix, "RunScaffold should preserve existing suffix from local state")
 	})
 
 	t.Run("RunScaffold generates new suffix when none exists", func(t *testing.T) {
@@ -304,11 +304,11 @@ APP_NAME=myapp
 		err := manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
 		require.NoError(t, err)
 
-		cfgAfter, err := config.ReadWorktreeConfig(tmpDir)
+		localStateAfter, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.NotEmpty(t, cfgAfter.DbSuffix, "RunScaffold should generate new suffix when none exists in worktree config")
+		assert.NotEmpty(t, localStateAfter.DbSuffix, "RunScaffold should generate new suffix when none exists in local state")
 
-		parts := strings.Split(cfgAfter.DbSuffix, "_")
+		parts := strings.Split(localStateAfter.DbSuffix, "_")
 		assert.Len(t, parts, 2, "Suffix should be in format {adjective}_{noun}")
 	})
 }
@@ -365,9 +365,9 @@ APP_NAME=myapp
 		assert.Equal(t, firstSuffix, secondSuffix, "All three databases should use the same suffix")
 		assert.Equal(t, secondSuffix, thirdSuffix, "All three databases should use the same suffix")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, firstSuffix, cfg.DbSuffix, "Suffix should be persisted to worktree config")
+		assert.Equal(t, firstSuffix, localState.DbSuffix, "Suffix should be persisted to local state")
 
 		createCalls := mockClient.GetCreateCalls()
 		assert.Len(t, createCalls, 3, "Should have created 3 databases")
