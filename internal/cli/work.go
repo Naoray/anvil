@@ -98,6 +98,19 @@ available branches or entering a new branch name.`,
 			ui.PrintInfo("[DRY RUN] Would create worktree")
 		}
 
+		// Set up branch tracking unless --no-track is specified
+		noTrack := mustGetBool(cmd, "no-track")
+		if !dryRun && !noTrack {
+			if err := git.SetBranchUpstream(pc.BarePath, branch, "origin"); err != nil {
+				// Non-fatal - just inform user if verbose
+				if verbose {
+					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))
+				}
+			} else {
+				ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on origin", branch))
+			}
+		}
+
 		if !dryRun {
 			preset := pc.Config.Preset
 			if preset == "" {
@@ -139,4 +152,5 @@ func init() {
 	rootCmd.AddCommand(workCmd)
 
 	workCmd.Flags().StringP("base", "b", "", "Base branch for new worktree")
+	workCmd.Flags().Bool("no-track", false, "Skip setting up remote tracking for new branches")
 }
