@@ -101,7 +101,8 @@ Arguments:
 		}
 
 		// Check for arbor.yaml in the cloned repository
-		if err := checkAndCopyRepoConfig(cmd, mainPath, absPath, cfg); err != nil {
+		copiedRepoConfig, err := checkAndCopyRepoConfig(cmd, mainPath, absPath, cfg)
+		if err != nil {
 			return err
 		}
 
@@ -128,8 +129,11 @@ Arguments:
 			}
 		}
 
-		if err := config.SaveProject(absPath, cfg); err != nil {
-			return fmt.Errorf("saving config: %w", err)
+		// Only save config if it wasn't copied from repo, or if we need to add preset
+		if !copiedRepoConfig || preset != "" {
+			if err := config.SaveProject(absPath, cfg); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
 		}
 
 		verbose := mustGetBool(cmd, "verbose")
@@ -169,11 +173,12 @@ func init() {
 	initCmd.Flags().Bool("use-repo-config", true, "Automatically use repository config (non-interactive, default: true)")
 }
 
-// checkAndCopyRepoConfig checks for arbor.yaml in the repository and prompts to copy it
-func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cfg *config.Config) error {
+// checkAndCopyRepoConfig checks for arbor.yaml in the repository and prompts to copy it.
+// Returns true if the config was copied from the repository.
+func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cfg *config.Config) (bool, error) {
 	repoConfigPath := filepath.Join(mainPath, "arbor.yaml")
 	if _, err := os.Stat(repoConfigPath); os.IsNotExist(err) {
-		return nil
+		return false, nil
 	}
 
 	shouldCopy := false
@@ -181,7 +186,7 @@ func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cf
 	if ui.IsInteractive() {
 		confirmed, err := ui.Confirm("Found arbor.yaml in repository. Copy to project root for team config?")
 		if err != nil {
-			return fmt.Errorf("prompting for config copy: %w", err)
+			return false, fmt.Errorf("prompting for config copy: %w", err)
 		}
 		shouldCopy = confirmed
 	} else {
@@ -190,21 +195,25 @@ func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cf
 	}
 
 	if !shouldCopy {
-		return nil
+		return false, nil
 	}
 
 	projectConfigPath := filepath.Join(projectPath, "arbor.yaml")
+	if _, err := os.Stat(projectConfigPath); err == nil {
+		ui.PrintInfo("Project config already exists; skipping copy from repository")
+		return false, nil
+	}
 
 	// Read repo config
 	repoConfigData, err := os.ReadFile(repoConfigPath)
 	if err != nil {
-		return fmt.Errorf("reading repository config: %w", err)
+		return false, fmt.Errorf("reading repository config: %w", err)
 	}
 
 	// Parse and clean it (remove db_suffix if present)
 	var configData map[string]interface{}
 	if err := yaml.Unmarshal(repoConfigData, &configData); err != nil {
-		return fmt.Errorf("parsing repository config: %w", err)
+		return false, fmt.Errorf("parsing repository config: %w", err)
 	}
 
 	// Remove local-only fields
@@ -216,11 +225,11 @@ func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cf
 	// Write to project root
 	cleanedData, err := yaml.Marshal(configData)
 	if err != nil {
-		return fmt.Errorf("marshaling cleaned config: %w", err)
+		return false, fmt.Errorf("marshaling cleaned config: %w", err)
 	}
 
 	if err := os.WriteFile(projectConfigPath, cleanedData, 0644); err != nil {
-		return fmt.Errorf("writing project config: %w", err)
+		return false, fmt.Errorf("writing project config: %w", err)
 	}
 
 	ui.PrintSuccess("Copied arbor.yaml to project root")
@@ -228,7 +237,7 @@ func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cf
 	// Reload config to get scaffold steps
 	reloadedCfg, err := config.LoadProject(projectPath)
 	if err != nil {
-		return fmt.Errorf("reloading config: %w", err)
+		return false, fmt.Errorf("reloading config: %w", err)
 	}
 
 	// Update cfg with reloaded scaffold/cleanup steps
@@ -237,5 +246,5 @@ func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cf
 	cfg.Preset = reloadedCfg.Preset
 	cfg.Tools = reloadedCfg.Tools
 
-	return nil
+	return true, nil
 }

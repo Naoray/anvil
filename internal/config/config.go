@@ -230,64 +230,158 @@ func LoadGlobal() (*GlobalConfig, error) {
 }
 
 // SaveProject saves project configuration to arbor.yaml.
-// Uses yaml.v3 directly to preserve existing config structure.
+// Preserves existing YAML structure, comments, and formatting.
 func SaveProject(path string, config *Config) error {
 	configPath := filepath.Join(path, "arbor.yaml")
 
-	// Read existing config if it exists (to preserve any manual edits)
-	var existing map[string]interface{}
+	// Read existing file content if it exists
+	var doc *yaml.Node
+	var root *yaml.Node
+	fileExists := false
+
 	if content, err := os.ReadFile(configPath); err == nil {
-		if err := yaml.Unmarshal(content, &existing); err != nil {
+		fileExists = true
+		// Parse into yaml.Node to preserve structure
+		doc = &yaml.Node{}
+		if err := yaml.Unmarshal(content, doc); err != nil {
 			return fmt.Errorf("parsing existing config: %w", err)
 		}
-	}
-
-	if existing == nil {
-		existing = make(map[string]interface{})
-	}
-
-	// Merge new data into existing config
-	if config.SiteName != "" {
-		existing["site_name"] = config.SiteName
-	}
-	if config.Preset != "" {
-		existing["preset"] = config.Preset
-	}
-	if config.DefaultBranch != "" {
-		existing["default_branch"] = config.DefaultBranch
-	}
-
-	// Merge sync config if any values are set
-	if config.Sync.Upstream != "" || config.Sync.Strategy != "" || config.Sync.Remote != "" {
-		if existingSync, ok := existing["sync"].(map[string]interface{}); ok {
-			// Update existing sync section
-			if config.Sync.Upstream != "" {
-				existingSync["upstream"] = config.Sync.Upstream
-			}
-			if config.Sync.Strategy != "" {
-				existingSync["strategy"] = config.Sync.Strategy
-			}
-			if config.Sync.Remote != "" {
-				existingSync["remote"] = config.Sync.Remote
-			}
-		} else {
-			// Create new sync section
-			syncData := make(map[string]interface{})
-			if config.Sync.Upstream != "" {
-				syncData["upstream"] = config.Sync.Upstream
-			}
-			if config.Sync.Strategy != "" {
-				syncData["strategy"] = config.Sync.Strategy
-			}
-			if config.Sync.Remote != "" {
-				syncData["remote"] = config.Sync.Remote
-			}
-			existing["sync"] = syncData
+		if len(doc.Content) > 0 {
+			root = doc.Content[0]
 		}
 	}
 
-	// Marshal and write back
-	content, err := yaml.Marshal(existing)
+	// If file doesn't exist or is empty, create a new document and mapping node
+	if !fileExists || root == nil || root.Kind != yaml.MappingNode {
+		root = &yaml.Node{
+			Kind: yaml.MappingNode,
+			Tag:  "!!map",
+		}
+		doc = &yaml.Node{
+			Kind:    yaml.DocumentNode,
+			Content: []*yaml.Node{root},
+		}
+	}
+
+	// Helper function to set or update a value in the mapping
+	setValue := func(key string, value interface{}) {
+		// Find if key already exists
+		for i := 0; i < len(root.Content); i += 2 {
+			if root.Content[i].Value == key {
+				valueNode := root.Content[i+1]
+				replacement := interfaceToNode(value)
+				if valueNode.Kind == yaml.ScalarNode && replacement.Kind == yaml.ScalarNode {
+					valueNode.Value = replacement.Value
+					valueNode.Tag = replacement.Tag
+					return
+				}
+				// Update existing value
+				root.Content[i+1] = replacement
+				return
+			}
+		}
+		// Key doesn't exist, add it
+		root.Content = append(root.Content, &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!str",
+			Value: key,
+		})
+		root.Content = append(root.Content, interfaceToNode(value))
+	}
+
+	// Helper function to set nested values (e.g., sync.upstream)
+	setNestedValue := func(section string, values map[string]interface{}, orderedKeys []string) {
+		// Find the section
+		var sectionNode *yaml.Node
+		var sectionIndex int
+		for i := 0; i < len(root.Content); i += 2 {
+			if root.Content[i].Value == section {
+				sectionNode = root.Content[i+1]
+				sectionIndex = i + 1
+				break
+			}
+		}
+
+		// Create section if it doesn't exist
+		if sectionNode == nil {
+			sectionNode = &yaml.Node{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+			}
+			// Add section key
+			root.Content = append(root.Content, &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Value: section,
+			})
+			root.Content = append(root.Content, sectionNode)
+		} else if sectionNode.Kind != yaml.MappingNode {
+			sectionNode = &yaml.Node{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+			}
+			root.Content[sectionIndex] = sectionNode
+		}
+
+		// Update values in the section
+		for _, key := range orderedKeys {
+			value, ok := values[key]
+			if !ok {
+				continue
+			}
+			found := false
+			for i := 0; i < len(sectionNode.Content); i += 2 {
+				if sectionNode.Content[i].Value == key {
+					replacement := interfaceToNode(value)
+					valueNode := sectionNode.Content[i+1]
+					if valueNode.Kind == yaml.ScalarNode && replacement.Kind == yaml.ScalarNode {
+						valueNode.Value = replacement.Value
+						valueNode.Tag = replacement.Tag
+					} else {
+						sectionNode.Content[i+1] = replacement
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				sectionNode.Content = append(sectionNode.Content, &yaml.Node{
+					Kind:  yaml.ScalarNode,
+					Tag:   "!!str",
+					Value: key,
+				})
+				sectionNode.Content = append(sectionNode.Content, interfaceToNode(value))
+			}
+		}
+	}
+
+	// Update simple values
+	if config.SiteName != "" {
+		setValue("site_name", config.SiteName)
+	}
+	if config.Preset != "" {
+		setValue("preset", config.Preset)
+	}
+	if config.DefaultBranch != "" {
+		setValue("default_branch", config.DefaultBranch)
+	}
+
+	// Update sync config if any values are set
+	if config.Sync.Upstream != "" || config.Sync.Strategy != "" || config.Sync.Remote != "" {
+		syncValues := make(map[string]interface{})
+		if config.Sync.Upstream != "" {
+			syncValues["upstream"] = config.Sync.Upstream
+		}
+		if config.Sync.Strategy != "" {
+			syncValues["strategy"] = config.Sync.Strategy
+		}
+		if config.Sync.Remote != "" {
+			syncValues["remote"] = config.Sync.Remote
+		}
+		setNestedValue("sync", syncValues, []string{"upstream", "strategy", "remote"})
+	}
+
+	content, err := yaml.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
@@ -297,6 +391,63 @@ func SaveProject(path string, config *Config) error {
 	}
 
 	return nil
+}
+
+// interfaceToNode converts a Go interface to a yaml.Node
+func interfaceToNode(v interface{}) *yaml.Node {
+	switch val := v.(type) {
+	case string:
+		return &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!str",
+			Value: val,
+		}
+	case bool:
+		boolStr := "false"
+		if val {
+			boolStr = "true"
+		}
+		return &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!bool",
+			Value: boolStr,
+		}
+	case int:
+		return &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!int",
+			Value: fmt.Sprintf("%d", val),
+		}
+	case map[string]interface{}:
+		node := &yaml.Node{
+			Kind: yaml.MappingNode,
+			Tag:  "!!map",
+		}
+		for k, v := range val {
+			node.Content = append(node.Content, &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Value: k,
+			})
+			node.Content = append(node.Content, interfaceToNode(v))
+		}
+		return node
+	case []interface{}:
+		node := &yaml.Node{
+			Kind: yaml.SequenceNode,
+			Tag:  "!!seq",
+		}
+		for _, v := range val {
+			node.Content = append(node.Content, interfaceToNode(v))
+		}
+		return node
+	default:
+		return &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!str",
+			Value: fmt.Sprintf("%v", val),
+		}
+	}
 }
 
 // GetGlobalConfigDir returns the global config directory

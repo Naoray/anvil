@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/michaeldyrynda/arbor/internal/git"
 	"github.com/michaeldyrynda/arbor/internal/utils"
 )
@@ -207,4 +209,30 @@ func TestInitCommand_ConfiguresFetchRefspec(t *testing.T) {
 	output, err = cmd.Output()
 	assert.NoError(t, err)
 	assert.Equal(t, "+refs/heads/*:refs/remotes/origin/*", strings.TrimSpace(string(output)))
+}
+
+func TestCheckAndCopyRepoConfig_SkipsWhenProjectConfigExists(t *testing.T) {
+	projectDir := t.TempDir()
+	mainPath := filepath.Join(projectDir, "main")
+	requireNoError(t, os.MkdirAll(mainPath, 0755))
+
+	repoConfigPath := filepath.Join(mainPath, "arbor.yaml")
+	repoContent := []byte("preset: laravel\n")
+	requireNoError(t, os.WriteFile(repoConfigPath, repoContent, 0644))
+
+	projectConfigPath := filepath.Join(projectDir, "arbor.yaml")
+	projectContent := []byte("preset: php\nsite_name: local\n")
+	requireNoError(t, os.WriteFile(projectConfigPath, projectContent, 0644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("use-repo-config", true, "")
+
+	cfg := &config.Config{SiteName: "local"}
+	copied, err := checkAndCopyRepoConfig(cmd, mainPath, projectDir, cfg)
+	requireNoError(t, err)
+	assert.False(t, copied, "expected repo config copy to be skipped when project config exists")
+
+	content, err := os.ReadFile(projectConfigPath)
+	requireNoError(t, err)
+	assert.Equal(t, string(projectContent), string(content))
 }
