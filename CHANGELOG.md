@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-04
+
+### Added
+- Pre-flight checks to validate dependencies before scaffold execution
+  - Check for required commands, files, environment variables, and configuration
+  - Conditional evaluation support for complex dependency validation
+  - Clear error messages listing missing dependencies
+  - Abort scaffold early when dependencies are not met
+
+- Improved diagnostics and error messages for scaffold operations
+
+### Fixed
+- Correct ldflags path for version info in build configuration
+
 ## [0.8.1] - 2026-02-03
 
 ### Fixed
@@ -237,6 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive commands (work, prune)
 - Multi-platform builds and CI/CD
 
+[0.9.0]: https://github.com/michaeldyrynda/arbor/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/michaeldyrynda/arbor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/michaeldyrynda/arbor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/michaeldyrynda/arbor/compare/v0.6.0...v0.7.0
