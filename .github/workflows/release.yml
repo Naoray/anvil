@@ -165,4 +165,4 @@ jobs:
           body: ${{ steps.release_body.outputs.BODY }}
           files: release-artifacts/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
