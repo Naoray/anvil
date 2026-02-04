@@ -23,6 +23,10 @@ Before running this skill:
 - Working directory must be clean
 - You have push access to the repository
 - `gh` CLI tool is installed and authenticated
+- `golangci-lint` is installed (pinned to v2.1.2)
+  ```bash
+  go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.2
+  ```
 
 ## Workflow
 
@@ -148,6 +152,20 @@ All checks must pass before proceeding:
 
 ```bash
 echo "Running quality gates..."
+
+# Check code formatting
+echo "→ Checking code formatting with gofmt..."
+UNFORMATTED=$(gofmt -l .)
+if [[ -n "$UNFORMATTED" ]]; then
+    echo "✗ The following files are not properly formatted:"
+    echo "$UNFORMATTED"
+    echo "Run 'gofmt -w .' to fix formatting issues"
+    exit 1
+fi
+
+# Run linter
+echo "→ Running golangci-lint..."
+golangci-lint run ./... || exit 1
 
 # Run all tests
 echo "→ Running unit tests..."
