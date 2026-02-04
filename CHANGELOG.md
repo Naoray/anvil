@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-02-04
+
+### Added
+- **Homebrew Support** - Arbor is now available via Homebrew
+  - Install with `brew tap artisanexperiences/tap && brew install arbor`
+  - Automated formula updates on new releases
+  - Support for macOS (arm64/amd64) and Linux (arm64/amd64)
+
+### Changed
+- **BREAKING:** Migrated repository from `michaeldyrynda` to `artisanexperiences` organization
+  - Module path changed from `github.com/michaeldyrynda/arbor` to `github.com/artisanexperiences/arbor`
+  - All import paths updated across the codebase
+  - GitHub URLs updated in documentation
+  - Users installing via `go install` must update their commands
+
+### Added
+- MIT LICENSE file with proper copyright attribution
+- Automated Homebrew formula update workflow
+- Enhanced installation documentation with multiple installation methods
+
 ## [0.9.1] - 2026-02-04
 
 ### Added
