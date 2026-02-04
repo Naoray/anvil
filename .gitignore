@@ -2,7 +2,7 @@
 .ai/plans/
 .ai/*.md
 .opencode/plans/
-.opencode/*.md
+!.opencode/skills/**/*.md
 
 # Ignore built binary
 arbor
