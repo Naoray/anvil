@@ -71,7 +71,7 @@ jobs:
         run: |
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -trimpath -ldflags "-X main.version=${{ steps.version.outputs.VERSION }} -X main.commit=$COMMIT -X main.date=$DATE" \
+          go build -trimpath -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }} -X main.Commit=$COMMIT -X main.BuildDate=$DATE" \
             -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }} ./cmd/arbor
 
       - name: Create archive (tar.gz)

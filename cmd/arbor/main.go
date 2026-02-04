@@ -8,15 +8,15 @@ import (
 
 // These variables are set at build time via -ldflags
 var (
-	version = "dev"
-	commit  = "unknown"
-	date    = "unknown"
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
 )
 
 func main() {
-	cli.Version = version
-	cli.Commit = commit
-	cli.BuildDate = date
+	cli.Version = Version
+	cli.Commit = Commit
+	cli.BuildDate = BuildDate
 	if err := cli.Execute(); err != nil {
 		os.Exit(1)
 	}
