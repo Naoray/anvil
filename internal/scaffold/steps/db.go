@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/words"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/words"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 type DbCreateStep struct {

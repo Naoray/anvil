@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/template"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/template"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestBashRunStep_TemplateReplacement(t *testing.T) {

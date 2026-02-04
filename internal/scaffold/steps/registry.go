@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/validation"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/validation"
 )
 
 type StepFactory func(cfg config.StepConfig) types.ScaffoldStep

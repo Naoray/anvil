@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/presets"
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/presets"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 var destroyCmd = &cobra.Command{

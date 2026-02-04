@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/config"
 )
 
 type PHP struct {

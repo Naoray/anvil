@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/config"
 )
 
 // RequiredField validates that a specific field is not empty.

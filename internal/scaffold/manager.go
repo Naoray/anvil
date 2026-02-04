@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/words"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/words"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 type ScaffoldManager struct {

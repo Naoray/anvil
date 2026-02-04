@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	arborerrors "github.com/michaeldyrynda/arbor/internal/errors"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/presets"
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
+	"github.com/artisanexperiences/arbor/internal/config"
+	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/presets"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
 )
 
 type ProjectContext struct {

@@ -6,10 +6,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	arbor_exec "github.com/michaeldyrynda/arbor/internal/exec"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/template"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/config"
+	arbor_exec "github.com/artisanexperiences/arbor/internal/exec"
+	"github.com/artisanexperiences/arbor/internal/scaffold/template"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type BinaryStep struct {

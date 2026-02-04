@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func RenderTable(headers []string, rows [][]string) string {

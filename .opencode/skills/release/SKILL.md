@@ -210,7 +210,7 @@ Example:
 Update version links at bottom:
 
 ```markdown
-[0.4.2]: https://github.com/michaeldyrynda/arbor/compare/v0.4.1...v0.4.2
+[0.4.2]: https://github.com/artisanexperiences/arbor/compare/v0.4.1...v0.4.2
 ```
 
 ### Step 5: Update README.md
@@ -306,7 +306,7 @@ gh release view vNEW_VERSION
 
 if [[ $? -eq 0 ]]; then
     echo "✓ Release vNEW_VERSION published successfully"
-    echo "Download URL: https://github.com/michaeldyrynda/arbor/releases/tag/vNEW_VERSION"
+    echo "Download URL: https://github.com/artisanexperiences/arbor/releases/tag/vNEW_VERSION"
 else
     echo "✗ Failed to verify release"
     exit 1

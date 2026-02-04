@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 var repairCmd = &cobra.Command{

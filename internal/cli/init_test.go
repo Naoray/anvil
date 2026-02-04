@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 func requireNoError(t *testing.T, err error) {
@@ -40,7 +40,7 @@ func TestExtractRepoName(t *testing.T) {
 		},
 		{
 			name:     "HTTPS URL",
-			input:    "https://github.com/michaeldyrynda/arbor.git",
+			input:    "https://github.com/artisanexperiences/arbor.git",
 			expected: "arbor",
 		},
 		{

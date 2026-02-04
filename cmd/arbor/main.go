@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/michaeldyrynda/arbor/internal/cli"
+	"github.com/artisanexperiences/arbor/internal/cli"
 )
 
 // These variables are set at build time via -ldflags

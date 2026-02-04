@@ -1,4 +1,4 @@
-module github.com/michaeldyrynda/arbor
+module github.com/artisanexperiences/arbor
 
 go 1.24.0
 

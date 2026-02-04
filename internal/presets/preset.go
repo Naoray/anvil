@@ -1,7 +1,7 @@
 package presets
 
 import (
-	"github.com/michaeldyrynda/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/config"
 )
 
 type Preset interface {

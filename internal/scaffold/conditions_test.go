@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestConditionEvaluator_Evaluate(t *testing.T) {

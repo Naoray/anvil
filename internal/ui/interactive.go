@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func SelectBranchInteractive(barePath string, localBranches, remoteBranches []string) (string, error) {

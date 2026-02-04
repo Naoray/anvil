@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 var rootCmd = &cobra.Command{

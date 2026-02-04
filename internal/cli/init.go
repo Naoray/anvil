@@ -8,12 +8,12 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/presets"
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
-	"github.com/michaeldyrynda/arbor/internal/ui"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/presets"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 var initCmd = &cobra.Command{

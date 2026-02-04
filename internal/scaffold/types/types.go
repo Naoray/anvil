@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 type ScaffoldContext struct {

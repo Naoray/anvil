@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	arbor_exec "github.com/michaeldyrynda/arbor/internal/exec"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	arbor_exec "github.com/artisanexperiences/arbor/internal/exec"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type CommandRunStep struct {

@@ -55,7 +55,7 @@ formatters:
 
     goimports:
       local-prefixes:
-        - github.com/michaeldyrynda/arbor
+        - github.com/artisanexperiences/arbor
 
 issues:
   max-issues-per-linter: 50

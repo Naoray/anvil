@@ -22,22 +22,45 @@ arbor remove feature-new-feature
 
 ## Installation
 
+### Via Homebrew (Recommended for macOS/Linux)
+
 ```bash
-# Clone and build
-git clone git@github.com:michaeldyrynda/arbor.git
+brew tap artisanexperiences/tap
+brew install arbor
+```
+
+**Upgrade:**
+```bash
+brew upgrade arbor
+```
+
+### Via Direct Download
+
+Download the latest release for your platform from the [releases page](https://github.com/artisanexperiences/arbor/releases).
+
+### Via Go Install
+
+```bash
+go install github.com/artisanexperiences/arbor/cmd/arbor@latest
+```
+
+*Note: Installing via `go install` builds without version information. Use Homebrew or download releases for proper version metadata.*
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/artisanexperiences/arbor.git
 cd arbor
 
-# Linux/macOS
+# Build for your platform
 go build -o arbor ./cmd/arbor
 
-# Windows
-go build -o arbor.exe ./cmd/arbor
-
-# Or install using go install
-go install github.com/michaeldyrynda/arbor/cmd/arbor@latest
-
-# Or download pre-built binary from GitHub Releases
-# https://github.com/michaeldyrynda/arbor/releases
+# Or build with version information
+VERSION=$(git describe --tags --always)
+COMMIT=$(git rev-parse --short HEAD)
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+go build -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" -o arbor ./cmd/arbor
 ```
 
 ## Quick Start

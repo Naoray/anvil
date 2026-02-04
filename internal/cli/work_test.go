@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func TestWorkCommand_SetsUpBranchTracking(t *testing.T) {
