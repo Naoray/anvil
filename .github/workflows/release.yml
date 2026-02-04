@@ -164,5 +164,13 @@ jobs:
           name: v${{ steps.version.outputs.VERSION }}
           body: ${{ steps.release_body.outputs.BODY }}
           files: release-artifacts/*
+
+      - name: Trigger Homebrew formula update
         env:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh api repos/artisanexperiences/homebrew-tap/dispatches \
+            --method POST \
+            --field event_type=update-formula \
+            --field client_payload[version]="${{ steps.version.outputs.VERSION }}" \
+            --field client_payload[repository]="${{ github.repository }}"
