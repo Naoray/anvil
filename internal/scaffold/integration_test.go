@@ -422,3 +422,168 @@ APP_NAME=some-feature
 		assert.Equal(t, actualDbName, expectedDbName, "Database name from db.create should match env.write value")
 	})
 }
+
+func TestIntegration_PreFlightChecks(t *testing.T) {
+	t.Run("pre-flight success - all dependencies exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create test file
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644))
+
+		// Set test env var
+		t.Setenv("TEST_VAR_1", "value1")
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists":     []interface{}{"TEST_VAR_1"},
+						"command_exists": []interface{}{"go"},
+						"file_exists":    []interface{}{"test.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.NoError(t, err, "Pre-flight should pass when all dependencies exist")
+	})
+
+	t.Run("pre-flight failure - missing env var", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists": []interface{}{"NONEXISTENT_VAR_12345"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when env var is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing environment variables")
+		assert.Contains(t, err.Error(), "NONEXISTENT_VAR_12345")
+	})
+
+	t.Run("pre-flight failure - missing command", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"command_exists": []interface{}{"nonexistentcommand12345"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when command is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing commands")
+		assert.Contains(t, err.Error(), "nonexistentcommand12345")
+	})
+
+	t.Run("pre-flight failure - missing file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"file_exists": []interface{}{"nonexistent.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when file is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "nonexistent.txt")
+	})
+
+	t.Run("pre-flight failure - multiple missing dependencies", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists":     []interface{}{"MISSING_VAR_1", "MISSING_VAR_2"},
+						"command_exists": []interface{}{"missingcmd1", "missingcmd2"},
+						"file_exists":    []interface{}{"missing1.txt", "missing2.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when multiple dependencies are missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing environment variables")
+		assert.Contains(t, err.Error(), "MISSING_VAR_1")
+		assert.Contains(t, err.Error(), "MISSING_VAR_2")
+		assert.Contains(t, err.Error(), "Missing commands")
+		assert.Contains(t, err.Error(), "missingcmd1")
+		assert.Contains(t, err.Error(), "missingcmd2")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "missing1.txt")
+		assert.Contains(t, err.Error(), "missing2.txt")
+	})
+
+	t.Run("no pre-flight configured - scaffold runs normally", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.NoError(t, err, "Scaffold should run normally when no pre-flight is configured")
+	})
+
+	t.Run("pre-flight with mixed results - some exist, some don't", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create one file but not another
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "exists.txt"), []byte("test"), 0644))
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"file_exists": []interface{}{"exists.txt", "missing.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when ANY file is missing")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "missing.txt")
+		assert.NotContains(t, err.Error(), "exists.txt", "Should not list files that exist")
+	})
+}

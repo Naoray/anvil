@@ -2,12 +2,16 @@ package scaffold
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/michaeldyrynda/arbor/internal/config"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
 	"github.com/michaeldyrynda/arbor/internal/scaffold/words"
+	"github.com/michaeldyrynda/arbor/internal/ui"
 )
 
 type ScaffoldManager struct {
@@ -206,6 +210,18 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 		ctx.SetDbSuffix(localState.DbSuffix)
 	}
 
+	// Run pre-flight checks with spinner
+	if !quiet {
+		if err := m.runPreFlightWithSpinner(&ctx, &cfg.Scaffold); err != nil {
+			return err
+		}
+	} else {
+		// Quiet mode: run without spinner
+		if err := m.runPreFlightChecks(&ctx, &cfg.Scaffold); err != nil {
+			return err
+		}
+	}
+
 	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch)
 	if err != nil {
 		return fmt.Errorf("getting scaffold steps: %w", err)
@@ -261,4 +277,154 @@ func (m *ScaffoldManager) stepOptionsFromFlags(dryRun, verbose, quiet bool) type
 		Verbose: verbose,
 		Quiet:   quiet,
 	}
+}
+
+// runPreFlightChecks validates dependencies before scaffold execution.
+// Returns an error with detailed information if any checks fail.
+func (m *ScaffoldManager) runPreFlightChecks(ctx *types.ScaffoldContext, cfg *config.ScaffoldConfig) error {
+	// Skip if no pre-flight configured
+	if cfg.PreFlight == nil || len(cfg.PreFlight.Condition) == 0 {
+		return nil
+	}
+
+	// Evaluate the condition
+	result, err := ctx.EvaluateCondition(cfg.PreFlight.Condition)
+	if err != nil {
+		return fmt.Errorf("pre-flight check error: %w", err)
+	}
+
+	if !result {
+		// Generate detailed error message showing what failed
+		return m.generatePreFlightError(ctx, cfg.PreFlight.Condition)
+	}
+
+	return nil
+}
+
+// runPreFlightWithSpinner runs pre-flight checks with a spinner.
+func (m *ScaffoldManager) runPreFlightWithSpinner(ctx *types.ScaffoldContext, cfg *config.ScaffoldConfig) error {
+	// Skip if no pre-flight configured
+	if cfg.PreFlight == nil || len(cfg.PreFlight.Condition) == 0 {
+		return nil
+	}
+
+	var checkErr error
+	err := ui.RunWithSpinner("Running pre-flight checks", func() error {
+		checkErr = m.runPreFlightChecks(ctx, cfg)
+		return checkErr
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return checkErr
+}
+
+// generatePreFlightError creates a detailed error message showing which checks failed.
+func (m *ScaffoldManager) generatePreFlightError(ctx *types.ScaffoldContext, conditions map[string]interface{}) error {
+	var errorParts []string
+
+	// Check each condition type to report specific failures
+	if envList, ok := conditions["env_exists"]; ok {
+		missing := m.checkMissingEnvVars(envList)
+		if len(missing) > 0 {
+			errorParts = append(errorParts,
+				fmt.Sprintf("Missing environment variables:\n  - %s",
+					strings.Join(missing, "\n  - ")))
+		}
+	}
+
+	if cmdList, ok := conditions["command_exists"]; ok {
+		missing := m.checkMissingCommands(cmdList)
+		if len(missing) > 0 {
+			errorParts = append(errorParts,
+				fmt.Sprintf("Missing commands:\n  - %s",
+					strings.Join(missing, "\n  - ")))
+		}
+	}
+
+	if fileList, ok := conditions["file_exists"]; ok {
+		missing := m.checkMissingFiles(ctx, fileList)
+		if len(missing) > 0 {
+			errorParts = append(errorParts,
+				fmt.Sprintf("Missing files:\n  - %s",
+					strings.Join(missing, "\n  - ")))
+		}
+	}
+
+	if len(errorParts) > 0 {
+		return fmt.Errorf("pre-flight checks failed:\n\n%s\n\nPlease resolve these issues and try again",
+			strings.Join(errorParts, "\n\n"))
+	}
+
+	return fmt.Errorf("pre-flight checks failed")
+}
+
+// checkMissingEnvVars returns list of environment variables that don't exist.
+func (m *ScaffoldManager) checkMissingEnvVars(value interface{}) []string {
+	var missing []string
+
+	switch v := value.(type) {
+	case string:
+		if _, exists := os.LookupEnv(v); !exists {
+			missing = append(missing, v)
+		}
+	case []interface{}:
+		for _, item := range v {
+			if envName, ok := item.(string); ok {
+				if _, exists := os.LookupEnv(envName); !exists {
+					missing = append(missing, envName)
+				}
+			}
+		}
+	}
+
+	return missing
+}
+
+// checkMissingCommands returns list of commands that don't exist in PATH.
+func (m *ScaffoldManager) checkMissingCommands(value interface{}) []string {
+	var missing []string
+
+	switch v := value.(type) {
+	case string:
+		if _, err := exec.LookPath(v); err != nil {
+			missing = append(missing, v)
+		}
+	case []interface{}:
+		for _, item := range v {
+			if cmdName, ok := item.(string); ok {
+				if _, err := exec.LookPath(cmdName); err != nil {
+					missing = append(missing, cmdName)
+				}
+			}
+		}
+	}
+
+	return missing
+}
+
+// checkMissingFiles returns list of files that don't exist in worktree.
+func (m *ScaffoldManager) checkMissingFiles(ctx *types.ScaffoldContext, value interface{}) []string {
+	var missing []string
+
+	switch v := value.(type) {
+	case string:
+		fullPath := filepath.Join(ctx.WorktreePath, v)
+		if _, err := os.Stat(fullPath); err != nil {
+			missing = append(missing, v)
+		}
+	case []interface{}:
+		for _, item := range v {
+			if path, ok := item.(string); ok {
+				fullPath := filepath.Join(ctx.WorktreePath, path)
+				if _, err := os.Stat(fullPath); err != nil {
+					missing = append(missing, path)
+				}
+			}
+		}
+	}
+
+	return missing
 }

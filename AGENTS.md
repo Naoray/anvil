@@ -48,7 +48,7 @@ arbor remove feature-my-feature  # When done
 
 | Config | Location | Purpose | Versioned? |
 |--------|----------|---------|------------|
-| Project | `<project-root>/arbor.yaml` | Project-specific settings, scaffold config | No (not in a repo) |
+| Project | `<project-root>/arbor.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
 | Repository | `<worktree>/arbor.yaml` | Team defaults (copied during init) | Yes (committed to git) |
 | Local State | `<worktree>/.arbor.local` | Runtime state (db_suffix) | No (gitignored) |
 | Global | `~/.config/arbor/arbor.yaml` | User defaults | No (local machine) |
@@ -183,6 +183,7 @@ This approach ensures:
 2. Register in step executor
 3. Add tests
 4. Document in `README.md` scaffold steps section
+5. Consider adding pre-flight checks if the step requires specific dependencies (environment variables, commands, files)
 
 ### Add a New Preset
 

@@ -568,3 +568,197 @@ func TestScaffoldContext_ConcurrentAccess(t *testing.T) {
 		}
 	})
 }
+
+func TestScaffoldContext_EnvExists_Array(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := &ScaffoldContext{
+		WorktreePath: tmpDir,
+	}
+
+	t.Run("all vars in array exist", func(t *testing.T) {
+		t.Setenv("TEST_VAR_1", "value1")
+		t.Setenv("TEST_VAR_2", "value2")
+		t.Setenv("TEST_VAR_3", "value3")
+
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"env_exists": []interface{}{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true when all env vars exist")
+		}
+	})
+
+	t.Run("one var in array missing", func(t *testing.T) {
+		t.Setenv("TEST_VAR_1", "value1")
+		t.Setenv("TEST_VAR_2", "value2")
+		// TEST_VAR_3 not set
+
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"env_exists": []interface{}{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when one env var is missing")
+		}
+	})
+
+	t.Run("empty array returns true", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"env_exists": []interface{}{},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true for empty array")
+		}
+	})
+
+	t.Run("all vars in array missing", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"env_exists": []interface{}{"NONEXISTENT_VAR_1", "NONEXISTENT_VAR_2"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when all env vars are missing")
+		}
+	})
+}
+
+func TestScaffoldContext_CommandExists_Array(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := &ScaffoldContext{
+		WorktreePath: tmpDir,
+	}
+
+	t.Run("all commands in array exist", func(t *testing.T) {
+		// Using common commands that should exist on most systems
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"command_exists": []interface{}{"go", "ls"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true when all commands exist")
+		}
+	})
+
+	t.Run("one command in array missing", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"command_exists": []interface{}{"go", "nonexistentcommand12345"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when one command is missing")
+		}
+	})
+
+	t.Run("empty array returns true", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"command_exists": []interface{}{},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true for empty array")
+		}
+	})
+
+	t.Run("all commands in array missing", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"command_exists": []interface{}{"nonexistentcmd1", "nonexistentcmd2"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when all commands are missing")
+		}
+	})
+}
+
+func TestScaffoldContext_FileExists_Array(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := &ScaffoldContext{
+		WorktreePath: tmpDir,
+	}
+
+	t.Run("all files in array exist", func(t *testing.T) {
+		// Create test files
+		if err := os.WriteFile(filepath.Join(tmpDir, "file1.txt"), []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "file3.txt"), []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"file_exists": []interface{}{"file1.txt", "file2.txt", "file3.txt"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true when all files exist")
+		}
+	})
+
+	t.Run("one file in array missing", func(t *testing.T) {
+		// Create only some files
+		if err := os.WriteFile(filepath.Join(tmpDir, "exists1.txt"), []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "exists2.txt"), []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// missing.txt not created
+
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"file_exists": []interface{}{"exists1.txt", "exists2.txt", "missing.txt"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when one file is missing")
+		}
+	})
+
+	t.Run("empty array returns true", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"file_exists": []interface{}{},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !result {
+			t.Error("expected true for empty array")
+		}
+	})
+
+	t.Run("all files in array missing", func(t *testing.T) {
+		result, err := ctx.EvaluateCondition(map[string]interface{}{
+			"file_exists": []interface{}{"nonexistent1.txt", "nonexistent2.txt"},
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result {
+			t.Error("expected false when all files are missing")
+		}
+	})
+}

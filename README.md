@@ -270,6 +270,113 @@ Scaffold steps define actions to run when creating a new worktree. Each step can
 - Copy files
 - Execute Laravel Artisan commands
 
+### Pre-Flight Checks
+
+Pre-flight checks validate dependencies **before** any scaffold steps execute. This prevents worktrees from being left in a broken state due to missing requirements.
+
+**Configuration:**
+
+```yaml
+scaffold:
+  pre_flight:
+    condition:
+      # Check environment variables are set
+      env_exists:
+        - OP_VAULT
+        - OP_ITEM
+      
+      # Check commands/binaries are installed
+      command_exists:
+        - op        # 1Password CLI
+        - herd      # Laravel Herd
+        - composer
+      
+      # Check required files exist
+      file_exists:
+        - .env.op
+        - package.json
+  
+  steps:
+    # Your scaffold steps here
+```
+
+**Supported Conditions:**
+
+All condition types support both single values and arrays:
+
+| Condition | Single Value | Array | Description |
+|-----------|--------------|-------|-------------|
+| `env_exists` | `env_exists: API_KEY` | `env_exists: [API_KEY, API_SECRET]` | Check OS environment variables are set |
+| `command_exists` | `command_exists: docker` | `command_exists: [docker, docker-compose]` | Check commands are available in PATH |
+| `file_exists` | `file_exists: .env` | `file_exists: [.env, composer.json]` | Check files exist in worktree |
+| `os` | `os: darwin` | `os: [darwin, linux]` | Check operating system |
+
+You can combine multiple condition types:
+
+```yaml
+pre_flight:
+  condition:
+    env_exists:
+      - OP_VAULT
+      - OP_ITEM
+    command_exists: op
+    file_exists: .env.op
+    os: darwin
+```
+
+**Error Messages:**
+
+When pre-flight checks fail, you'll see a detailed breakdown:
+
+```
+✗ Running pre-flight checks
+
+Pre-flight checks failed:
+
+Missing environment variables:
+  - OP_VAULT
+  - OP_ITEM
+
+Missing commands:
+  - op
+
+Missing files:
+  - .env.op
+
+Please resolve these issues and try again.
+```
+
+**Example: 1Password Integration**
+
+```yaml
+scaffold:
+  pre_flight:
+    condition:
+      env_exists:
+        - OP_VAULT
+        - OP_ITEM
+      command_exists: op
+      file_exists: .env.op
+  
+  steps:
+    - name: bash.run
+      command: "op inject -i .env.op -o .env"
+      
+    - name: php.composer
+      args: ["install"]
+```
+
+This ensures that before any steps run:
+- The `op` CLI is installed
+- Environment variables `OP_VAULT` and `OP_ITEM` are set
+- The `.env.op` template file exists
+
+**Notes:**
+
+- Pre-flight checks are **skipped** when using `--skip-scaffold`
+- File paths in `file_exists` are relative to the worktree (no template variables)
+- All checks must pass for scaffold to proceed
+
 ### Configuration Structure
 
 ```yaml
@@ -526,13 +633,26 @@ Steps execute in the order they appear in the configuration file.
 
 ### Conditions
 
-Steps can be conditionally executed based on environment:
+Steps can be conditionally executed based on environment. Conditions support both single values and arrays:
 
 ```yaml
+# Single value conditions
 condition:
   env_file_contains:
     file: .env
     key: DB_CONNECTION
+
+# Array conditions - check multiple items at once
+condition:
+  env_exists:
+    - API_KEY
+    - API_SECRET
+  command_exists:
+    - docker
+    - docker-compose
+  file_exists:
+    - .env
+    - composer.json
 ```
 
 ### Example Configuration

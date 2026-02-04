@@ -51,10 +51,17 @@ type SyncConfig struct {
 	Remote   string `mapstructure:"remote"`
 }
 
+// PreFlight defines checks that run before scaffold execution.
+// All checks must pass before any scaffold steps are executed.
+type PreFlight struct {
+	Condition map[string]interface{} `mapstructure:"condition"`
+}
+
 // ScaffoldConfig represents scaffold configuration
 type ScaffoldConfig struct {
-	Steps    []StepConfig `mapstructure:"steps"`
-	Override bool         `mapstructure:"override"`
+	PreFlight *PreFlight   `mapstructure:"pre_flight"`
+	Steps     []StepConfig `mapstructure:"steps"`
+	Override  bool         `mapstructure:"override"`
 }
 
 // StepConfig represents a scaffold step configuration
