@@ -937,3 +937,217 @@ func TestListWorktrees_PorcelainParsing_CurrentBehavior(t *testing.T) {
 	assert.NotNil(t, mainWt, "main worktree should exist")
 	assert.Equal(t, "main", mainWt.Branch)
 }
+
+// Tests for linked project functionality (using .git instead of .bare)
+
+// createTestRepoWithGit creates a regular git repo (with .git directory, not bare)
+func createTestRepoWithGit(t *testing.T) string {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("creating repo dir: %v", err)
+	}
+
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("initializing git repo: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("setting git user.email: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("setting git user.name: %v", err)
+	}
+
+	readmePath := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("test"), 0644); err != nil {
+		t.Fatalf("writing README: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("staging files: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+
+	return repoDir
+}
+
+func TestIsGitRepo(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+
+	assert.True(t, IsGitRepo(repoDir), "should detect .git directory")
+	assert.False(t, IsGitRepo("/nonexistent/path"), "should return false for nonexistent path")
+	assert.False(t, IsGitRepo(t.TempDir()), "should return false for non-git directory")
+}
+
+func TestIsArborProject(t *testing.T) {
+	barePath, _ := createTestRepo(t)
+	projectDir := filepath.Dir(barePath)
+
+	assert.True(t, IsArborProject(projectDir), "should detect .bare directory")
+	assert.False(t, IsArborProject("/nonexistent/path"), "should return false for nonexistent path")
+
+	repoDir := createTestRepoWithGit(t)
+	assert.False(t, IsArborProject(repoDir), "should return false for regular git repo")
+}
+
+func TestFindGitDir_WithGitRepo(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+
+	gitDir, isBare, err := FindGitDir(repoDir)
+
+	assert.NoError(t, err)
+	assert.False(t, isBare)
+	assert.Equal(t, filepath.Join(repoDir, ".git"), gitDir)
+}
+
+func TestFindGitDir_WithBareRepo(t *testing.T) {
+	barePath, _ := createTestRepo(t)
+	projectDir := filepath.Dir(barePath)
+
+	gitDir, isBare, err := FindGitDir(projectDir)
+
+	assert.NoError(t, err)
+	assert.True(t, isBare)
+	assert.Equal(t, barePath, gitDir)
+}
+
+func TestFindGitDir_NoRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	_, _, err := FindGitDir(tmpDir)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no .git or .bare found")
+}
+
+func TestCreateWorktreeFromGitDir(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	tmpDir := filepath.Dir(repoDir)
+
+	worktreePath := filepath.Join(tmpDir, "feature-branch")
+
+	err := CreateWorktreeFromGitDir(gitDir, worktreePath, "feature", "main")
+
+	assert.NoError(t, err)
+
+	// Verify worktree was created
+	_, err = os.Stat(worktreePath)
+	assert.NoError(t, err, "worktree directory should exist")
+
+	// Verify it has the README
+	_, err = os.Stat(filepath.Join(worktreePath, "README.md"))
+	assert.NoError(t, err, "worktree should have README.md")
+
+	// Verify branch was created
+	assert.True(t, BranchExists(repoDir, "feature"), "feature branch should exist")
+}
+
+func TestCreateWorktreeFromGitDir_ExistingBranch(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	tmpDir := filepath.Dir(repoDir)
+
+	// Create a branch first
+	cmd := exec.Command("git", "branch", "existing-branch")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("creating branch: %v", err)
+	}
+
+	worktreePath := filepath.Join(tmpDir, "existing-branch-wt")
+
+	err := CreateWorktreeFromGitDir(gitDir, worktreePath, "existing-branch", "main")
+
+	assert.NoError(t, err)
+
+	// Verify worktree was created
+	_, err = os.Stat(worktreePath)
+	assert.NoError(t, err, "worktree directory should exist")
+}
+
+func TestListWorktreesFromGitDir(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	tmpDir := filepath.Dir(repoDir)
+
+	// Create a feature worktree
+	featurePath := filepath.Join(tmpDir, "feature-wt")
+	err := CreateWorktreeFromGitDir(gitDir, featurePath, "feature", "main")
+	assert.NoError(t, err)
+
+	worktrees, err := ListWorktreesFromGitDir(gitDir)
+
+	assert.NoError(t, err)
+	assert.Len(t, worktrees, 2, "should have main and feature worktrees")
+
+	branches := make(map[string]bool)
+	for _, wt := range worktrees {
+		branches[wt.Branch] = true
+	}
+
+	assert.True(t, branches["main"], "should have main worktree")
+	assert.True(t, branches["feature"], "should have feature worktree")
+}
+
+func TestRemoveWorktreeWithGitDir(t *testing.T) {
+	repoDir := createTestRepoWithGit(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	tmpDir := filepath.Dir(repoDir)
+
+	// Create a feature worktree
+	featurePath := filepath.Join(tmpDir, "feature-wt")
+	err := CreateWorktreeFromGitDir(gitDir, featurePath, "feature", "main")
+	assert.NoError(t, err)
+
+	// Verify it exists
+	_, err = os.Stat(featurePath)
+	assert.NoError(t, err, "worktree should exist before removal")
+
+	// Remove it
+	err = RemoveWorktreeWithGitDir(gitDir, featurePath, true)
+	assert.NoError(t, err)
+
+	// Verify it's gone
+	_, err = os.Stat(featurePath)
+	assert.True(t, os.IsNotExist(err), "worktree should be removed")
+
+	// Verify worktree list only has main
+	worktrees, err := ListWorktreesFromGitDir(gitDir)
+	assert.NoError(t, err)
+	assert.Len(t, worktrees, 1, "should only have main worktree")
+}
+
+func TestGetRepoPath(t *testing.T) {
+	tests := []struct {
+		gitDir   string
+		expected string
+	}{
+		{"/home/user/project/.git", "/home/user/project"},
+		{"/home/user/project/.bare", "/home/user/project"},
+		{"/var/repos/myrepo/.git", "/var/repos/myrepo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.gitDir, func(t *testing.T) {
+			result := GetRepoPath(tt.gitDir)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

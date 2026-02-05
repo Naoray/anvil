@@ -207,3 +207,194 @@ func loadGlobalFromTestDir(testDir string) (*GlobalConfig, error) {
 
 	return &config, nil
 }
+
+// Tests for linked project functionality
+
+func TestGlobalConfig_ProjectInfo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configContent := `default_branch: main
+worktree_base: ~/.arbor/worktrees
+projects:
+  my-project:
+    path: /home/user/projects/my-project
+    default_branch: main
+    preset: laravel
+    site_name: my-project
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+
+	cfg, err := loadGlobalFromTestDir(tmpDir)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, "~/.arbor/worktrees", cfg.WorktreeBase)
+	assert.NotNil(t, cfg.Projects)
+	assert.Contains(t, cfg.Projects, "my-project")
+
+	project := cfg.Projects["my-project"]
+	assert.Equal(t, "/home/user/projects/my-project", project.Path)
+	assert.Equal(t, "main", project.DefaultBranch)
+	assert.Equal(t, "laravel", project.Preset)
+	assert.Equal(t, "my-project", project.SiteName)
+}
+
+func TestGlobalConfig_GetLinkedProjectByName(t *testing.T) {
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"my-project": {
+				Path:          "/home/user/projects/my-project",
+				DefaultBranch: "main",
+				Preset:        "laravel",
+			},
+		},
+	}
+
+	project := cfg.GetLinkedProjectByName("my-project")
+	assert.NotNil(t, project)
+	assert.Equal(t, "/home/user/projects/my-project", project.Path)
+
+	notFound := cfg.GetLinkedProjectByName("nonexistent")
+	assert.Nil(t, notFound)
+}
+
+func TestGlobalConfig_GetLinkedProjectByName_NilProjects(t *testing.T) {
+	cfg := &GlobalConfig{}
+
+	project := cfg.GetLinkedProjectByName("my-project")
+	assert.Nil(t, project)
+}
+
+func TestGlobalConfig_AddProject(t *testing.T) {
+	cfg := &GlobalConfig{}
+
+	project := &ProjectInfo{
+		Path:          "/home/user/projects/test",
+		DefaultBranch: "main",
+		Preset:        "php",
+	}
+
+	cfg.AddProject("test", project)
+
+	assert.NotNil(t, cfg.Projects)
+	assert.Contains(t, cfg.Projects, "test")
+	assert.Equal(t, project, cfg.Projects["test"])
+}
+
+func TestGlobalConfig_RemoveProject(t *testing.T) {
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"my-project": {Path: "/home/user/projects/my-project"},
+		},
+	}
+
+	cfg.RemoveProject("my-project")
+	assert.NotContains(t, cfg.Projects, "my-project")
+}
+
+func TestGlobalConfig_RemoveProject_NilProjects(t *testing.T) {
+	cfg := &GlobalConfig{}
+	cfg.RemoveProject("nonexistent") // Should not panic
+}
+
+func TestGlobalConfig_FindLinkedProjectFromPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectPath := filepath.Join(tmpDir, "my-project")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"my-project": {
+				Path:          projectPath,
+				DefaultBranch: "main",
+			},
+		},
+	}
+
+	// Exact match
+	name, project := cfg.FindLinkedProjectFromPath(projectPath)
+	assert.Equal(t, "my-project", name)
+	assert.NotNil(t, project)
+
+	// Subdirectory match
+	subPath := filepath.Join(projectPath, "app", "Models")
+	require.NoError(t, os.MkdirAll(subPath, 0755))
+	name, project = cfg.FindLinkedProjectFromPath(subPath)
+	assert.Equal(t, "my-project", name)
+	assert.NotNil(t, project)
+
+	// Not in any project
+	name, project = cfg.FindLinkedProjectFromPath("/some/other/path")
+	assert.Empty(t, name)
+	assert.Nil(t, project)
+}
+
+func TestGlobalConfig_GetWorktreeBaseExpanded(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		worktreeBase string
+		expected     string
+	}{
+		{
+			name:         "tilde expansion",
+			worktreeBase: "~/.arbor/worktrees",
+			expected:     filepath.Join(home, ".arbor/worktrees"),
+		},
+		{
+			name:         "absolute path unchanged",
+			worktreeBase: "/var/arbor/worktrees",
+			expected:     "/var/arbor/worktrees",
+		},
+		{
+			name:         "empty returns empty",
+			worktreeBase: "",
+			expected:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &GlobalConfig{WorktreeBase: tt.worktreeBase}
+			result, err := cfg.GetWorktreeBaseExpanded()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestLoadOrCreateGlobalConfig_NoExistingConfig(t *testing.T) {
+	// Set XDG to a temp dir so we don't affect real config
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg, err := LoadOrCreateGlobalConfig()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, DefaultBranch, cfg.DefaultBranch)
+	assert.NotNil(t, cfg.Projects)
+}
+
+func TestIsSubPath(t *testing.T) {
+	tests := []struct {
+		parent   string
+		child    string
+		expected bool
+	}{
+		{"/home/user/project", "/home/user/project/app", true},
+		{"/home/user/project", "/home/user/project/app/Models", true},
+		{"/home/user/project", "/home/user/other", false},
+		{"/home/user/project", "/home/user/project", false}, // Same path is not a subpath
+		{"/home/user/project", "/home/user", false},         // Parent is not a subpath of child
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.parent+"->"+tt.child, func(t *testing.T) {
+			result := isSubPath(tt.parent, tt.child)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

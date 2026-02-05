@@ -57,18 +57,24 @@ func CreateWorktree(barePath, worktreePath, branch, baseBranch string) error {
 
 // RemoveWorktree removes a worktree
 func RemoveWorktree(worktreePath string, force bool) error {
+	barePath, err := FindBarePath(worktreePath)
+	if err != nil {
+		return fmt.Errorf("finding bare repository: %w", err)
+	}
+
+	return RemoveWorktreeWithGitDir(barePath, worktreePath, force)
+}
+
+// RemoveWorktreeWithGitDir removes a worktree using a specific git directory
+// gitDir can be either a .git directory or a .bare directory
+func RemoveWorktreeWithGitDir(gitDir, worktreePath string, force bool) error {
 	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "-f")
 	}
 	args = append(args, worktreePath)
 
-	barePath, err := FindBarePath(worktreePath)
-	if err != nil {
-		return fmt.Errorf("finding bare repository: %w", err)
-	}
-
-	cmd := exec.Command("git", append([]string{"-C", barePath}, args...)...)
+	cmd := exec.Command("git", append([]string{"-C", gitDir}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree remove failed: %w\n%s", err, string(output))
@@ -402,4 +408,147 @@ func FindBarePath(worktreePath string) (string, error) {
 		}
 		current = parent
 	}
+}
+
+// FindGitDir finds the git directory (.git or .bare) from a path
+// For linked projects, this returns the .git directory
+// For bare/arbor-init projects, this returns the .bare directory
+func FindGitDir(path string) (string, bool, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false, err
+	}
+
+	// Check for .git directory (linked project)
+	gitPath := filepath.Join(absPath, ".git")
+	if info, err := os.Stat(gitPath); err == nil {
+		if info.IsDir() {
+			return gitPath, false, nil
+		}
+		// .git could be a file pointing to worktree's actual git dir
+		// Read the file to get the actual gitdir
+		content, err := os.ReadFile(gitPath)
+		if err == nil {
+			line := strings.TrimSpace(string(content))
+			if strings.HasPrefix(line, "gitdir: ") {
+				actualGitDir := strings.TrimPrefix(line, "gitdir: ")
+				if !filepath.IsAbs(actualGitDir) {
+					actualGitDir = filepath.Join(absPath, actualGitDir)
+				}
+				return actualGitDir, false, nil
+			}
+		}
+	}
+
+	// Check for .bare directory (arbor-init project)
+	barePath := filepath.Join(absPath, ".bare")
+	if _, err := os.Stat(barePath); err == nil {
+		return barePath, true, nil
+	}
+
+	return "", false, fmt.Errorf("no .git or .bare found in %s", absPath)
+}
+
+// IsGitRepo checks if a directory is a git repository (has .git directory)
+func IsGitRepo(path string) bool {
+	gitPath := filepath.Join(path, ".git")
+	_, err := os.Stat(gitPath)
+	return err == nil
+}
+
+// IsArborProject checks if a directory is an arbor-init project (has .bare directory)
+func IsArborProject(path string) bool {
+	barePath := filepath.Join(path, ".bare")
+	_, err := os.Stat(barePath)
+	return err == nil
+}
+
+// CreateWorktreeFromGitDir creates a worktree from a regular .git directory
+// This is used for linked projects where the main repo is a normal git clone
+func CreateWorktreeFromGitDir(gitDir, worktreePath, branch, baseBranch string) error {
+	// Get the working directory (parent of .git)
+	repoPath := filepath.Dir(gitDir)
+	if filepath.Base(gitDir) != ".git" {
+		// gitDir might be the repo path itself
+		if IsGitRepo(gitDir) {
+			repoPath = gitDir
+		}
+	}
+
+	// Create worktree directory parent if needed
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+		return err
+	}
+
+	// Check if branch already exists
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", branch)
+	if err := cmd.Run(); err == nil {
+		// Branch exists, just checkout
+		cmd = exec.Command("git", "-C", repoPath, "worktree", "add", worktreePath, branch)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git worktree add failed: %w\n%s", err, string(output))
+		}
+		return nil
+	}
+
+	// Branch doesn't exist, create from base
+	if baseBranch == "" {
+		baseBranch = config.DefaultBranch
+	}
+
+	gitArgs := []string{"-C", repoPath, "worktree", "add", "-b", branch, worktreePath, baseBranch}
+	cmd = exec.Command("git", gitArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add failed: %w\n%s", err, string(output))
+	}
+	return nil
+}
+
+// GetRepoPath returns the repository working directory from a git dir
+// For .git directories, returns the parent
+// For .bare directories, returns the parent
+func GetRepoPath(gitDir string) string {
+	return filepath.Dir(gitDir)
+}
+
+// ListWorktreesFromGitDir lists worktrees using a regular .git directory
+func ListWorktreesFromGitDir(gitDir string) ([]Worktree, error) {
+	repoPath := GetRepoPath(gitDir)
+
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var worktrees []Worktree
+	var currentPath string
+	var currentBranch string
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+			currentPath = strings.TrimSpace(currentPath)
+		} else if strings.HasPrefix(line, "branch refs/heads/") {
+			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
+			currentBranch = strings.TrimSpace(currentBranch)
+			if currentPath != "" && currentBranch != "" {
+				worktrees = append(worktrees, Worktree{
+					Path:   currentPath,
+					Branch: currentBranch,
+				})
+				currentPath = ""
+				currentBranch = ""
+			}
+		}
+	}
+
+	return worktrees, nil
 }

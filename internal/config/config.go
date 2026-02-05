@@ -68,10 +68,20 @@ type ToolConfig struct {
 
 // GlobalConfig represents the global configuration
 type GlobalConfig struct {
-	DefaultBranch string               `mapstructure:"default_branch"`
-	DetectedTools map[string]bool      `mapstructure:"detected_tools"`
-	Tools         map[string]ToolInfo  `mapstructure:"tools"`
-	Scaffold      GlobalScaffoldConfig `mapstructure:"scaffold"`
+	DefaultBranch string                  `mapstructure:"default_branch"`
+	DetectedTools map[string]bool         `mapstructure:"detected_tools"`
+	Tools         map[string]ToolInfo     `mapstructure:"tools"`
+	Scaffold      GlobalScaffoldConfig    `mapstructure:"scaffold"`
+	WorktreeBase  string                  `mapstructure:"worktree_base"`
+	Projects      map[string]*ProjectInfo `mapstructure:"projects"`
+}
+
+// ProjectInfo represents a linked project's configuration
+type ProjectInfo struct {
+	Path          string `mapstructure:"path"`
+	DefaultBranch string `mapstructure:"default_branch"`
+	Preset        string `mapstructure:"preset"`
+	SiteName      string `mapstructure:"site_name"`
 }
 
 // ToolInfo represents detected tool information
@@ -260,4 +270,172 @@ func WriteWorktreeConfig(worktreePath string, data map[string]string) error {
 	}
 
 	return nil
+}
+
+// SaveGlobalConfig saves the global configuration to arbor.yaml
+func SaveGlobalConfig(config *GlobalConfig) error {
+	configDir, err := GetGlobalConfigDir()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	v := viper.New()
+	v.SetConfigName("arbor")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(configDir)
+
+	// Try to read existing config first
+	_ = v.ReadInConfig()
+
+	configMap := map[string]interface{}{
+		"default_branch": config.DefaultBranch,
+		"detected_tools": config.DetectedTools,
+		"scaffold":       config.Scaffold,
+	}
+
+	if config.WorktreeBase != "" {
+		configMap["worktree_base"] = config.WorktreeBase
+	}
+
+	if config.Projects != nil {
+		configMap["projects"] = config.Projects
+	}
+
+	if err := v.MergeConfigMap(configMap); err != nil {
+		return fmt.Errorf("merging config: %w", err)
+	}
+
+	configPath := filepath.Join(configDir, "arbor.yaml")
+	if err := v.WriteConfigAs(configPath); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+
+	return nil
+}
+
+// LoadOrCreateGlobalConfig loads global config or creates a new one if it doesn't exist
+func LoadOrCreateGlobalConfig() (*GlobalConfig, error) {
+	config, err := LoadGlobal()
+	if err != nil {
+		// Config doesn't exist, return empty config
+		return &GlobalConfig{
+			DefaultBranch: DefaultBranch,
+			DetectedTools: make(map[string]bool),
+			Projects:      make(map[string]*ProjectInfo),
+		}, nil
+	}
+
+	// Ensure Projects map is initialized
+	if config.Projects == nil {
+		config.Projects = make(map[string]*ProjectInfo)
+	}
+
+	return config, nil
+}
+
+// GetLinkedProject returns the linked project info for a given path, or nil if not linked
+func (gc *GlobalConfig) GetLinkedProject(path string) *ProjectInfo {
+	if gc.Projects == nil {
+		return nil
+	}
+
+	// Normalize the path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil
+	}
+
+	// Check if the exact path matches a project
+	for _, project := range gc.Projects {
+		projectAbs, err := filepath.Abs(project.Path)
+		if err != nil {
+			continue
+		}
+		if projectAbs == absPath {
+			return project
+		}
+	}
+
+	return nil
+}
+
+// GetLinkedProjectByName returns the linked project info by name
+func (gc *GlobalConfig) GetLinkedProjectByName(name string) *ProjectInfo {
+	if gc.Projects == nil {
+		return nil
+	}
+	return gc.Projects[name]
+}
+
+// FindLinkedProjectFromPath checks if a path is inside a linked project
+func (gc *GlobalConfig) FindLinkedProjectFromPath(path string) (string, *ProjectInfo) {
+	if gc.Projects == nil {
+		return "", nil
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", nil
+	}
+
+	for name, project := range gc.Projects {
+		projectAbs, err := filepath.Abs(project.Path)
+		if err != nil {
+			continue
+		}
+
+		// Check if path is the project root or inside it
+		if absPath == projectAbs || isSubPath(projectAbs, absPath) {
+			return name, project
+		}
+	}
+
+	return "", nil
+}
+
+// isSubPath checks if child is a subdirectory of parent
+func isSubPath(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	// If the relative path doesn't start with "..", it's a subpath
+	return len(rel) > 0 && rel[0] != '.'
+}
+
+// AddProject adds a project to the global config
+func (gc *GlobalConfig) AddProject(name string, project *ProjectInfo) {
+	if gc.Projects == nil {
+		gc.Projects = make(map[string]*ProjectInfo)
+	}
+	gc.Projects[name] = project
+}
+
+// RemoveProject removes a project from the global config
+func (gc *GlobalConfig) RemoveProject(name string) {
+	if gc.Projects != nil {
+		delete(gc.Projects, name)
+	}
+}
+
+// GetWorktreeBaseExpanded returns the worktree base path with ~ expanded
+func (gc *GlobalConfig) GetWorktreeBaseExpanded() (string, error) {
+	if gc.WorktreeBase == "" {
+		return "", nil
+	}
+
+	base := gc.WorktreeBase
+	if len(base) > 0 && base[0] == '~' {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expanding home directory: %w", err)
+		}
+		base = filepath.Join(home, base[1:])
+	}
+
+	return base, nil
 }

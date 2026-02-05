@@ -45,7 +45,12 @@ Cleanup steps may include:
 			return fmt.Errorf("getting default branch: %w", err)
 		}
 
-		worktrees, err := git.ListWorktreesDetailed(pc.BarePath, currentWorktreePath, defaultBranch)
+		var worktrees []git.Worktree
+		if pc.IsLinked {
+			worktrees, err = git.ListWorktreesFromGitDir(pc.BarePath)
+		} else {
+			worktrees, err = git.ListWorktreesDetailed(pc.BarePath, currentWorktreePath, defaultBranch)
+		}
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
@@ -124,8 +129,14 @@ Cleanup steps may include:
 				}
 			}
 
-			if err := git.RemoveWorktree(targetWorktree.Path, true); err != nil {
-				return fmt.Errorf("removing worktree: %w", err)
+			if pc.IsLinked {
+				if err := git.RemoveWorktreeWithGitDir(pc.BarePath, targetWorktree.Path, true); err != nil {
+					return fmt.Errorf("removing worktree: %w", err)
+				}
+			} else {
+				if err := git.RemoveWorktree(targetWorktree.Path, true); err != nil {
+					return fmt.Errorf("removing worktree: %w", err)
+				}
 			}
 			ui.PrintSuccessPath("Removed", targetWorktree.Path)
 

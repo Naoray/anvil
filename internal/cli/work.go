@@ -64,6 +64,9 @@ available branches or entering a new branch name.`,
 		worktreePath := ""
 		if len(args) > 1 {
 			worktreePath = args[1]
+		} else if pc.IsLinked {
+			// For linked projects, use centralized worktree location
+			worktreePath = pc.GetWorktreePath(branch)
 		} else {
 			worktreePath = filepath.Join(pc.ProjectPath, utils.SanitisePath(branch))
 		}
@@ -73,17 +76,21 @@ available branches or entering a new branch name.`,
 			return fmt.Errorf("getting absolute path: %w", err)
 		}
 
-		exists := git.BranchExists(pc.BarePath, branch)
-		if exists {
-			worktrees, err := git.ListWorktrees(pc.BarePath)
-			if err != nil {
-				return fmt.Errorf("listing worktrees: %w", err)
-			}
-			for _, wt := range worktrees {
-				if wt.Branch == branch {
-					ui.PrintInfo(fmt.Sprintf("Worktree already exists at %s", wt.Path))
-					return nil
-				}
+		// Check for existing worktrees
+		var worktrees []git.Worktree
+		if pc.IsLinked {
+			worktrees, err = git.ListWorktreesFromGitDir(pc.BarePath)
+		} else {
+			worktrees, err = git.ListWorktrees(pc.BarePath)
+		}
+		if err != nil {
+			return fmt.Errorf("listing worktrees: %w", err)
+		}
+
+		for _, wt := range worktrees {
+			if wt.Branch == branch {
+				ui.PrintInfo(fmt.Sprintf("Worktree already exists at %s", wt.Path))
+				return nil
 			}
 		}
 
@@ -91,8 +98,15 @@ available branches or entering a new branch name.`,
 		ui.PrintInfo(fmt.Sprintf("Path: %s", absWorktreePath))
 
 		if !dryRun {
-			if err := git.CreateWorktree(pc.BarePath, absWorktreePath, branch, baseBranch); err != nil {
-				return fmt.Errorf("creating worktree: %w", err)
+			if pc.IsLinked {
+				// For linked projects, use the .git directory
+				if err := git.CreateWorktreeFromGitDir(pc.BarePath, absWorktreePath, branch, baseBranch); err != nil {
+					return fmt.Errorf("creating worktree: %w", err)
+				}
+			} else {
+				if err := git.CreateWorktree(pc.BarePath, absWorktreePath, branch, baseBranch); err != nil {
+					return fmt.Errorf("creating worktree: %w", err)
+				}
 			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would create worktree")
