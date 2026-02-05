@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 type ExecutionResult struct {
@@ -203,7 +203,7 @@ func getStepDescription(step types.ScaffoldStep) string {
 	baseDesc := descriptions[stepName]
 
 	// For Laravel artisan commands, try to extract the command name
-	if stepName == "php.laravel.artisan" {
+	if stepName == "php.laravel" {
 		// Try to get the args from the step
 		if argGetter, ok := step.(interface{ GetArgs() []string }); ok {
 			args := argGetter.GetArgs()

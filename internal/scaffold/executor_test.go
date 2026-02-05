@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type mockStep struct {
@@ -234,10 +234,10 @@ func TestStepExecutor_LaravelPresetStepOrdering(t *testing.T) {
 	fileCopy := &mockStep{name: "file.copy .env", conditionResult: true}
 	dbCreate := &mockStep{name: "db.create", conditionResult: true}
 	npmCi := &mockStep{name: "node.npm ci", conditionResult: true}
-	keyGenerate := &mockStep{name: "php.laravel.artisan key:generate", conditionResult: true}
-	migrateFresh := &mockStep{name: "php.laravel.artisan migrate:fresh", conditionResult: true}
+	keyGenerate := &mockStep{name: "php.laravel key:generate", conditionResult: true}
+	migrateFresh := &mockStep{name: "php.laravel migrate:fresh", conditionResult: true}
 	npmBuild := &mockStep{name: "node.npm build", conditionResult: true}
-	storageLink := &mockStep{name: "php.laravel.artisan storage:link", conditionResult: true}
+	storageLink := &mockStep{name: "php.laravel storage:link", conditionResult: true}
 	herd := &mockStep{name: "herd", conditionResult: true}
 
 	// Steps provided in the correct execution order (as they come from preset)
@@ -281,9 +281,9 @@ func TestStepExecutor_LaravelPresetStepOrdering(t *testing.T) {
 	assert.Equal(t, "file.copy .env", results[1].Step.Name())
 	assert.Equal(t, "db.create", results[2].Step.Name())
 	assert.Equal(t, "node.npm ci", results[3].Step.Name())
-	assert.Equal(t, "php.laravel.artisan key:generate", results[4].Step.Name())
-	assert.Equal(t, "php.laravel.artisan migrate:fresh", results[5].Step.Name())
+	assert.Equal(t, "php.laravel key:generate", results[4].Step.Name())
+	assert.Equal(t, "php.laravel migrate:fresh", results[5].Step.Name())
 	assert.Equal(t, "node.npm build", results[6].Step.Name())
-	assert.Equal(t, "php.laravel.artisan storage:link", results[7].Step.Name())
+	assert.Equal(t, "php.laravel storage:link", results[7].Step.Name())
 	assert.Equal(t, "herd", results[8].Step.Name())
 }

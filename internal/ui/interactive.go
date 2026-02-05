@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func SelectBranchInteractive(barePath string, localBranches, remoteBranches []string) (string, error) {
@@ -356,6 +357,137 @@ func ConfirmScaffold(branch string) (bool, error) {
 			huh.NewConfirm().
 				Title("Scaffold current worktree").
 				Description(fmt.Sprintf("Run scaffold steps for worktree %q?", branch)).
+				Value(&confirmed),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return false, NormalizeAbort(err)
+	}
+
+	return confirmed, nil
+}
+
+// SelectSyncStrategy prompts user to choose between rebase and merge
+func SelectSyncStrategy(defaultStrategy string) (string, error) {
+	selected := defaultStrategy
+
+	options := []huh.Option[string]{
+		huh.NewOption("rebase (cleaner history)", "rebase"),
+		huh.NewOption("merge (preserves all commits)", "merge"),
+	}
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select sync strategy").
+				Description("Choose how to integrate upstream changes").
+				Options(options...).
+				Value(&selected),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return "", NormalizeAbort(err)
+	}
+
+	return selected, nil
+}
+
+// SelectUpstreamBranch prompts user to select an upstream branch
+// Defaults to the defaultBranch option if available
+func SelectUpstreamBranch(localBranches, remoteBranches []string, defaultBranch string) (string, error) {
+	var selected string
+
+	options := []huh.Option[string]{}
+
+	// Add local branches first
+	for _, b := range localBranches {
+		// Skip the default branch if it's in the list - we'll add it at the top
+		if b == defaultBranch {
+			continue
+		}
+		options = append(options, huh.NewOption(b, b))
+	}
+
+	// Add remote branches (strip remote prefix)
+	for _, b := range remoteBranches {
+		// Skip remote HEAD references
+		if strings.HasSuffix(b, "/HEAD") {
+			continue
+		}
+		// Extract the branch name from "origin/branch"
+		parts := strings.SplitN(b, "/", 2)
+		if len(parts) == 2 {
+			branchName := parts[1]
+			// Skip if already in local branches or is default branch
+			if branchName == defaultBranch {
+				continue
+			}
+			// Check if already added
+			alreadyAdded := false
+			for _, opt := range options {
+				if opt.Value == branchName {
+					alreadyAdded = true
+					break
+				}
+			}
+			if !alreadyAdded {
+				options = append(options, huh.NewOption(branchName+" (from remote)", branchName))
+			}
+		}
+	}
+
+	// Insert default branch at the beginning if it exists
+	if defaultBranch != "" {
+		defaultOption := huh.NewOption(defaultBranch+" (default)", defaultBranch)
+		options = append([]huh.Option[string]{defaultOption}, options...)
+	}
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select upstream branch").
+				Description("Choose the branch to sync against").
+				Options(options...).
+				Value(&selected),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return "", NormalizeAbort(err)
+	}
+
+	return selected, nil
+}
+
+// ConfirmSync prompts user to confirm running sync operation
+func ConfirmSync(currentBranch, upstream, strategy string) (bool, error) {
+	var confirmed bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Confirm sync operation").
+				Description(fmt.Sprintf("Sync branch %q with upstream %q using %s?", currentBranch, upstream, strategy)).
+				Value(&confirmed),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
+
+	if err := form.Run(); err != nil {
+		return false, NormalizeAbort(err)
+	}
+
+	return confirmed, nil
+}
+
+// ConfirmSaveSyncConfig asks user if they want to save sync settings to arbor.yaml
+func ConfirmSaveSyncConfig() (bool, error) {
+	var confirmed bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Save sync settings").
+				Description("Save the selected upstream and strategy to arbor.yaml for future syncs?").
 				Value(&confirmed),
 		),
 	).WithTheme(huh.ThemeCatppuccin())

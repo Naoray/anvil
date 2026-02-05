@@ -11,17 +11,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestBinaryStep_CommandConstruction(t *testing.T) {
 	t.Run("php.composer with install", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"install"},
 		})
-
-		assert.NotNil(t, step)
+		require.NoError(t, err)
 		assert.Equal(t, "php.composer", step.Name())
 
 		binaryStep, ok := step.(*BinaryStep)
@@ -31,11 +30,10 @@ func TestBinaryStep_CommandConstruction(t *testing.T) {
 	})
 
 	t.Run("php binary", func(t *testing.T) {
-		step := Create("php", config.StepConfig{
+		step, err := Create("php", config.StepConfig{
 			Args: []string{"-v"},
 		})
-
-		assert.NotNil(t, step)
+		require.NoError(t, err)
 		assert.Equal(t, "php", step.Name())
 
 		binaryStep, ok := step.(*BinaryStep)
@@ -44,13 +42,12 @@ func TestBinaryStep_CommandConstruction(t *testing.T) {
 		assert.Equal(t, []string{"-v"}, binaryStep.args)
 	})
 
-	t.Run("php.laravel.artisan uses BinaryStep with 'php artisan' binary", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
+	t.Run("php.laravel uses BinaryStep with 'php artisan' binary", func(t *testing.T) {
+		step, err := Create("php.laravel", config.StepConfig{
 			Args: []string{"key:generate", "--no-interaction"},
 		})
-
-		assert.NotNil(t, step)
-		assert.Equal(t, "php.laravel.artisan", step.Name())
+		require.NoError(t, err)
+		assert.Equal(t, "php.laravel", step.Name())
 
 		binaryStep, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
@@ -61,9 +58,10 @@ func TestBinaryStep_CommandConstruction(t *testing.T) {
 
 func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 	t.Run("php.composer command construction", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"install", "--no-interaction"},
 		})
+		require.NoError(t, err)
 
 		binaryStep, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
@@ -75,9 +73,10 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 	})
 
 	t.Run("php command construction", func(t *testing.T) {
-		step := Create("php", config.StepConfig{
+		step, err := Create("php", config.StepConfig{
 			Args: []string{"-v"},
 		})
+		require.NoError(t, err)
 
 		binaryStep, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
@@ -88,10 +87,11 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 		assert.Equal(t, expectedCommand, joinArgs(allArgs))
 	})
 
-	t.Run("php.laravel.artisan command construction", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
+	t.Run("php.laravel command construction", func(t *testing.T) {
+		step, err := Create("php.laravel", config.StepConfig{
 			Args: []string{"key:generate", "--no-interaction"},
 		})
+		require.NoError(t, err)
 
 		binaryStep, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
@@ -102,10 +102,11 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 		assert.Equal(t, expectedCommand, joinArgs(allArgs))
 	})
 
-	t.Run("php.laravel.artisan migrate:fresh command", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
+	t.Run("php.laravel migrate:fresh command", func(t *testing.T) {
+		step, err := Create("php.laravel", config.StepConfig{
 			Args: []string{"migrate:fresh", "--seed", "--no-interaction"},
 		})
+		require.NoError(t, err)
 
 		binaryStep, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
@@ -116,14 +117,15 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 	})
 
 	t.Run("binary step condition checks first part of multi-part binary", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
+		step, err := Create("php.laravel", config.StepConfig{
 			Args: []string{"storage:link"},
 		})
+		require.NoError(t, err)
 
 		_, ok := step.(*BinaryStep)
 		assert.True(t, ok, "Expected BinaryStep type")
 
-		_, err := exec.LookPath("php")
+		_, err = exec.LookPath("php")
 		hasPHP := err == nil
 
 		ctx := types.ScaffoldContext{
@@ -431,9 +433,10 @@ func TestConditionEvaluator_viaContext(t *testing.T) {
 
 func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	t.Run("replaces .SiteName in args", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"install", "--name={{ .SiteName }}"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -447,9 +450,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("replaces .RepoName in args", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"install", "--repo={{ .RepoName }}"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -463,9 +467,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("replaces .Path in args", func(t *testing.T) {
-		step := Create("herd", config.StepConfig{
+		step, err := Create("herd", config.StepConfig{
 			Args: []string{"link", "{{ .SiteName }}", "--domain={{ .Path }}.test"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -480,9 +485,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("replaces .DbSuffix in args", func(t *testing.T) {
-		step := Create("php.laravel.artisan", config.StepConfig{
+		step, err := Create("php.laravel", config.StepConfig{
 			Args: []string{"db:seed", "--database=myapp_{{ .DbSuffix }}"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -496,9 +502,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("replaces dynamic variables from context", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"install", "--name={{ .VarName }}"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -512,9 +519,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("handles whitespace variations in template syntax", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"--name={{ .SiteName }}", "--repo={{.RepoName}}", "--path={{  .Path  }}"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -532,9 +540,10 @@ func TestBinaryStep_TemplateReplacement(t *testing.T) {
 	})
 
 	t.Run("ignores template errors for invalid syntax", func(t *testing.T) {
-		step := Create("php.composer", config.StepConfig{
+		step, err := Create("php.composer", config.StepConfig{
 			Args: []string{"--name={{ invalid_syntax }", "--fallback=value"},
 		})
+		require.NoError(t, err)
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")
 
@@ -661,10 +670,11 @@ func TestBinaryStep_OutputCapture(t *testing.T) {
 	})
 
 	t.Run("creates step via Create with store_as", func(t *testing.T) {
-		step := Create("php", config.StepConfig{
+		step, err := Create("php", config.StepConfig{
 			Args:    []string{"-r", "echo 'hello';"},
 			StoreAs: "PhpOutput",
 		})
+		require.NoError(t, err)
 
 		binaryStep, ok := step.(*BinaryStep)
 		require.True(t, ok, "Expected BinaryStep type")

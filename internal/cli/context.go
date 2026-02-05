@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	arborerrors "github.com/michaeldyrynda/arbor/internal/errors"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/presets"
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/config"
+	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/presets"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
 )
 
 type ProjectContext struct {
@@ -234,18 +235,25 @@ func (pc *ProjectContext) MustBeInWorktree() error {
 
 func (pc *ProjectContext) PresetManager() *presets.Manager {
 	pc.managersInit.Do(func() {
-		pc.presetManager = presets.NewManager()
-		pc.scaffoldManager = scaffold.NewScaffoldManager()
-		presets.RegisterAllWithScaffold(pc.scaffoldManager)
+		pc.initManagers()
 	})
 	return pc.presetManager
 }
 
 func (pc *ProjectContext) ScaffoldManager() *scaffold.ScaffoldManager {
 	pc.managersInit.Do(func() {
-		pc.presetManager = presets.NewManager()
-		pc.scaffoldManager = scaffold.NewScaffoldManager()
-		presets.RegisterAllWithScaffold(pc.scaffoldManager)
+		pc.initManagers()
 	})
 	return pc.scaffoldManager
+}
+
+func (pc *ProjectContext) initManagers() {
+	// Create explicit step registry with default steps
+	stepRegistry := steps.NewRegistry()
+	stepRegistry.RegisterDefaults()
+
+	// Initialize managers with dependency injection
+	pc.presetManager = presets.NewManager()
+	pc.scaffoldManager = scaffold.NewScaffoldManagerWithRegistry(stepRegistry)
+	presets.RegisterAllWithScaffold(pc.scaffoldManager)
 }

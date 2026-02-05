@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 type ScaffoldContext struct {
@@ -126,23 +126,34 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value interface{}) (bool,
 }
 
 func (ctx *ScaffoldContext) fileExists(value interface{}) (bool, error) {
-	var path string
 	switch v := value.(type) {
 	case string:
-		path = v
+		// Single file
+		fullPath := filepath.Join(ctx.WorktreePath, v)
+		_, err := os.Stat(fullPath)
+		return err == nil, nil
+	case []interface{}:
+		// Array of files - all must exist
+		for _, item := range v {
+			if path, ok := item.(string); ok {
+				fullPath := filepath.Join(ctx.WorktreePath, path)
+				_, err := os.Stat(fullPath)
+				if err != nil {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
 	case map[string]interface{}:
+		// Map format with "file" key
 		if p, ok := v["file"].(string); ok {
-			path = p
+			fullPath := filepath.Join(ctx.WorktreePath, p)
+			_, err := os.Stat(fullPath)
+			return err == nil, nil
 		}
 	}
 
-	if path == "" {
-		return false, nil
-	}
-
-	fullPath := filepath.Join(ctx.WorktreePath, path)
-	_, err := os.Stat(fullPath)
-	return err == nil, nil
+	return false, nil
 }
 
 func (ctx *ScaffoldContext) fileContains(value interface{}) (bool, error) {
@@ -198,22 +209,31 @@ func (ctx *ScaffoldContext) fileHasScript(value interface{}) (bool, error) {
 }
 
 func (ctx *ScaffoldContext) commandExists(value interface{}) (bool, error) {
-	var cmdName string
 	switch v := value.(type) {
 	case string:
-		cmdName = v
+		// Single command
+		_, err := exec.LookPath(v)
+		return err == nil, nil
+	case []interface{}:
+		// Array of commands - all must exist
+		for _, item := range v {
+			if cmdName, ok := item.(string); ok {
+				_, err := exec.LookPath(cmdName)
+				if err != nil {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
 	case map[string]interface{}:
+		// Map format with "command" key
 		if c, ok := v["command"].(string); ok {
-			cmdName = c
+			_, err := exec.LookPath(c)
+			return err == nil, nil
 		}
 	}
 
-	if cmdName == "" {
-		return false, nil
-	}
-
-	_, err := exec.LookPath(cmdName)
-	return err == nil, nil
+	return false, nil
 }
 
 func (ctx *ScaffoldContext) osMatches(value interface{}) (bool, error) {
@@ -238,22 +258,31 @@ func (ctx *ScaffoldContext) osMatches(value interface{}) (bool, error) {
 }
 
 func (ctx *ScaffoldContext) envExists(value interface{}) (bool, error) {
-	var envName string
 	switch v := value.(type) {
 	case string:
-		envName = v
+		// Single environment variable
+		_, exists := os.LookupEnv(v)
+		return exists, nil
+	case []interface{}:
+		// Array of environment variables - all must exist
+		for _, item := range v {
+			if envName, ok := item.(string); ok {
+				_, exists := os.LookupEnv(envName)
+				if !exists {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
 	case map[string]interface{}:
+		// Map format with "env" key
 		if e, ok := v["env"].(string); ok {
-			envName = e
+			_, exists := os.LookupEnv(e)
+			return exists, nil
 		}
 	}
 
-	if envName == "" {
-		return false, nil
-	}
-
-	_, exists := os.LookupEnv(envName)
-	return exists, nil
+	return false, nil
 }
 
 func (ctx *ScaffoldContext) envNotExists(value interface{}) (bool, error) {

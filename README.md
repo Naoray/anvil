@@ -22,24 +22,53 @@ arbor remove feature-new-feature
 
 ## Installation
 
+### Via Homebrew (Recommended for macOS/Linux)
+
 ```bash
-# Clone and build
-git clone git@github.com:michaeldyrynda/arbor.git
+brew tap artisanexperiences/tap
+brew install arbor
+```
+
+**Upgrade:**
+```bash
+brew upgrade arbor
+```
+
+### Via Direct Download
+
+Download the latest release for your platform from the [releases page](https://github.com/artisanexperiences/arbor/releases).
+
+### Via Go Install
+
+```bash
+go install github.com/artisanexperiences/arbor/cmd/arbor@latest
+```
+
+*Note: Installing via `go install` builds without version information. Use Homebrew or download releases for proper version metadata.*
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/artisanexperiences/arbor.git
 cd arbor
 
-# Linux/macOS
+# Build for your platform
 go build -o arbor ./cmd/arbor
 
-# Windows
-go build -o arbor.exe ./cmd/arbor
-
-# Or install via Homebrew (coming soon)
-brew install arbor
+# Or build with version information
+VERSION=$(git describe --tags --always)
+COMMIT=$(git rev-parse --short HEAD)
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+go build -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" -o arbor ./cmd/arbor
 ```
 
 ## Quick Start
 
 ```bash
+# Check arbor version
+arbor version
+
 # Initialise a new Laravel project
 arbor init git@github.com:user/my-laravel-app.git
 
@@ -48,6 +77,18 @@ arbor work feature/user-auth
 
 # Create a worktree from a specific base branch
 arbor work feature/user-auth -b develop
+
+# Sync current worktree with upstream (defaults to main, uses rebase)
+arbor sync
+
+# Sync with a specific upstream branch
+arbor sync --upstream develop
+
+# Sync using merge instead of rebase
+arbor sync --strategy merge
+
+# Save sync settings to arbor.yaml for future use
+arbor sync --upstream develop --strategy rebase --save
 
 # List all worktrees with their status
 arbor list
@@ -76,6 +117,76 @@ See [AGENTS.md](./AGENTS.md) for development guide.
 - Testing strategy
 
 ## Commands
+
+### `arbor sync`
+
+Synchronizes the current worktree branch with an upstream branch by fetching the latest changes and rebasing or merging.
+
+**Auto-Stashing (Default):**
+
+By default, `arbor sync` automatically stashes changes before syncing, including:
+- Tracked modifications
+- Untracked files
+
+**Note:** Ignored files (like `node_modules`, `vendor`, `.env`) are **not** stashed for performance reasons. This is safe because git does not modify ignored files during rebase/merge operations, and skipping them makes sync much faster on large projects.
+
+After a successful sync, the stashed changes are automatically restored.
+
+```bash
+# Sync with default settings (upstream: main, strategy: rebase, auto-stash: on)
+arbor sync
+
+# Sync with a specific upstream branch
+arbor sync --upstream develop
+arbor sync -u develop
+
+# Sync using merge instead of rebase
+arbor sync --strategy merge
+arbor sync -s merge
+
+# Use a specific remote
+arbor sync --remote upstream
+arbor sync -r upstream
+
+# Disable auto-stashing (not recommended)
+arbor sync --no-auto-stash
+
+# Skip all confirmations
+arbor sync --yes
+arbor sync -y
+
+# Save sync settings to arbor.yaml for future use
+arbor sync --save
+
+# Combination of options
+arbor sync --upstream main --strategy rebase --save
+```
+
+**Configuration:**
+
+Sync settings can be persisted in `arbor.yaml`:
+
+```yaml
+sync:
+  upstream: main
+  strategy: rebase
+  remote: origin
+  auto_stash: true  # Default: true, set to false to disable
+```
+
+The command resolves settings in this order:
+1. CLI flags (`--upstream`, `--strategy`, `--remote`, `--no-auto-stash`)
+2. Project config (`arbor.yaml`)
+3. Project `default_branch`
+4. Interactive selection (if in interactive mode)
+
+**Notes:**
+- Must be run from within a worktree (not project root)
+- Fails if worktree is on detached HEAD
+- Auto-stashes all changes by default (can be disabled with `--no-auto-stash`)
+- If stash pop fails due to conflicts, the stash is preserved and instructions are provided
+- Detects and blocks if rebase or merge is already in progress
+- Provides guidance when conflicts occur
 
 ### `arbor scaffold [PATH]`
 
@@ -111,7 +222,81 @@ arbor scaffold main
 
 ## Configuration
 
-Arbor uses a configuration file to define scaffold steps for `init` and `work` commands. Configuration is read from `arbor.yaml` in your project root.
+Arbor uses a three-tier configuration system to separate team configuration from local state.
+
+### Configuration Hierarchy
+
+#### 1. Project Config (`<project-root>/arbor.yaml`)
+
+Located at the project root (alongside `.bare/`), this file contains:
+- Scaffold steps and cleanup steps
+- Preset selection
+- Tool configurations
+- Project-wide settings
+
+This file is **not versioned** (the project root is not a git repository).
+
+During `arbor init`, if an `arbor.yaml` file is found in the repository, you'll be prompted to copy it to the project root.
+
+#### 2. Repository Config (`<worktree>/arbor.yaml`)
+
+Located inside each worktree and **committed to git**, this file contains:
+- Team default scaffold steps
+- Shared cleanup steps
+- Tool configurations
+
+This file serves as the source of truth for team configuration and is copied to the project root during `arbor init`.
+
+#### 3. Local State (`<worktree>/.arbor.local`)
+
+Located inside each worktree and **NOT versioned** (should be in `.gitignore`), this file contains:
+- `db_suffix` - unique database suffix for the worktree
+- Other worktree-specific runtime state
+
+This file is automatically created by Arbor and should never be committed.
+
+**Example `.gitignore` entry:**
+```
+.arbor.local
+```
+
+**Example `.arbor.local` file:**
+```yaml
+db_suffix: "sunset"
+```
+
+### Sharing Team Configuration
+
+To share scaffold configuration with your team:
+
+1. Create `arbor.yaml` in your repository with scaffold steps:
+```yaml
+preset: laravel
+scaffold:
+  steps:
+    - name: file.copy
+      from: .env.example
+      to: .env
+    - name: db.create
+    - name: php.composer
+      args: ["install"]
+```
+
+2. Commit and push to git:
+```bash
+git add arbor.yaml
+git commit -m "Add Arbor scaffold configuration"
+git push
+```
+
+3. Team members run `arbor init`:
+```bash
+arbor init user/repo
+# → Found arbor.yaml in repository. Copy to project root for team config? [Y/n]
+# → Press Enter to use team config
+```
+
+The config will be automatically copied to their project root and used for all worktrees.
 
 ### Scaffold Steps
 
@@ -123,6 +308,113 @@ Scaffold steps define actions to run when creating a new worktree. Each step can
 - Copy files
 - Execute Laravel Artisan commands
 
+### Pre-Flight Checks
+
+Pre-flight checks validate dependencies **before** any scaffold steps execute. This prevents worktrees from being left in a broken state due to missing requirements.
+
+**Configuration:**
+
+```yaml
+scaffold:
+  pre_flight:
+    condition:
+      # Check environment variables are set
+      env_exists:
+        - OP_VAULT
+        - OP_ITEM
+      
+      # Check commands/binaries are installed
+      command_exists:
+        - op        # 1Password CLI
+        - herd      # Laravel Herd
+        - composer
+      
+      # Check required files exist
+      file_exists:
+        - .env.op
+        - package.json
+  
+  steps:
+    # Your scaffold steps here
+```
+
+**Supported Conditions:**
+
+All condition types support both single values and arrays:
+
+| Condition | Single Value | Array | Description |
+|-----------|--------------|-------|-------------|
+| `env_exists` | `env_exists: API_KEY` | `env_exists: [API_KEY, API_SECRET]` | Check OS environment variables are set |
+| `command_exists` | `command_exists: docker` | `command_exists: [docker, docker-compose]` | Check commands are available in PATH |
+| `file_exists` | `file_exists: .env` | `file_exists: [.env, composer.json]` | Check files exist in worktree |
+| `os` | `os: darwin` | `os: [darwin, linux]` | Check operating system |
+
+You can combine multiple condition types:
+
+```yaml
+pre_flight:
+  condition:
+    env_exists:
+      - OP_VAULT
+      - OP_ITEM
+    command_exists: op
+    file_exists: .env.op
+    os: darwin
+```
+
+**Error Messages:**
+
+When pre-flight checks fail, you'll see a detailed breakdown:
+
+```
+✗ Running pre-flight checks
+
+Pre-flight checks failed:
+
+Missing environment variables:
+  - OP_VAULT
+  - OP_ITEM
+
+Missing commands:
+  - op
+
+Missing files:
+  - .env.op
+
+Please resolve these issues and try again.
+```
+
+**Example: 1Password Integration**
+
+```yaml
+scaffold:
+  pre_flight:
+    condition:
+      env_exists:
+        - OP_VAULT
+        - OP_ITEM
+      command_exists: op
+      file_exists: .env.op
+  
+  steps:
+    - name: bash.run
+      command: "op inject -i .env.op -o .env"
+      
+    - name: php.composer
+      args: ["install"]
+```
+
+This ensures that before any steps run:
+- The `op` CLI is installed
+- Environment variables `OP_VAULT` and `OP_ITEM` are set
+- The `.env.op` template file exists
+
+**Notes:**
+
+- Pre-flight checks are **skipped** when using `--skip-scaffold`
+- File paths in `file_exists` are relative to the worktree (no template variables)
+- All checks must pass for scaffold to proceed
+
 ### Configuration Structure
 
 ```yaml
@@ -130,7 +422,6 @@ scaffold:
   steps:
     - name: step.name
       enabled: true
-      priority: 10
       args: ["--option"]
       condition:
         env_file_contains:
@@ -172,7 +463,7 @@ All steps support template variables that are replaced at runtime:
 - Suffix is generated once per `init` or `work` invocation and shared across all `db.create` steps
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
-- Persists suffix to worktree-local `arbor.yaml` for cleanup
+- Persists suffix to `.arbor.local` for cleanup
 
 **Multiple databases with shared suffix:**
 
@@ -227,6 +518,31 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 - Preserves comments, blank lines, and ordering
 - Supports template variables
 
+**`env.copy`** - Copy keys from another worktree's `.env` file
+
+```yaml
+# Copy a single key
+- name: env.copy
+  source: ../main           # Source worktree path (relative or absolute)
+  key: API_KEY
+
+# Copy multiple keys
+- name: env.copy
+  source: ../main
+  keys:
+    - API_KEY
+    - API_SECRET
+    - STRIPE_KEY
+  source_file: .env         # optional, defaults to .env
+  file: .env                # optional target file, defaults to .env
+```
+
+- Copies environment variables from a source worktree to the current worktree
+- Useful for copying API keys, secrets, or other values from main to feature branches
+- Creates target `.env` if missing
+- Updates existing keys in-place
+- Supports relative paths (resolved from worktree) or absolute paths
+
 #### Node.js Steps
 
 **`node.npm`** - npm package manager
@@ -234,7 +550,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.npm
   args: ["install"]
-  priority: 10
 ```
 
 **`node.yarn`** - Yarn package manager
@@ -242,7 +557,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.yarn
   args: ["install"]
-  priority: 10
 ```
 
 **`node.pnpm`** - pnpm package manager
@@ -250,7 +564,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.pnpm
   args: ["install"]
-  priority: 10
 ```
 
 **`node.bun`** - Bun package manager
@@ -258,7 +571,6 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: node.bun
   args: ["install"]
-  priority: 10
 ```
 
 #### PHP Steps
@@ -268,21 +580,19 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: php.composer
   args: ["install"]
-  priority: 10
 ```
 
-**`php.laravel.artisan`** - Laravel Artisan commands
+**`php.laravel`** - Laravel Artisan commands
 
 ```yaml
-- name: php.laravel.artisan
+- name: php.laravel
   args: ["migrate:fresh", "--no-interaction"]
-  priority: 20
 ```
 
 Capture command output:
 
 ```yaml
-- name: php.laravel.artisan
+- name: php.laravel
   args: ["--version"]
   store_as: LaravelVersion
 
@@ -353,20 +663,34 @@ All steps support these configuration options:
 | Option | Type | Description |
 |--------|------|-------------|
 | `enabled` | boolean | Enable/disable step (default: true) |
-| `priority` | integer | Execution order (lower runs first, default: 0) |
 | `condition` | object | Conditional execution rules |
 | `args` | array | Arguments passed to the step (e.g., `["--prefix", "app"]`) |
 | `store_as` | string | Store command output as template variable (trimmed, on success only) |
 
+Steps execute in the order they appear in the configuration file.
+
 ### Conditions
 
-Steps can be conditionally executed based on environment:
+Steps can be conditionally executed based on environment. Conditions support both single values and arrays:
 
 ```yaml
+# Single value conditions
 condition:
   env_file_contains:
     file: .env
     key: DB_CONNECTION
+
+# Array conditions - check multiple items at once
+condition:
+  env_exists:
+    - API_KEY
+    - API_SECRET
+  command_exists:
+    - docker
+    - docker-compose
+  file_exists:
+    - .env
+    - composer.json
 ```
 
 ### Example Configuration
@@ -378,7 +702,6 @@ scaffold:
   steps:
     # Create database if DB_CONNECTION is set
     - name: db.create
-      priority: 5
       condition:
         env_file_contains:
           file: .env
@@ -386,33 +709,27 @@ scaffold:
 
     # Write database name to .env
     - name: env.write
-      priority: 6
       key: DB_DATABASE
       value: "{{ .SiteName }}_{{ .DbSuffix }}"
 
     # Install dependencies
     - name: php.composer
-      priority: 10
       args: ["install"]
 
     - name: node.npm
-      priority: 11
       args: ["install"]
 
     # Run migrations
-    - name: php.laravel.artisan
-      priority: 20
+    - name: php.laravel
       args: ["migrate:fresh", "--no-interaction"]
 
     # Set domain based on worktree path
     - name: env.write
-      priority: 21
       key: APP_DOMAIN
       value: "app.{{ .Path }}.test"
 
     # Generate application key
-    - name: php.laravel.artisan
-      priority: 22
+    - name: php.laravel
       args: ["key:generate"]
 
 cleanup:
@@ -431,30 +748,24 @@ scaffold:
     # Create three databases with different prefixes but shared suffix
     - name: db.create
       args: ["--prefix", "app"]
-      priority: 5
 
     - name: db.create
       args: ["--prefix", "quotes"]
-      priority: 6
 
     - name: db.create
       args: ["--prefix", "knowledge"]
-      priority: 7
 
     # Write the main database name to .env
     - name: env.write
-      priority: 10
       key: DB_DATABASE
       value: "app_{{ .DbSuffix }}"
 
     # Write other database names to .env (optional)
     - name: env.write
-      priority: 11
       key: DB_QUOTES_DATABASE
       value: "quotes_{{ .DbSuffix }}"
 
     - name: env.write
-      priority: 12
       key: DB_KNOWLEDGE_DATABASE
       value: "knowledge_{{ .DbSuffix }}"
 ```

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 type Manager struct {

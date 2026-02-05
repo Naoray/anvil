@@ -55,7 +55,7 @@ func TestExtractRepoName(t *testing.T) {
 		},
 		{
 			name:     "HTTPS URL",
-			input:    "https://github.com/michaeldyrynda/arbor.git",
+			input:    "https://github.com/artisanexperiences/arbor.git",
 			expected: "arbor",
 		},
 		{

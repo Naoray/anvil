@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/config"
 )
 
 func evalSymlinks(path string) string {

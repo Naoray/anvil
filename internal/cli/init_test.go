@@ -1,14 +1,26 @@
 package cli
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
 func TestIsCommandAvailable(t *testing.T) {
 	assert.True(t, isCommandAvailable("ls"))
@@ -28,7 +40,7 @@ func TestExtractRepoName(t *testing.T) {
 		},
 		{
 			name:     "HTTPS URL",
-			input:    "https://github.com/michaeldyrynda/arbor.git",
+			input:    "https://github.com/artisanexperiences/arbor.git",
 			expected: "arbor",
 		},
 		{
@@ -144,4 +156,83 @@ func TestInitShortFormatShouldUseGhClone(t *testing.T) {
 
 	assert.DirExists(t, barePath, "gh repo clone --bare should succeed")
 	assert.DirExists(t, filepath.Join(barePath, "refs"), "bare repo should have refs directory")
+}
+
+func TestInitCommand_ConfiguresFetchRefspec(t *testing.T) {
+	// Create a local test repo to clone from
+	sourceDir := t.TempDir()
+	barePath := filepath.Join(t.TempDir(), ".bare")
+
+	// Initialize source repo
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	// Configure git user
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	// Create initial commit
+	readmePath := filepath.Join(sourceDir, "README.md")
+	requireNoError(t, os.WriteFile(readmePath, []byte("test"), 0644))
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	// Clone to bare repo
+	cmd = exec.Command("git", "clone", "--bare", sourceDir, barePath)
+	requireNoError(t, cmd.Run())
+
+	// Configure fetch refspec (simulating what init command does)
+	remoteURL := sourceDir
+	err := git.ConfigureFetchRefspec(barePath, remoteURL)
+	assert.NoError(t, err)
+
+	// Verify remote.origin.url is set
+	cmd = exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.url")
+	output, err := cmd.Output()
+	assert.NoError(t, err)
+	assert.Equal(t, remoteURL, strings.TrimSpace(string(output)))
+
+	// Verify fetch refspec is set
+	cmd = exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch")
+	output, err = cmd.Output()
+	assert.NoError(t, err)
+	assert.Equal(t, "+refs/heads/*:refs/remotes/origin/*", strings.TrimSpace(string(output)))
+}
+
+func TestCheckAndCopyRepoConfig_SkipsWhenProjectConfigExists(t *testing.T) {
+	projectDir := t.TempDir()
+	mainPath := filepath.Join(projectDir, "main")
+	requireNoError(t, os.MkdirAll(mainPath, 0755))
+
+	repoConfigPath := filepath.Join(mainPath, "arbor.yaml")
+	repoContent := []byte("preset: laravel\n")
+	requireNoError(t, os.WriteFile(repoConfigPath, repoContent, 0644))
+
+	projectConfigPath := filepath.Join(projectDir, "arbor.yaml")
+	projectContent := []byte("preset: php\nsite_name: local\n")
+	requireNoError(t, os.WriteFile(projectConfigPath, projectContent, 0644))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("use-repo-config", true, "")
+
+	cfg := &config.Config{SiteName: "local"}
+	copied, err := checkAndCopyRepoConfig(cmd, mainPath, projectDir, cfg)
+	requireNoError(t, err)
+	assert.False(t, copied, "expected repo config copy to be skipped when project config exists")
+
+	content, err := os.ReadFile(projectConfigPath)
+	requireNoError(t, err)
+	assert.Equal(t, string(projectContent), string(content))
 }

@@ -2,16 +2,18 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/presets"
-	"github.com/michaeldyrynda/arbor/internal/scaffold"
-	"github.com/michaeldyrynda/arbor/internal/ui"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/presets"
+	"github.com/artisanexperiences/arbor/internal/scaffold"
+	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 var initCmd = &cobra.Command{
@@ -70,6 +72,12 @@ Arguments:
 		}
 		ui.PrintSuccess(fmt.Sprintf("Cloned %s", repo))
 
+		// Configure fetch refspec for remote tracking
+		if err := git.ConfigureFetchRefspec(barePath, repo); err != nil {
+			return fmt.Errorf("configuring fetch refspec: %w", err)
+		}
+		ui.PrintSuccess("Configured fetch refspec for remote tracking")
+
 		defaultBranch, err := git.GetDefaultBranch(barePath)
 		if err != nil {
 			defaultBranch = config.DefaultBranch
@@ -90,6 +98,12 @@ Arguments:
 		cfg := &config.Config{
 			DefaultBranch: defaultBranch,
 			SiteName:      siteName,
+		}
+
+		// Check for arbor.yaml in the cloned repository
+		copiedRepoConfig, err := checkAndCopyRepoConfig(cmd, mainPath, absPath, cfg)
+		if err != nil {
+			return err
 		}
 
 		preset := mustGetString(cmd, "preset")
@@ -115,8 +129,11 @@ Arguments:
 			}
 		}
 
-		if err := config.SaveProject(absPath, cfg); err != nil {
-			return fmt.Errorf("saving config: %w", err)
+		// Only save config if it wasn't copied from repo, or if we need to add preset
+		if !copiedRepoConfig || preset != "" {
+			if err := config.SaveProject(absPath, cfg); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
 		}
 
 		verbose := mustGetBool(cmd, "verbose")
@@ -135,6 +152,11 @@ Arguments:
 			ui.PrintInfo("Skipped scaffold (use 'arbor scaffold main' to scaffold manually)")
 		}
 
+		// Check if .arbor.local should be gitignored
+		if !quiet {
+			checkArborLocalGitignore(mainPath)
+		}
+
 		ui.PrintDone("Repository ready!")
 		ui.PrintInfo(fmt.Sprintf("cd %s", absPath))
 		ui.PrintInfo("arbor work feature/my-feature")
@@ -148,4 +170,81 @@ func init() {
 
 	initCmd.Flags().String("preset", "", "Project preset (laravel, php)")
 	initCmd.Flags().Bool("skip-scaffold", false, "Skip scaffold steps during init")
+	initCmd.Flags().Bool("use-repo-config", true, "Automatically use repository config (non-interactive, default: true)")
+}
+
+// checkAndCopyRepoConfig checks for arbor.yaml in the repository and prompts to copy it.
+// Returns true if the config was copied from the repository.
+func checkAndCopyRepoConfig(cmd *cobra.Command, mainPath, projectPath string, cfg *config.Config) (bool, error) {
+	repoConfigPath := filepath.Join(mainPath, "arbor.yaml")
+	if _, err := os.Stat(repoConfigPath); os.IsNotExist(err) {
+		return false, nil
+	}
+
+	shouldCopy := false
+
+	if ui.IsInteractive() {
+		confirmed, err := ui.Confirm("Found arbor.yaml in repository. Copy to project root for team config?")
+		if err != nil {
+			return false, fmt.Errorf("prompting for config copy: %w", err)
+		}
+		shouldCopy = confirmed
+	} else {
+		// Non-interactive: use --use-repo-config flag (default true)
+		shouldCopy = mustGetBool(cmd, "use-repo-config")
+	}
+
+	if !shouldCopy {
+		return false, nil
+	}
+
+	projectConfigPath := filepath.Join(projectPath, "arbor.yaml")
+	if _, err := os.Stat(projectConfigPath); err == nil {
+		ui.PrintInfo("Project config already exists; skipping copy from repository")
+		return false, nil
+	}
+
+	// Read repo config
+	repoConfigData, err := os.ReadFile(repoConfigPath)
+	if err != nil {
+		return false, fmt.Errorf("reading repository config: %w", err)
+	}
+
+	// Parse and clean it (remove db_suffix if present)
+	var configData map[string]interface{}
+	if err := yaml.Unmarshal(repoConfigData, &configData); err != nil {
+		return false, fmt.Errorf("parsing repository config: %w", err)
+	}
+
+	// Remove local-only fields
+	delete(configData, "db_suffix")
+
+	// Always override site_name based on local path after copying team config
+	configData["site_name"] = cfg.SiteName
+
+	// Write to project root
+	cleanedData, err := yaml.Marshal(configData)
+	if err != nil {
+		return false, fmt.Errorf("marshaling cleaned config: %w", err)
+	}
+
+	if err := os.WriteFile(projectConfigPath, cleanedData, 0644); err != nil {
+		return false, fmt.Errorf("writing project config: %w", err)
+	}
+
+	ui.PrintSuccess("Copied arbor.yaml to project root")
+
+	// Reload config to get scaffold steps
+	reloadedCfg, err := config.LoadProject(projectPath)
+	if err != nil {
+		return false, fmt.Errorf("reloading config: %w", err)
+	}
+
+	// Update cfg with reloaded scaffold/cleanup steps
+	cfg.Scaffold = reloadedCfg.Scaffold
+	cfg.Cleanup = reloadedCfg.Cleanup
+	cfg.Preset = reloadedCfg.Preset
+	cfg.Tools = reloadedCfg.Tools
+
+	return true, nil
 }

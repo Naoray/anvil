@@ -1,21 +1,37 @@
 package steps
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/template"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	arbor_exec "github.com/artisanexperiences/arbor/internal/exec"
+	"github.com/artisanexperiences/arbor/internal/scaffold/template"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type BashRunStep struct {
-	command string
-	storeAs string
+	command  string
+	storeAs  string
+	executor *arbor_exec.CommandExecutor
 }
 
+// NewBashRunStep creates a bash step with the default command executor.
 func NewBashRunStep(command string, storeAs string) *BashRunStep {
-	return &BashRunStep{command: command, storeAs: storeAs}
+	return NewBashRunStepWithExecutor(command, storeAs, nil)
+}
+
+// NewBashRunStepWithExecutor creates a bash step with a custom command executor.
+// This is useful for testing with mock executors.
+func NewBashRunStepWithExecutor(command string, storeAs string, executor *arbor_exec.CommandExecutor) *BashRunStep {
+	if executor == nil {
+		executor = arbor_exec.NewCommandExecutor(nil)
+	}
+	return &BashRunStep{
+		command:  command,
+		storeAs:  storeAs,
+		executor: executor,
+	}
 }
 
 func (s *BashRunStep) Name() string {
@@ -28,9 +44,8 @@ func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 		return fmt.Errorf("template replacement failed: %w", err)
 	}
 
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Dir = ctx.WorktreePath
-	output, err := cmd.CombinedOutput()
+	// Use the command executor for testability
+	output, err := s.executor.RunBash(context.Background(), ctx.WorktreePath, command)
 	if err != nil {
 		return fmt.Errorf("bash.run failed: %w\n%s", err, string(output))
 	}

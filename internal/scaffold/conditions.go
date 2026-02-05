@@ -1,7 +1,7 @@
 package scaffold
 
 import (
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type ConditionEvaluator struct {

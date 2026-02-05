@@ -3,7 +3,7 @@ package template
 import (
 	"testing"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestReplaceTemplateVars(t *testing.T) {

@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func TestSortWorktreesForDestroy(t *testing.T) {

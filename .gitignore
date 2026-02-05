@@ -1,6 +1,8 @@
 # Ignore AI/planning directory contents
 .ai/plans/
 .ai/*.md
+.opencode/plans/
+!.opencode/skills/**/*.md
 
 # Ignore built binary
 arbor

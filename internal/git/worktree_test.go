@@ -501,7 +501,8 @@ func TestListWorktreesDetailed(t *testing.T) {
 
 	mainPathEval, _ := filepath.EvalSymlinks(mainPath)
 	for _, wt := range worktrees {
-		if wt.Branch == "main" {
+		switch wt.Branch {
+		case "main":
 			if !wt.IsMain {
 				t.Error("main worktree should have IsMain=true")
 			}
@@ -512,7 +513,7 @@ func TestListWorktreesDetailed(t *testing.T) {
 			if wtPathEval == mainPathEval && !wt.IsCurrent {
 				t.Error("main worktree should have IsCurrent=true when it's the current path")
 			}
-		} else if wt.Branch == "feature" {
+		case "feature":
 			if wt.IsMain {
 				t.Error("feature worktree should have IsMain=false")
 			}
@@ -549,11 +550,12 @@ func TestListWorktreesDetailed_CurrentWorktree(t *testing.T) {
 
 	for _, wt := range worktrees {
 		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
-		if wt.Branch == "main" {
+		switch wt.Branch {
+		case "main":
 			if wtPathEval == mainPathEval && wt.IsCurrent {
 				t.Error("main worktree should not be current when feature path is passed")
 			}
-		} else if wt.Branch == "feature" {
+		case "feature":
 			if wtPathEval != featurePathEval || !wt.IsCurrent {
 				t.Errorf("feature worktree should be current when feature path is passed (path: %s vs %s)", wtPathEval, featurePathEval)
 			}

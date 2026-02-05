@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestDbCreateStep(t *testing.T) {
@@ -155,7 +155,7 @@ func TestDbCreateStep(t *testing.T) {
 		assert.True(t, strings.HasPrefix(createCalls[0], "my_app_"), "Database name should start with sanitized site name")
 	})
 
-	t.Run("writes DbSuffix to worktree-local arbor.yaml", func(t *testing.T) {
+	t.Run("writes DbSuffix to local state", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envFile := filepath.Join(tmpDir, ".env")
@@ -176,9 +176,9 @@ func TestDbCreateStep(t *testing.T) {
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix, "DbSuffix should be set in context")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, cfg.DbSuffix, "DbSuffix should be persisted to worktree arbor.yaml")
+		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .arbor.local")
 	})
 
 	t.Run("reads APP_NAME from .env if SiteName is empty", func(t *testing.T) {
@@ -294,9 +294,9 @@ func TestDbCreateStep(t *testing.T) {
 		assert.Len(t, createCalls, 1)
 		assert.True(t, strings.HasPrefix(createCalls[0], "mycustom_"), "Should use custom prefix")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, cfg.DbSuffix, "Suffix should be persisted to worktree config")
+		assert.Equal(t, suffix, localState.DbSuffix, "Suffix should be persisted to local state")
 	})
 
 	t.Run("creates database without prefix uses siteName", func(t *testing.T) {
@@ -346,9 +346,9 @@ func TestDbCreateStep(t *testing.T) {
 		assert.Len(t, createCalls, 1)
 		assert.Equal(t, "testapp_preexisting_suffix", createCalls[0], "Should use preexisting suffix")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, "preexisting_suffix", cfg.DbSuffix, "Should persist preexisting suffix to worktree config")
+		assert.Equal(t, "preexisting_suffix", localState.DbSuffix, "Should persist preexisting suffix to local state")
 	})
 
 	t.Run("db.create with prefix uses existing suffix", func(t *testing.T) {
@@ -463,7 +463,7 @@ func TestDbDestroyStep(t *testing.T) {
 		assert.True(t, step.Condition(ctx))
 	})
 
-	t.Run("returns nil when no DbSuffix in context or worktree config", func(t *testing.T) {
+	t.Run("returns nil when no DbSuffix in context or local state", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envFile := filepath.Join(tmpDir, ".env")
@@ -481,7 +481,7 @@ func TestDbDestroyStep(t *testing.T) {
 		assert.NoError(t, err, "Should return nil when no DbSuffix found")
 	})
 
-	t.Run("reads DbSuffix from worktree-local arbor.yaml", func(t *testing.T) {
+	t.Run("reads DbSuffix from local state", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envFile := filepath.Join(tmpDir, ".env")
@@ -489,8 +489,8 @@ func TestDbDestroyStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		if err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "swift_runner"}); err != nil {
-			t.Fatalf("writing worktree config: %v", err)
+		if err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "swift_runner"}); err != nil {
+			t.Fatalf("writing local state: %v", err)
 		}
 
 		mockClient := NewMockDatabaseClient()
@@ -503,7 +503,7 @@ func TestDbDestroyStep(t *testing.T) {
 
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
 		assert.NoError(t, err)
-		assert.Equal(t, "swift_runner", ctx.GetDbSuffix(), "DbSuffix should be read from worktree config")
+		assert.Equal(t, "swift_runner", ctx.GetDbSuffix(), "DbSuffix should be read from local state")
 
 		listCalls := mockClient.listCalls
 		assert.Len(t, listCalls, 1)
@@ -544,8 +544,8 @@ func TestDbDestroyStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		if err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "test_suffix"}); err != nil {
-			t.Fatalf("writing worktree config: %v", err)
+		if err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "test_suffix"}); err != nil {
+			t.Fatalf("writing local state: %v", err)
 		}
 
 		mockClient := NewMockDatabaseClient()
@@ -566,8 +566,8 @@ func TestDbDestroyStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		if err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "test_suffix"}); err != nil {
-			t.Fatalf("writing worktree config: %v", err)
+		if err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "test_suffix"}); err != nil {
+			t.Fatalf("writing local state: %v", err)
 		}
 
 		mockClient := NewMockDatabaseClient()
@@ -588,12 +588,12 @@ func TestDbDestroyStep(t *testing.T) {
 			t.Fatalf("writing env file: %v", err)
 		}
 
-		if err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "test_suffix"}); err != nil {
-			t.Fatalf("writing worktree config: %v", err)
+		if err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "test_suffix"}); err != nil {
+			t.Fatalf("writing local state: %v", err)
 		}
 
 		mockClient := NewMockDatabaseClient()
-		step := NewDbDestroyStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(mockClient))
+		step := NewDbDestroyStepWithFactory(config.StepConfig{}, MockClientFactory(mockClient))
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 		}
@@ -619,13 +619,13 @@ func TestDbDestroyStep(t *testing.T) {
 		}
 		ctx.SetDbSuffix("context_suffix")
 
-		if err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "config_suffix"}); err != nil {
-			t.Fatalf("writing worktree config: %v", err)
+		if err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "config_suffix"}); err != nil {
+			t.Fatalf("writing local state: %v", err)
 		}
 
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
 		assert.NoError(t, err)
-		assert.Equal(t, "context_suffix", ctx.GetDbSuffix(), "Should use DbSuffix from context, not worktree config")
+		assert.Equal(t, "context_suffix", ctx.GetDbSuffix(), "Should use DbSuffix from context, not local state")
 
 		listCalls := mockClient.listCalls
 		assert.Len(t, listCalls, 1)

@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	arborerrors "github.com/michaeldyrynda/arbor/internal/errors"
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/ui"
+	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/ui"
 )
 
 var removeCmd = &cobra.Command{

@@ -2,19 +2,30 @@ package steps
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/fs"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 type FileCopyStep struct {
 	from string
 	to   string
+	fs   fs.FS
 }
 
+// NewFileCopyStep creates a file copy step with the default file system.
 func NewFileCopyStep(from, to string) *FileCopyStep {
-	return &FileCopyStep{from: from, to: to}
+	return NewFileCopyStepWithFS(from, to, nil)
+}
+
+// NewFileCopyStepWithFS creates a file copy step with a custom file system.
+// This is useful for testing with mock file systems.
+func NewFileCopyStepWithFS(from, to string, filesystem fs.FS) *FileCopyStep {
+	if filesystem == nil {
+		filesystem = fs.Default
+	}
+	return &FileCopyStep{from: from, to: to, fs: filesystem}
 }
 
 func (s *FileCopyStep) Name() string {
@@ -29,12 +40,13 @@ func (s *FileCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 		fmt.Printf("  Copying %s to %s\n", s.from, s.to)
 	}
 
-	data, err := os.ReadFile(fromPath)
+	// Use the file system interface for testability
+	data, err := s.fs.ReadFile(fromPath)
 	if err != nil {
 		return fmt.Errorf("reading source file %s: %w", fromPath, err)
 	}
 
-	if err := os.WriteFile(toPath, data, 0644); err != nil {
+	if err := s.fs.WriteFile(toPath, data, 0644); err != nil {
 		return fmt.Errorf("writing destination file %s: %w", toPath, err)
 	}
 
@@ -43,6 +55,6 @@ func (s *FileCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 
 func (s *FileCopyStep) Condition(ctx *types.ScaffoldContext) bool {
 	fromPath := filepath.Join(ctx.WorktreePath, s.from)
-	_, err := os.Stat(fromPath)
+	_, err := s.fs.Stat(fromPath)
 	return err == nil
 }

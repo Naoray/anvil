@@ -23,9 +23,9 @@ builds:
       - -tags=osusergo,netgo
     ldflags:
       - -s -w -buildid=
-      - -X main.Version={{ .Version }}
-      - -X main.Commit={{ .ShortCommit }}
-      - -X main.Date={{ .Date }}
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
 
 archives:
   - format: tar.gz

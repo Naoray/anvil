@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	arborerrors "github.com/michaeldyrynda/arbor/internal/errors"
+	"github.com/artisanexperiences/arbor/internal/config"
+	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
 )
 
 // Worktree represents a git worktree

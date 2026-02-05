@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/git"
 )
 
 func createTestRepo(t *testing.T) (string, string) {
@@ -155,7 +155,8 @@ func TestPrintJSON(t *testing.T) {
 	}
 
 	for _, wt := range result {
-		if wt.Branch == "main" {
+		switch wt.Branch {
+		case "main":
 			if !wt.IsMain {
 				t.Error("main branch should have isMain=true")
 			}
@@ -165,7 +166,7 @@ func TestPrintJSON(t *testing.T) {
 			if !wt.IsMerged {
 				t.Error("main branch should have isMerged=true")
 			}
-		} else if wt.Branch == "feature" {
+		case "feature":
 			if wt.IsMain {
 				t.Error("feature branch should have isMain=false")
 			}

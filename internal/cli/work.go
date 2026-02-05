@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/michaeldyrynda/arbor/internal/git"
-	"github.com/michaeldyrynda/arbor/internal/ui"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 var workCmd = &cobra.Command{
@@ -112,6 +112,19 @@ available branches or entering a new branch name.`,
 			ui.PrintInfo("[DRY RUN] Would create worktree")
 		}
 
+		// Set up branch tracking unless --no-track is specified
+		noTrack := mustGetBool(cmd, "no-track")
+		if !dryRun && !noTrack {
+			if err := git.SetBranchUpstream(pc.BarePath, branch, "origin"); err != nil {
+				// Non-fatal - just inform user if verbose
+				if verbose {
+					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))
+				}
+			} else {
+				ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on origin", branch))
+			}
+		}
+
 		if !dryRun {
 			preset := pc.Config.Preset
 			if preset == "" {
@@ -135,6 +148,11 @@ available branches or entering a new branch name.`,
 			if err := pc.ScaffoldManager().RunScaffold(absWorktreePath, branch, repoName, siteName, preset, pc.Config, false, verbose, quiet); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			}
+
+			// Check if .arbor.local should be gitignored
+			if !quiet {
+				checkArborLocalGitignore(absWorktreePath)
+			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would run scaffold steps")
 		}
@@ -153,4 +171,5 @@ func init() {
 	rootCmd.AddCommand(workCmd)
 
 	workCmd.Flags().StringP("base", "b", "", "Base branch for new worktree")
+	workCmd.Flags().Bool("no-track", false, "Skip setting up remote tracking for new branches")
 }

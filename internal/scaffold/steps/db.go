@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/words"
-	"github.com/michaeldyrynda/arbor/internal/utils"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/scaffold/words"
+	"github.com/artisanexperiences/arbor/internal/utils"
 )
 
 type DbCreateStep struct {
@@ -154,7 +154,7 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine string
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {
@@ -215,13 +215,8 @@ func (s *DbCreateStep) persistDbSuffix(ctx *types.ScaffoldContext) error {
 		return nil
 	}
 
-	if err := config.WriteWorktreeConfig(ctx.WorktreePath, map[string]string{
-		"db_suffix": suffix,
-	}); err != nil {
-		return fmt.Errorf("writing worktree config: %w", err)
-	}
-
-	return nil
+	// Write to .arbor.local instead of arbor.yaml
+	return config.WriteLocalState(ctx.WorktreePath, config.LocalState{DbSuffix: suffix})
 }
 
 func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, opts types.StepOptions) error {
@@ -244,7 +239,9 @@ func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, o
 	if err != nil {
 		return fmt.Errorf("creating SQLite file: %w", err)
 	}
-	file.Close()
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing SQLite file: %w", err)
+	}
 
 	if opts.Verbose {
 		fmt.Printf("  SQLite database created at: %s\n", dbPath)
@@ -289,11 +286,11 @@ func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {
 func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
 	suffix := ctx.GetDbSuffix()
 	if suffix == "" {
-		cfg, err := config.ReadWorktreeConfig(ctx.WorktreePath)
+		localState, err := config.ReadLocalState(ctx.WorktreePath)
 		if err != nil {
 			return nil
 		}
-		suffix = cfg.DbSuffix
+		suffix = localState.DbSuffix
 	}
 
 	if suffix == "" {
@@ -390,7 +387,7 @@ func (s *DbDestroyStep) destroyDatabases(engine, suffix string, opts types.StepO
 		}
 		return nil
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {

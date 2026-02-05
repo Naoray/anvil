@@ -1,4 +1,4 @@
-module github.com/michaeldyrynda/arbor
+module github.com/artisanexperiences/arbor
 
 go 1.24.0
 
@@ -14,6 +14,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -59,5 +60,4 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

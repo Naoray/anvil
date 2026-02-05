@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/michaeldyrynda/arbor/internal/config"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/steps"
-	"github.com/michaeldyrynda/arbor/internal/scaffold/types"
+	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
+	"github.com/artisanexperiences/arbor/internal/scaffold/types"
 )
 
 func TestIntegration_TemplateReplacementChain(t *testing.T) {
@@ -33,14 +33,14 @@ APP_NAME=original_app
 			Branch:       "test",
 		}
 
-		readStep := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalApp"})
-		require.NotNil(t, readStep)
-		err := readStep.Run(ctx, types.StepOptions{Verbose: false})
+		readStep, err := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalApp"})
+		require.NoError(t, err)
+		err = readStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 		assert.Equal(t, "original_app", ctx.GetVar("OriginalApp"))
 
-		writeStep := steps.Create("env.write", config.StepConfig{Key: "NEW_APP", Value: "{{ .SiteName }}"})
-		require.NotNil(t, writeStep)
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "NEW_APP", Value: "{{ .SiteName }}"})
+		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -51,7 +51,7 @@ APP_NAME=original_app
 }
 
 func TestIntegration_DatabaseCreationWithEnv(t *testing.T) {
-	t.Run("db.create generates suffix and persists to worktree config", func(t *testing.T) {
+	t.Run("db.create generates suffix and persists to local state", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envContent := `DB_CONNECTION=mysql
@@ -78,9 +78,9 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix, "DbSuffix should be set after db.create")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, cfg.DbSuffix, "DbSuffix should be persisted to worktree arbor.yaml")
+		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .arbor.local")
 
 		parts := strings.Split(suffix, "_")
 		assert.Len(t, parts, 2, "Suffix should be in format {adjective}_{noun}")
@@ -102,13 +102,13 @@ func TestIntegration_EnvReadWriteFlow(t *testing.T) {
 			Path:         "feature-auth",
 		}
 
-		readStep := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalName"})
-		require.NotNil(t, readStep)
-		err := readStep.Run(ctx, types.StepOptions{Verbose: false})
+		readStep, err := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalName"})
+		require.NoError(t, err)
+		err = readStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
-		writeStep := steps.Create("env.write", config.StepConfig{Key: "NEW_NAME", Value: "{{ .SiteName }}_{{ .Path }}"})
-		require.NotNil(t, writeStep)
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "NEW_NAME", Value: "{{ .SiteName }}_{{ .Path }}"})
+		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -147,8 +147,8 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeStep := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
-		require.NotNil(t, writeStep)
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
+		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -160,7 +160,7 @@ APP_NAME=myapp
 }
 
 func TestIntegration_DatabaseDestroyCleanup(t *testing.T) {
-	t.Run("db.destroy reads suffix from worktree config and cleans up", func(t *testing.T) {
+	t.Run("db.destroy reads suffix from local state and cleans up", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envContent := `DB_CONNECTION=mysql
@@ -172,30 +172,30 @@ APP_NAME=myapp
 		envFile := filepath.Join(tmpDir, ".env")
 		require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
 
-		err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": "swift_runner"})
+		err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: "swift_runner"})
 		require.NoError(t, err)
 
 		ctx := &types.ScaffoldContext{
 			WorktreePath: tmpDir,
 		}
 
-		destroyStep := steps.Create("db.destroy", config.StepConfig{})
-		require.NotNil(t, destroyStep)
+		destroyStep, err := steps.Create("db.destroy", config.StepConfig{})
+		require.NoError(t, err)
 		err = destroyStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
 		suffix := ctx.GetDbSuffix()
-		assert.Equal(t, "swift_runner", suffix, "DbSuffix should be read from worktree config")
+		assert.Equal(t, "swift_runner", suffix, "DbSuffix should be read from local state")
 	})
 }
 
 func TestIntegration_BunIntegration(t *testing.T) {
 	t.Run("node.bun step is registered and functional", func(t *testing.T) {
-		step := steps.Create("node.bun", config.StepConfig{
+		step, err := steps.Create("node.bun", config.StepConfig{
 			Args: []string{"--version"},
 		})
 
-		assert.NotNil(t, step)
+		require.NoError(t, err)
 		assert.Equal(t, "node.bun", step.Name())
 	})
 }
@@ -229,8 +229,8 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeDbStep := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
-		require.NotNil(t, writeDbStep)
+		writeDbStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
+		require.NoError(t, err)
 		err = writeDbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -239,8 +239,8 @@ APP_NAME=myapp
 		expectedDbName := "myapp_" + suffix
 		assert.Contains(t, string(content), "DB_DATABASE="+expectedDbName)
 
-		writeDomainStep := steps.Create("env.write", config.StepConfig{Key: "APP_DOMAIN", Value: "app.{{ .Path }}.test"})
-		require.NotNil(t, writeDomainStep)
+		writeDomainStep, err := steps.Create("env.write", config.StepConfig{Key: "APP_DOMAIN", Value: "app.{{ .Path }}.test"})
+		require.NoError(t, err)
 		err = writeDomainStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -259,7 +259,7 @@ APP_NAME=myapp
 }
 
 func TestIntegration_RunScaffoldSuffixLoading(t *testing.T) {
-	t.Run("RunScaffold loads existing suffix from worktree config", func(t *testing.T) {
+	t.Run("RunScaffold loads existing suffix from local state", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envContent := `DB_CONNECTION=mysql
@@ -272,7 +272,7 @@ APP_NAME=myapp
 		require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
 
 		existingSuffix := "existing_suffix"
-		err := config.WriteWorktreeConfig(tmpDir, map[string]string{"db_suffix": existingSuffix})
+		err := config.WriteLocalState(tmpDir, config.LocalState{DbSuffix: existingSuffix})
 		require.NoError(t, err)
 
 		cfg := &config.Config{Preset: ""}
@@ -281,9 +281,9 @@ APP_NAME=myapp
 		err = manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
 		require.NoError(t, err)
 
-		cfgAfter, err := config.ReadWorktreeConfig(tmpDir)
+		localStateAfter, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, existingSuffix, cfgAfter.DbSuffix, "RunScaffold should preserve existing suffix from worktree config")
+		assert.Equal(t, existingSuffix, localStateAfter.DbSuffix, "RunScaffold should preserve existing suffix from local state")
 	})
 
 	t.Run("RunScaffold generates new suffix when none exists", func(t *testing.T) {
@@ -304,11 +304,11 @@ APP_NAME=myapp
 		err := manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
 		require.NoError(t, err)
 
-		cfgAfter, err := config.ReadWorktreeConfig(tmpDir)
+		localStateAfter, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.NotEmpty(t, cfgAfter.DbSuffix, "RunScaffold should generate new suffix when none exists in worktree config")
+		assert.NotEmpty(t, localStateAfter.DbSuffix, "RunScaffold should generate new suffix when none exists in local state")
 
-		parts := strings.Split(cfgAfter.DbSuffix, "_")
+		parts := strings.Split(localStateAfter.DbSuffix, "_")
 		assert.Len(t, parts, 2, "Suffix should be in format {adjective}_{noun}")
 	})
 }
@@ -365,9 +365,9 @@ APP_NAME=myapp
 		assert.Equal(t, firstSuffix, secondSuffix, "All three databases should use the same suffix")
 		assert.Equal(t, secondSuffix, thirdSuffix, "All three databases should use the same suffix")
 
-		cfg, err := config.ReadWorktreeConfig(tmpDir)
+		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, firstSuffix, cfg.DbSuffix, "Suffix should be persisted to worktree config")
+		assert.Equal(t, firstSuffix, localState.DbSuffix, "Suffix should be persisted to local state")
 
 		createCalls := mockClient.GetCreateCalls()
 		assert.Len(t, createCalls, 3, "Should have created 3 databases")
@@ -410,8 +410,8 @@ APP_NAME=some-feature
 		actualDbName := createCalls[0]
 		assert.True(t, strings.HasPrefix(actualDbName, "some_feature_"), "Database should be created with sanitized name (underscores)")
 
-		writeStep := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}"})
-		require.NotNil(t, writeStep)
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}"})
+		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
@@ -420,5 +420,220 @@ APP_NAME=some-feature
 		expectedDbName := "some_feature_" + suffix
 		assert.Contains(t, string(content), "DB_DATABASE="+expectedDbName, "env.write should use SanitizedSiteName to match actual database name")
 		assert.Equal(t, actualDbName, expectedDbName, "Database name from db.create should match env.write value")
+	})
+}
+
+func TestIntegration_PreFlightChecks(t *testing.T) {
+	t.Run("pre-flight success - all dependencies exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create test file
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644))
+
+		// Set test env var
+		t.Setenv("TEST_VAR_1", "value1")
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists":     []interface{}{"TEST_VAR_1"},
+						"command_exists": []interface{}{"go"},
+						"file_exists":    []interface{}{"test.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.NoError(t, err, "Pre-flight should pass when all dependencies exist")
+	})
+
+	t.Run("pre-flight failure - map form conditions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists":     map[string]interface{}{"env": "NONEXISTENT_MAP_ENV"},
+						"command_exists": map[string]interface{}{"command": "nonexistent-map-command"},
+						"file_exists":    map[string]interface{}{"file": "missing-map-file.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		require.Error(t, err, "Pre-flight should fail when map form dependencies are missing")
+		assert.Contains(t, err.Error(), "Missing environment variables")
+		assert.Contains(t, err.Error(), "NONEXISTENT_MAP_ENV")
+		assert.Contains(t, err.Error(), "Missing commands")
+		assert.Contains(t, err.Error(), "nonexistent-map-command")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "missing-map-file.txt")
+	})
+
+	t.Run("pre-flight failure - nested not condition", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("NESTED_MISSING_ENV", "present")
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"not": map[string]interface{}{
+							"env_exists": []interface{}{"NESTED_MISSING_ENV"},
+						},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		require.Error(t, err, "Pre-flight should fail when nested condition fails")
+		assert.EqualError(t, err, "pre-flight checks failed")
+	})
+
+	t.Run("pre-flight failure - missing env var", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists": []interface{}{"NONEXISTENT_VAR_12345"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when env var is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing environment variables")
+		assert.Contains(t, err.Error(), "NONEXISTENT_VAR_12345")
+	})
+
+	t.Run("pre-flight failure - missing command", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"command_exists": []interface{}{"nonexistentcommand12345"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when command is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing commands")
+		assert.Contains(t, err.Error(), "nonexistentcommand12345")
+	})
+
+	t.Run("pre-flight failure - missing file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"file_exists": []interface{}{"nonexistent.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when file is missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "nonexistent.txt")
+	})
+
+	t.Run("pre-flight failure - multiple missing dependencies", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"env_exists":     []interface{}{"MISSING_VAR_1", "MISSING_VAR_2"},
+						"command_exists": []interface{}{"missingcmd1", "missingcmd2"},
+						"file_exists":    []interface{}{"missing1.txt", "missing2.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when multiple dependencies are missing")
+		assert.Contains(t, err.Error(), "pre-flight checks failed")
+		assert.Contains(t, err.Error(), "Missing environment variables")
+		assert.Contains(t, err.Error(), "MISSING_VAR_1")
+		assert.Contains(t, err.Error(), "MISSING_VAR_2")
+		assert.Contains(t, err.Error(), "Missing commands")
+		assert.Contains(t, err.Error(), "missingcmd1")
+		assert.Contains(t, err.Error(), "missingcmd2")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "missing1.txt")
+		assert.Contains(t, err.Error(), "missing2.txt")
+	})
+
+	t.Run("no pre-flight configured - scaffold runs normally", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.NoError(t, err, "Scaffold should run normally when no pre-flight is configured")
+	})
+
+	t.Run("pre-flight with mixed results - some exist, some don't", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create one file but not another
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "exists.txt"), []byte("test"), 0644))
+
+		cfg := &config.Config{
+			Scaffold: config.ScaffoldConfig{
+				PreFlight: &config.PreFlight{
+					Condition: map[string]interface{}{
+						"file_exists": []interface{}{"exists.txt", "missing.txt"},
+					},
+				},
+				Steps: []config.StepConfig{},
+			},
+		}
+
+		manager := NewScaffoldManager()
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		assert.Error(t, err, "Pre-flight should fail when ANY file is missing")
+		assert.Contains(t, err.Error(), "Missing files")
+		assert.Contains(t, err.Error(), "missing.txt")
+		assert.NotContains(t, err.Error(), "exists.txt", "Should not list files that exist")
 	})
 }

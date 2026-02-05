@@ -2,19 +2,16 @@
 
 This file provides important context for developing the Arbor project.
 
-## Source of Truth
+## Documentation
 
-The complete specification and development workflow is located at:
-```
-.ai/plans/arbor.md
-```
+The project documentation is split between user-facing and development documentation:
 
-**Always read `.ai/plans/arbor.md` before starting work.** It contains:
-- Command specifications
-- Configuration file formats
-- Scaffold step definitions
-- Preset configurations
-- Detailed development workflow
+**User Documentation** (kept up-to-date via release process):
+- [README.md](./README.md) - Complete command reference, configuration guide, and scaffold step documentation
+
+**Development Documentation:**
+- This file (AGENTS.md) - Development workflow, architecture, and contribution guidelines
+- `.ai/plans/arbor.md` - Historical development plan (phases 1-5, complete). Note: This file is gitignored and contains the original implementation plan.
 
 ## Development Location
 
@@ -49,19 +46,36 @@ arbor remove feature-my-feature  # When done
 
 ### Config Files
 
-| Config | Location | Purpose |
-|--------|----------|---------|
-| Project | `arbor.yaml` in worktree root | Project-specific settings |
-| Global | `~/.config/arbor/arbor.yaml` | User defaults |
-| Plan | `.ai/plans/arbor.md` | Complete specification |
+| Config | Location | Purpose | Versioned? |
+|--------|----------|---------|------------|
+| Project | `<project-root>/arbor.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
+| Repository | `<worktree>/arbor.yaml` | Team defaults (copied during init) | Yes (committed to git) |
+| Local State | `<worktree>/.arbor.local` | Runtime state (db_suffix) | No (gitignored) |
+| Global | `~/.config/arbor/arbor.yaml` | User defaults | No (local machine) |
 
 ### Step Naming
 
-Steps use dot notation: `language.tool.command`
-- `php.composer.install`
-- `node.npm.run`
-- `herd.link`
-- `bash.run`
+Steps use simplified dot notation where the tool namespace maps to the binary:
+
+**Binary Steps:** Execute the corresponding tool with configured arguments
+- `php` - Run PHP with args
+- `php.composer` - Run composer (e.g., `install`, `update`)
+- `php.laravel` - Run artisan commands
+- `node.npm` - Run npm (e.g., `ci`, `run build`)
+- `node.yarn` - Run yarn
+- `node.pnpm` - Run pnpm
+- `node.bun` - Run bun
+- `herd` - Run herd (e.g., `link --secure`, `unlink`)
+
+**Special Steps:** Perform scaffold operations
+- `file.copy` - Copy files
+- `env.read` - Read .env values
+- `env.write` - Write .env values
+- `env.copy` - Copy between env files
+- `db.create` - Create database
+- `db.destroy` - Drop database
+- `bash.run` - Run bash commands
+- `command.run` - Run arbitrary commands
 
 ### Exit Codes
 
@@ -83,11 +97,34 @@ Steps use dot notation: `language.tool.command`
 # All tests
 go test ./... -v
 
+# With race detector
+go test ./... -race
+
 # With coverage
 go test ./... -cover
 
 # Specific package
 go test ./internal/utils/... -v
+```
+
+### Linting
+
+Install golangci-lint (pinned to v2.1.2):
+
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.2
+```
+
+Ensure `~/go/bin` is in your PATH:
+
+```bash
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+Run linter:
+
+```bash
+golangci-lint run ./...
 ```
 
 ### Test Requirements
@@ -136,23 +173,24 @@ This approach ensures:
 3. Add command to root in `internal/cli/root.go` init function
 4. Add tests in `internal/cli/commandname_test.go`
 5. Update documentation:
-   - Update `.ai/plans/arbor.md` command table
-   - Add full command documentation in `.ai/plans/arbor.md`
-   - Update `README.md` quick start section if needed
+   - Update `README.md` with command reference and examples
+   - Update `internal/cli/root.go` `printBanner()` to include the new command in the banner list
+   - Update AGENTS.md quick reference section if needed
 
 ### Add a New Scaffold Step
 
 1. Create step implementation in `internal/scaffold/steps/`
 2. Register in step executor
 3. Add tests
-4. Document in `.ai/plans/arbor.md`
+4. Document in `README.md` scaffold steps section
+5. Consider adding pre-flight checks if the step requires specific dependencies (environment variables, commands, files)
 
 ### Add a New Preset
 
 1. Create `internal/presets/presetname.go`
 2. Implement Preset interface
 3. Register in preset manager
-4. Document in `.ai/plans/arbor.md`
+4. Document in `README.md`
 
 ## Current Phase
 
@@ -164,7 +202,7 @@ All phases 1-5 are complete. The project has:
 - Interactive commands (work, prune)
 - Distribution via GitHub Actions
 
-See `.ai/plans/arbor.md` for the detailed phase history and learnings.
+See `.ai/plans/arbor.md` for the detailed phase history and learnings (gitignored file).
 
 ## Refactoring Work
 
@@ -182,6 +220,8 @@ When working on the idiomatic refactor (`.ai/plans/idiomatic-refactor.md`):
    ```bash
    go test ./... -v
    go test ./... -race
+   go vet ./...
+   go mod tidy && git diff --exit-code go.mod go.sum
    golangci-lint run ./...
    ```
 
@@ -204,13 +244,48 @@ When refactoring, enforce these standards:
 5. **Dependency injection** - Prefer passing dependencies over global state
 6. **Testability** - Write code that can be unit tested
 
+#### Error Handling Conventions
+
+**Return errors for:**
+- User input validation failures (unknown step names, invalid config)
+- I/O operations (file read/write, network calls, database operations)
+- Business logic failures that callers should handle
+
+**Panic for:**
+- Programmer errors that indicate code bugs (duplicate step registration, nil pointer dereference)
+- Invalid assumptions that should never happen in production
+- Initialization failures that prevent the program from functioning
+
+**Guideline:** If the error could be triggered by user input or external conditions, return it. If it indicates a programming mistake or unrecoverable state, panic.
+
+#### Deterministic Iteration
+
+Go map iteration order is random. For deterministic behavior:
+
+- Maintain an ordered slice alongside maps when iteration order matters
+- Use the slice for iteration, the map for O(1) lookups
+- Example: `presetOrder []string` in ScaffoldManager ensures consistent preset detection
+
+```go
+// Good: Deterministic iteration
+type Manager struct {
+    presets     map[string]Preset
+    presetOrder []string  // Maintains registration order
+}
+
+// Bad: Random iteration order
+for _, preset := range m.presets {  // Order varies between runs
+    // ...
+}
+```
+
 ## Release Management
 
 When preparing a new release, follow the release skill:
 
 **Trigger:** `/release`
 
-**Skill Location:** `.ai/skills/release.md`
+**Skill Location:** `.opencode/skills/release/SKILL.md`
 
 **What it does:**
 1. Analyzes commits to recommend version bump (MAJOR/MINOR/PATCH)
@@ -241,4 +316,8 @@ When preparing a new release, follow the release skill:
 ## Notes
 
 - The user will review changes file-by-file before committing, **always** wait for confirmation before committing code
+- **Never** force commit (`git add -f`) a file that is in the `.gitignore` file unless explicitly instructed to do so
+  - Files in `.gitignore` are excluded from version control for a reason
+  - Even if a plan document or other file needs to be updated, respect the gitignore rules
+  - Wait for explicit user instruction before overriding gitignore
 - For releases, the skill handles the process automatically once approved

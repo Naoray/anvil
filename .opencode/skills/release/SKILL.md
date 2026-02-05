@@ -1,3 +1,13 @@
+---
+name: release
+description: Prepare and publish releases with version analysis, documentation updates, and quality checks
+license: MIT
+compatibility: opencode
+metadata:
+  audience: maintainers
+  workflow: github
+---
+
 # Release Management Skill
 
 ## Overview
@@ -13,6 +23,10 @@ Before running this skill:
 - Working directory must be clean
 - You have push access to the repository
 - `gh` CLI tool is installed and authenticated
+- `golangci-lint` is installed (pinned to v2.1.2)
+  ```bash
+  go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.2
+  ```
 
 ## Workflow
 
@@ -21,6 +35,9 @@ Before running this skill:
 Verify repository is ready for release:
 
 ```bash
+# Fetch latest tags from remote to ensure we have all version information
+git fetch --tags
+
 # Check for uncommitted changes
 if [[ -n $(git status --porcelain) ]]; then
     echo "Error: Working directory has uncommitted changes"
@@ -41,12 +58,44 @@ fi
 Analyze changes and recommend version bump:
 
 ```bash
-# Get current version
-CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-echo "Current version: $CURRENT_VERSION"
+# Fetch latest tags from remote to ensure we have all version information
+git fetch --tags
+
+# Get the latest tag by creation date (most recent release)
+CURRENT_VERSION=$(git tag -l --sort=-creatordate | head -1)
+if [[ -z "$CURRENT_VERSION" ]]; then
+    CURRENT_VERSION="v0.0.0"
+fi
+echo "Latest tag: $CURRENT_VERSION"
+
+# Check if this tag is an ancestor of HEAD
+if git merge-base --is-ancestor $CURRENT_VERSION HEAD 2>/dev/null; then
+    echo "  $CURRENT_VERSION is an ancestor of current HEAD"
+else
+    echo "  Warning: $CURRENT_VERSION is NOT an ancestor of current HEAD"
+    echo "  This may indicate the tag was created on a different branch"
+fi
+
+# Show recent tags for context
+echo ""
+echo "Recent tags:"
+git tag -l --sort=-creatordate | head -5 | while read tag; do
+    if git merge-base --is-ancestor $tag HEAD 2>/dev/null; then
+        echo "  $tag (on current branch)"
+    else
+        echo "  $tag (not on current branch)"
+    fi
+done
 
 # Get commits since last tag
-COMMITS=$(git log ${CURRENT_VERSION}..HEAD --oneline)
+# Handle both cases: tag is ancestor or not
+if git merge-base --is-ancestor $CURRENT_VERSION HEAD 2>/dev/null; then
+    # Tag is ancestor, get commits after it
+    COMMITS=$(git log ${CURRENT_VERSION}..HEAD --oneline)
+else
+    # Tag is not ancestor, get all commits on current branch
+    COMMITS=$(git log --oneline)
+fi
 
 # Categorize commits
 BREAKING=$(echo "$COMMITS" | grep -i "break\|breaking" || true)
@@ -103,6 +152,20 @@ All checks must pass before proceeding:
 
 ```bash
 echo "Running quality gates..."
+
+# Check code formatting
+echo "→ Checking code formatting with gofmt..."
+UNFORMATTED=$(gofmt -l .)
+if [[ -n "$UNFORMATTED" ]]; then
+    echo "✗ The following files are not properly formatted:"
+    echo "$UNFORMATTED"
+    echo "Run 'gofmt -w .' to fix formatting issues"
+    exit 1
+fi
+
+# Run linter
+echo "→ Running golangci-lint..."
+golangci-lint run ./... || exit 1
 
 # Run all tests
 echo "→ Running unit tests..."
@@ -165,7 +228,7 @@ Example:
 Update version links at bottom:
 
 ```markdown
-[0.4.2]: https://github.com/michaeldyrynda/arbor/compare/v0.4.1...v0.4.2
+[0.4.2]: https://github.com/artisanexperiences/arbor/compare/v0.4.1...v0.4.2
 ```
 
 ### Step 5: Update README.md
@@ -261,7 +324,7 @@ gh release view vNEW_VERSION
 
 if [[ $? -eq 0 ]]; then
     echo "✓ Release vNEW_VERSION published successfully"
-    echo "Download URL: https://github.com/michaeldyrynda/arbor/releases/tag/vNEW_VERSION"
+    echo "Download URL: https://github.com/artisanexperiences/arbor/releases/tag/vNEW_VERSION"
 else
     echo "✗ Failed to verify release"
     exit 1
