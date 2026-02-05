@@ -602,7 +602,17 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 	}
 
 	if config.Projects != nil {
-		configMap["projects"] = config.Projects
+		// Convert ProjectInfo pointers to plain maps for viper compatibility
+		projectsMap := make(map[string]interface{})
+		for name, proj := range config.Projects {
+			projectsMap[name] = map[string]interface{}{
+				"path":           proj.Path,
+				"default_branch": proj.DefaultBranch,
+				"preset":         proj.Preset,
+				"site_name":      proj.SiteName,
+			}
+		}
+		configMap["projects"] = projectsMap
 	}
 
 	if err := v.MergeConfigMap(configMap); err != nil {
