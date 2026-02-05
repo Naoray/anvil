@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-02-05
+
+### Performance
+
+- **Significantly improved `arbor sync` auto-stash performance** - Changed auto-stash to skip ignored files (node_modules, vendor, etc.) for much faster operation
+  - Auto-stash now completes in seconds instead of minutes on large projects
+  - Changed from `git stash push --all` to `git stash push --include-untracked`
+  - Still protects tracked modifications and untracked files
+  - Ignored files are safely skipped since git doesn't modify them during sync anyway
+  - Fixes hanging behavior on "Auto-stashing..." message with large projects
+
+### Fixed
+
+- Lint issues in codebase
+
+### Changed
+
+- Release workflow now ensures gofmt and golangci-lint checks run
+
 ## [0.10.0] - 2026-02-04
 
 ### Added
