@@ -698,8 +698,8 @@ func TestGetRepoPath(t *testing.T) {
 		gitDir   string
 		expected string
 	}{
-		{"/home/user/project/.git", "/home/user/project"},
-		{"/var/repos/myrepo/.git", "/var/repos/myrepo"},
+		{filepath.Join("/home", "user", "project", ".git"), filepath.Join("/home", "user", "project")},
+		{filepath.Join("/var", "repos", "myrepo", ".git"), filepath.Join("/var", "repos", "myrepo")},
 	}
 
 	for _, tt := range tests {

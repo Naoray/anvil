@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -144,11 +143,6 @@ available branches or entering a new branch name.`,
 		ui.PrintDone(fmt.Sprintf("Worktree ready at %s", absWorktreePath))
 		return nil
 	},
-}
-
-func isCommandAvailable(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
 }
 
 func init() {

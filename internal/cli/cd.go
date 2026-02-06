@@ -127,17 +127,17 @@ func listWorktreesForCd(w io.Writer, gitDir string) error {
 	}
 
 	if len(worktrees) == 0 {
-		fmt.Fprintln(w, "No worktrees found")
+		_, _ = fmt.Fprintln(w, "No worktrees found")
 		return nil
 	}
 
-	fmt.Fprintln(w, "Available worktrees:")
+	_, _ = fmt.Fprintln(w, "Available worktrees:")
 	for _, wt := range worktrees {
 		folderName := filepath.Base(wt.Path)
 		if folderName == wt.Branch {
-			fmt.Fprintf(w, "  %s\n", folderName)
+			_, _ = fmt.Fprintf(w, "  %s\n", folderName)
 		} else {
-			fmt.Fprintf(w, "  %s (%s)\n", folderName, wt.Branch)
+			_, _ = fmt.Fprintf(w, "  %s (%s)\n", folderName, wt.Branch)
 		}
 	}
 

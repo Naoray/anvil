@@ -109,7 +109,7 @@ func ListWorktrees(gitDir string) ([]Worktree, error) {
 					Branch: currentBranch,
 				})
 				currentPath = ""
-				currentBranch = ""
+				currentBranch = "" //nolint:ineffassign // reset for clarity
 			}
 		}
 	}
