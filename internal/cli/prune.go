@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var pruneCmd = &cobra.Command{
@@ -28,7 +28,7 @@ interactive review before removal.`,
 		verbose := mustGetBool(cmd, "verbose")
 		quiet := mustGetBool(cmd, "quiet")
 
-		worktrees, err := git.ListWorktrees(pc.BarePath)
+		worktrees, err := git.ListWorktrees(pc.GitDir)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
@@ -41,7 +41,7 @@ interactive review before removal.`,
 				continue
 			}
 
-			merged, err := git.IsMerged(pc.BarePath, wt.Branch, pc.DefaultBranch)
+			merged, err := git.IsMerged(pc.GitDir, wt.Branch, pc.DefaultBranch)
 			if err != nil {
 				ui.PrintErrorWithHint(fmt.Sprintf("Error checking %s", wt.Branch), err.Error())
 				continue
@@ -106,7 +106,7 @@ interactive review before removal.`,
 					ui.PrintErrorWithHint("Cleanup failed", err.Error())
 				}
 
-				if err := git.RemoveWorktree(wt.Path, true); err != nil {
+				if err := git.RemoveWorktree(pc.GitDir, wt.Path, true); err != nil {
 					ui.PrintErrorWithHint(fmt.Sprintf("Error removing %s", wt.Branch), err.Error())
 				}
 			} else {

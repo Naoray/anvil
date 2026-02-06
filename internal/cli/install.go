@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var installCmd = &cobra.Command{
@@ -18,10 +18,10 @@ var installCmd = &cobra.Command{
 	Short: "Setup global configuration",
 	Long: `Sets up global configuration and detects available tools.
 
-Creates the global arbor.yaml configuration file and detects
+Creates the global anvil.yaml configuration file and detects
 available tools (gh, herd, php, composer, npm).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		title := ui.HeaderStyle.Render("Arbor Installation")
+		title := ui.HeaderStyle.Render("Anvil Installation")
 
 		platform := runtime.GOOS
 
@@ -74,7 +74,7 @@ available tools (gh, herd, php, composer, npm).`,
 		fmt.Printf("Config: %s\n", configDir)
 		fmt.Println(ui.RenderStatusTable(toolRows))
 		ui.PrintDone("Configuration saved")
-		ui.PrintInfo("Run `arbor init <repo>` to get started")
+		ui.PrintInfo("Run `anvil init <repo>` to get started")
 
 		return nil
 	},

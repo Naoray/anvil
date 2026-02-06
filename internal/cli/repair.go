@@ -7,22 +7,22 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var repairCmd = &cobra.Command{
 	Use:   "repair",
-	Short: "Repair git configuration for existing arbor project",
-	Long: `Fixes fetch refspec and branch tracking configuration for an existing arbor project.
+	Short: "Repair git configuration for existing anvil project",
+	Long: `Fixes fetch refspec and branch tracking configuration for an existing anvil project.
 
 Use this command if:
-- Fetch refspec was not configured during init (older arbor versions)
+- Fetch refspec was not configured
 - You need to reset remote configuration
 - Branch tracking needs to be fixed
 
 This will:
-1. Configure fetch refspec in the .bare directory (unless --tracking-only)
+1. Configure fetch refspec for the repository (unless --tracking-only)
 2. Set up tracking for all local branches that don't have it (unless --refspec-only)
 
 This command is idempotent and safe to run multiple times.`,
@@ -62,7 +62,7 @@ This command is idempotent and safe to run multiple times.`,
 
 func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 	// Check if already configured
-	hasRefspec, err := git.HasFetchRefspec(pc.BarePath)
+	hasRefspec, err := git.HasFetchRefspec(pc.GitDir)
 	if err != nil {
 		return fmt.Errorf("checking fetch refspec: %w", err)
 	}
@@ -75,14 +75,14 @@ func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 	}
 
 	// Try to get remote URL from bare repo config
-	remoteURL, err := git.GetRemoteURL(pc.BarePath, "origin")
+	remoteURL, err := git.GetRemoteURL(pc.GitDir, "origin")
 	if err != nil {
 		return fmt.Errorf("getting remote URL: %w", err)
 	}
 
 	// If not in bare repo, try to get from a worktree
 	if remoteURL == "" {
-		worktrees, err := git.ListWorktrees(pc.BarePath)
+		worktrees, err := git.ListWorktrees(pc.GitDir)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
@@ -145,7 +145,7 @@ func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 		return nil
 	}
 
-	if err := git.ConfigureFetchRefspec(pc.BarePath, remoteURL); err != nil {
+	if err := git.ConfigureFetchRefspec(pc.GitDir, remoteURL); err != nil {
 		return fmt.Errorf("configuring fetch refspec: %w", err)
 	}
 	ui.PrintSuccess("Configured fetch refspec")
@@ -203,7 +203,7 @@ func confirmOrEditURL(message, currentValue string) (bool, string, error) {
 }
 
 func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
-	localBranches, remoteBranches, err := git.GetBranchRefs(pc.BarePath)
+	localBranches, remoteBranches, err := git.GetBranchRefs(pc.GitDir)
 	if err != nil {
 		return fmt.Errorf("listing branches: %w", err)
 	}
@@ -221,7 +221,7 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 	skipped := 0
 
 	for _, branch := range localBranches {
-		hasTracking, err := git.HasBranchTracking(pc.BarePath, branch)
+		hasTracking, err := git.HasBranchTracking(pc.GitDir, branch)
 		if err != nil {
 			if verbose {
 				ui.PrintInfo(fmt.Sprintf("Could not check tracking for '%s': %v", branch, err))
@@ -251,7 +251,7 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 			continue
 		}
 
-		if err := git.SetBranchUpstream(pc.BarePath, branch, "origin"); err != nil {
+		if err := git.SetBranchUpstream(pc.GitDir, branch, "origin"); err != nil {
 			ui.PrintInfo(fmt.Sprintf("Could not set up tracking for '%s': %v", branch, err))
 			continue
 		}

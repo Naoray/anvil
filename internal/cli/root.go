@@ -6,13 +6,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "arbor",
+	Use:   "anvil",
 	Short: "Git worktree manager for agentic development",
-	Long: `Arbor is a self-contained binary for managing git worktrees
+	Long: `Anvil is a self-contained binary for managing git worktrees
 to assist with agentic development of applications.
 It is cross-project, cross-language, and cross-environment compatible.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -27,7 +27,7 @@ It is cross-project, cross-language, and cross-environment compatible.`,
 var noColor bool
 
 func printBanner() {
-	// Big block letters for "ARBOR" with gradient colors
+	// Big block letters for "ANVIL" with gradient colors
 	blockLetters := [][]string{
 		// A
 		{
@@ -38,41 +38,41 @@ func printBanner() {
 			"██║  ██║",
 			"╚═╝  ╚═╝",
 		},
-		// R
+		// N
 		{
-			"██████╗ ",
-			"██╔══██╗",
-			"██████╔╝",
-			"██╔══██╗",
-			"██║  ██║",
-			"╚═╝  ╚═╝",
+			"███╗   ██╗",
+			"████╗  ██║",
+			"██╔██╗ ██║",
+			"██║╚██╗██║",
+			"██║ ╚████║",
+			"╚═╝  ╚═══╝",
 		},
-		// B
+		// V
 		{
-			"██████╗ ",
-			"██╔══██╗",
-			"██████╔╝",
-			"██╔══██╗",
-			"██████╔╝",
-			"╚═════╝ ",
-		},
-		// O
-		{
-			" ██████╗ ",
-			"██╔═══██╗",
+			"██╗   ██╗",
 			"██║   ██║",
 			"██║   ██║",
-			"╚██████╔╝",
-			" ╚═════╝ ",
+			"╚██╗ ██╔╝",
+			" ╚████╔╝ ",
+			"  ╚═══╝  ",
 		},
-		// R
+		// I
 		{
-			"██████╗ ",
-			"██╔══██╗",
-			"██████╔╝",
-			"██╔══██╗",
-			"██║  ██║",
-			"╚═╝  ╚═╝",
+			"██╗",
+			"██║",
+			"██║",
+			"██║",
+			"██║",
+			"╚═╝",
+		},
+		// L
+		{
+			"██╗     ",
+			"██║     ",
+			"██║     ",
+			"██║     ",
+			"███████╗",
+			"╚══════╝",
 		},
 	}
 
@@ -110,19 +110,20 @@ func printBanner() {
 
 	commands := `
 Commands:
-  init      Initialize a new repository
+  link      Link an existing repository for worktree management
+  unlink    Unlink a project from anvil
   work      Create or checkout a worktree
   list      List all worktrees
+  cd        Navigate to a worktree
   sync      Sync current worktree with upstream branch
   remove    Remove a worktree
   prune     Remove merged worktrees
   scaffold  Run scaffold steps for a worktree
   repair    Repair git configuration for existing project
-  destroy   Completely destroy an arbor project
   install   Setup global configuration
-  version   Show arbor version
+  version   Show anvil version
 
-Run 'arbor <command> --help' for more information.`
+Run 'anvil <command> --help' for more information.`
 
 	versionLine := fmt.Sprintf("Version %s (commit: %s, built: %s)", Version, Commit, BuildDate)
 	fmt.Println(versionStyle.Render(versionLine))

@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var syncCmd = &cobra.Command{
@@ -26,9 +26,9 @@ Note: Ignored files (node_modules, vendor, etc.) are not stashed for performance
 as they are not modified by git during sync anyway.
 
 Auto-stashing can be disabled with --no-auto-stash flag or by setting
-sync.auto_stash: false in arbor.yaml.
+sync.auto_stash: false in anvil.yaml.
 
-Configuration can be set via flags, project config (arbor.yaml), or interactively.`,
+Configuration can be set via flags, project config (anvil.yaml), or interactively.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
 		if err != nil {
@@ -145,12 +145,12 @@ Configuration can be set via flags, project config (arbor.yaml), or interactivel
 		if shouldPrompt {
 			// Prompt for upstream if not set via flag or config
 			if upstreamFlag == "" && pc.Config.Sync.Upstream == "" {
-				localBranches, err := git.ListLocalBranches(pc.BarePath)
+				localBranches, err := git.ListLocalBranches(pc.GitDir)
 				if err != nil {
 					return fmt.Errorf("listing local branches: %w", err)
 				}
 
-				remoteBranches, _ := git.ListRemoteBranches(pc.BarePath)
+				remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 				selected, err := ui.SelectUpstreamBranch(localBranches, remoteBranches, pc.DefaultBranch)
 				if err != nil {
@@ -180,11 +180,11 @@ Configuration can be set via flags, project config (arbor.yaml), or interactivel
 
 		// Validate upstream is provided in non-interactive mode
 		if upstream == "" {
-			return fmt.Errorf("upstream branch required - provide --upstream flag, set sync.upstream in arbor.yaml, or run interactively")
+			return fmt.Errorf("upstream branch required - provide --upstream flag, set sync.upstream in anvil.yaml, or run interactively")
 		}
 
 		// Check remote exists
-		remoteURL, err := git.GetRemoteURL(pc.BarePath, remote)
+		remoteURL, err := git.GetRemoteURL(pc.GitDir, remote)
 		if err != nil {
 			return fmt.Errorf("checking remote: %w", err)
 		}
@@ -198,7 +198,7 @@ Configuration can be set via flags, project config (arbor.yaml), or interactivel
 			}
 
 			if !dryRun {
-				if err := git.StashAll(pc.CWD, "arbor sync auto-stash"); err != nil {
+				if err := git.StashAll(pc.CWD, "anvil sync auto-stash"); err != nil {
 					return fmt.Errorf("failed to stash changes: %w", err)
 				}
 				stashCreated = true
@@ -226,7 +226,7 @@ Configuration can be set via flags, project config (arbor.yaml), or interactivel
 		if verbose && !quiet {
 			ui.PrintInfo(fmt.Sprintf("Fetching from %s", remote))
 		}
-		if err := git.FetchRemote(pc.BarePath, remote); err != nil {
+		if err := git.FetchRemote(pc.GitDir, remote); err != nil {
 			return fmt.Errorf("fetch failed: %w", err)
 		}
 		if !quiet {
@@ -308,7 +308,7 @@ Configuration can be set via flags, project config (arbor.yaml), or interactivel
 			if err := config.SaveProject(pc.ProjectPath, pc.Config); err != nil {
 				ui.PrintError(fmt.Sprintf("Failed to save sync config: %v", err))
 			} else {
-				ui.PrintSuccess("Saved sync settings to arbor.yaml")
+				ui.PrintSuccess("Saved sync settings to anvil.yaml")
 			}
 		}
 
@@ -323,7 +323,7 @@ func init() {
 	syncCmd.Flags().StringP("upstream", "u", "", "Upstream branch to sync against (e.g., main)")
 	syncCmd.Flags().StringP("strategy", "s", "", "Sync strategy: rebase or merge (default: rebase)")
 	syncCmd.Flags().StringP("remote", "r", "", "Remote name to fetch from (default: origin)")
-	syncCmd.Flags().Bool("save", false, "Persist sync settings to arbor.yaml")
+	syncCmd.Flags().Bool("save", false, "Persist sync settings to anvil.yaml")
 	syncCmd.Flags().BoolP("yes", "y", false, "Skip confirmations and run with chosen values")
 	syncCmd.Flags().Bool("no-auto-stash", false, "Disable automatic stashing of all changes before sync")
 }

@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var scaffoldCmd = &cobra.Command{
@@ -15,7 +15,7 @@ var scaffoldCmd = &cobra.Command{
 	Short: "Run scaffold steps for a worktree",
 	Long: `Run scaffold steps for an existing worktree.
 
-When run from the project root (where .bare is located), you can specify a worktree
+When run from the project root, you can specify a worktree
 path relative to the project root (e.g., 'main', 'feature/my-feature').
 
 When run from inside a worktree without arguments, you'll be prompted to confirm
@@ -34,7 +34,7 @@ a worktree to scaffold.`,
 		verbose := mustGetBool(cmd, "verbose")
 		quiet := mustGetBool(cmd, "quiet")
 
-		worktrees, err := git.ListWorktreesDetailed(pc.BarePath, pc.CWD, pc.DefaultBranch)
+		worktrees, err := git.ListWorktreesDetailed(pc.GitDir, pc.CWD, pc.DefaultBranch)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}

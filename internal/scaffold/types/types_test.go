@@ -132,9 +132,9 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("env_exists - env var exists", func(t *testing.T) {
-		t.Setenv("ARBOR_TEST_ENV_VAR", "test_value")
+		t.Setenv("ANVIL_TEST_ENV_VAR", "test_value")
 		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_exists": "ARBOR_TEST_ENV_VAR",
+			"env_exists": "ANVIL_TEST_ENV_VAR",
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)

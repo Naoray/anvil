@@ -16,7 +16,7 @@ func TestLoadProject_ValidConfig(t *testing.T) {
 	configContent := `preset: php
 default_branch: main
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := LoadProject(tmpDir)
 
@@ -33,7 +33,7 @@ func TestLoadProject_MissingConfig(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "arbor.yaml not found")
+	assert.Contains(t, err.Error(), "anvil.yaml not found")
 }
 
 func TestLoadProject_InvalidYAML(t *testing.T) {
@@ -42,7 +42,7 @@ func TestLoadProject_InvalidYAML(t *testing.T) {
 	invalidContent := `preset: php
   invalid indentation that breaks yaml
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(invalidContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(invalidContent), 0644))
 
 	cfg, err := LoadProject(tmpDir)
 
@@ -59,7 +59,7 @@ func TestLoadGlobal_ValidConfig(t *testing.T) {
 detected_tools:
   php: true
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := loadGlobalFromTestDir(tmpDir)
 
@@ -85,7 +85,7 @@ func TestGetGlobalConfigDir_XDGSet(t *testing.T) {
 	dir, err := GetGlobalConfigDir()
 
 	assert.NoError(t, err)
-	assert.Equal(t, filepath.Join(xdgPath, "arbor"), dir)
+	assert.Equal(t, filepath.Join(xdgPath, "anvil"), dir)
 }
 
 func TestGetGlobalConfigDir_XDGNotSet(t *testing.T) {
@@ -97,7 +97,7 @@ func TestGetGlobalConfigDir_XDGNotSet(t *testing.T) {
 	dir, err := GetGlobalConfigDir()
 
 	assert.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, ".config", "arbor"), dir)
+	assert.Equal(t, filepath.Join(home, ".config", "anvil"), dir)
 }
 
 func TestStepConfig_Unmarshal_NewFields(t *testing.T) {
@@ -119,7 +119,7 @@ scaffold:
           file: .env
           key: DB_CONNECTION
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := LoadProject(tmpDir)
 
@@ -148,7 +148,7 @@ scaffold:
   steps:
     - name: test.step
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := LoadProject(tmpDir)
 
@@ -176,7 +176,7 @@ scaffold:
     - name: test.step
       enabled: false
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := LoadProject(tmpDir)
 
@@ -192,7 +192,7 @@ scaffold:
 func loadGlobalFromTestDir(testDir string) (*GlobalConfig, error) {
 	v := viper.New()
 
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(testDir)
 
@@ -214,7 +214,7 @@ func TestGlobalConfig_ProjectInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	configContent := `default_branch: main
-worktree_base: ~/.arbor/worktrees
+worktree_base: ~/.anvil/worktrees
 projects:
   my-project:
     path: /home/user/projects/my-project
@@ -222,13 +222,13 @@ projects:
     preset: laravel
     site_name: my-project
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "arbor.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
 
 	cfg, err := loadGlobalFromTestDir(tmpDir)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
-	assert.Equal(t, "~/.arbor/worktrees", cfg.WorktreeBase)
+	assert.Equal(t, "~/.anvil/worktrees", cfg.WorktreeBase)
 	assert.NotNil(t, cfg.Projects)
 	assert.Contains(t, cfg.Projects, "my-project")
 
@@ -340,13 +340,13 @@ func TestGlobalConfig_GetWorktreeBaseExpanded(t *testing.T) {
 	}{
 		{
 			name:         "tilde expansion",
-			worktreeBase: "~/.arbor/worktrees",
-			expected:     filepath.Join(home, ".arbor/worktrees"),
+			worktreeBase: "~/.anvil/worktrees",
+			expected:     filepath.Join(home, ".anvil/worktrees"),
 		},
 		{
 			name:         "absolute path unchanged",
-			worktreeBase: "/var/arbor/worktrees",
-			expected:     "/var/arbor/worktrees",
+			worktreeBase: "/var/anvil/worktrees",
+			expected:     "/var/anvil/worktrees",
 		},
 		{
 			name:         "empty returns empty",

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 func TestEnvReadStep(t *testing.T) {

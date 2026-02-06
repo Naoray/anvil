@@ -6,23 +6,20 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/presets"
-	"github.com/artisanexperiences/arbor/internal/scaffold"
-	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
+	"github.com/naoray/anvil/internal/scaffold"
+	"github.com/naoray/anvil/internal/scaffold/steps"
 )
 
 type ProjectContext struct {
 	CWD           string
-	BarePath      string // For legacy projects, this is the .bare path; for linked projects, this is the .git path
+	GitDir        string
 	ProjectPath   string
 	Config        *config.Config
 	DefaultBranch string
 
-	// Linked project fields
-	IsLinked     bool
 	ProjectName  string
 	WorktreeBase string
 	GlobalConfig *config.GlobalConfig
@@ -38,60 +35,35 @@ func OpenProjectFromCWD() (*ProjectContext, error) {
 		return nil, fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// First, check if we're in a linked project
+	// Load global config and find linked project
 	globalCfg, err := config.LoadOrCreateGlobalConfig()
-	if err == nil {
-		projectName, projectInfo := globalCfg.FindLinkedProjectFromPath(cwd)
-		if projectInfo != nil {
-			return openLinkedProject(cwd, projectName, projectInfo, globalCfg)
-		}
-
-		// Also check if we're in a worktree of a linked project
-		worktreeBase, err := globalCfg.GetWorktreeBaseExpanded()
-		if err == nil && worktreeBase != "" {
-			pc, err := openLinkedProjectFromWorktree(cwd, worktreeBase, globalCfg)
-			if err == nil && pc != nil {
-				return pc, nil
-			}
-		}
-	}
-
-	// Fall back to legacy .bare project detection
-	barePath, err := git.FindBarePath(cwd)
 	if err != nil {
-		return nil, fmt.Errorf("finding bare repository: %w", err)
+		return nil, fmt.Errorf("loading global config: %w", err)
 	}
 
-	projectPath := filepath.Dir(barePath)
-	cfg, err := config.LoadProject(projectPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading project config: %w", err)
+	// Check if we're in a linked project
+	projectName, projectInfo := globalCfg.FindLinkedProjectFromPath(cwd)
+	if projectInfo != nil {
+		return openProject(cwd, projectName, projectInfo, globalCfg)
 	}
 
-	defaultBranch := cfg.DefaultBranch
-	if defaultBranch == "" {
-		defaultBranch, _ = git.GetDefaultBranch(barePath)
-		if defaultBranch == "" {
-			defaultBranch = config.DefaultBranch
+	// Check if we're in a worktree of a linked project
+	worktreeBase, err := globalCfg.GetWorktreeBaseExpanded()
+	if err == nil && worktreeBase != "" {
+		pc, err := openProjectFromWorktree(cwd, worktreeBase, globalCfg)
+		if err == nil && pc != nil {
+			return pc, nil
 		}
 	}
 
-	return &ProjectContext{
-		CWD:           cwd,
-		BarePath:      barePath,
-		ProjectPath:   projectPath,
-		Config:        cfg,
-		DefaultBranch: defaultBranch,
-		IsLinked:      false,
-		GlobalConfig:  globalCfg,
-	}, nil
+	return nil, fmt.Errorf("not in a linked anvil project (run 'anvil link' first)")
 }
 
-// openLinkedProject creates a ProjectContext for a linked project
-func openLinkedProject(cwd, projectName string, projectInfo *config.ProjectInfo, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
-	gitDir, _, err := git.FindGitDir(projectInfo.Path)
+// openProject creates a ProjectContext for a linked project
+func openProject(cwd, projectName string, projectInfo *config.ProjectInfo, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
+	gitDir, err := git.FindGitDir(projectInfo.Path)
 	if err != nil {
-		return nil, fmt.Errorf("finding git directory for linked project: %w", err)
+		return nil, fmt.Errorf("finding git directory: %w", err)
 	}
 
 	defaultBranch := projectInfo.DefaultBranch
@@ -104,7 +76,6 @@ func openLinkedProject(cwd, projectName string, projectInfo *config.ProjectInfo,
 
 	worktreeBase, _ := globalCfg.GetWorktreeBaseExpanded()
 
-	// Create a synthetic config for the linked project
 	cfg := &config.Config{
 		SiteName:      projectInfo.SiteName,
 		Preset:        projectInfo.Preset,
@@ -113,41 +84,25 @@ func openLinkedProject(cwd, projectName string, projectInfo *config.ProjectInfo,
 
 	return &ProjectContext{
 		CWD:           cwd,
-		BarePath:      gitDir,
+		GitDir:        gitDir,
 		ProjectPath:   projectInfo.Path,
 		Config:        cfg,
 		DefaultBranch: defaultBranch,
-		IsLinked:      true,
 		ProjectName:   projectName,
 		WorktreeBase:  worktreeBase,
 		GlobalConfig:  globalCfg,
 	}, nil
 }
 
-// openLinkedProjectFromWorktree creates a ProjectContext when inside a worktree of a linked project
-func openLinkedProjectFromWorktree(cwd, worktreeBase string, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
+// openProjectFromWorktree creates a ProjectContext when inside a worktree of a linked project
+func openProjectFromWorktree(cwd, worktreeBase string, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
 	// Check if cwd is under worktreeBase
 	rel, err := filepath.Rel(worktreeBase, cwd)
 	if err != nil || len(rel) == 0 || rel[0] == '.' {
 		return nil, nil // Not under worktree base
 	}
 
-	// Extract project name from path (first component after worktreeBase)
-	parts := filepath.SplitList(rel)
-	if len(parts) == 0 {
-		// Try splitting by separator
-		for i := 0; i < len(rel); i++ {
-			if rel[i] == filepath.Separator {
-				parts = []string{rel[:i]}
-				break
-			}
-		}
-		if len(parts) == 0 {
-			parts = []string{rel}
-		}
-	}
-
-	// Get first path component
+	// Get first path component as project name
 	projectName := ""
 	for i := 0; i < len(rel); i++ {
 		if rel[i] == filepath.Separator {
@@ -165,25 +120,20 @@ func openLinkedProjectFromWorktree(cwd, worktreeBase string, globalCfg *config.G
 		return nil, nil // Project not found in config
 	}
 
-	return openLinkedProject(cwd, projectName, projectInfo, globalCfg)
+	return openProject(cwd, projectName, projectInfo, globalCfg)
 }
 
 // GetWorktreePath returns the path where worktrees should be created for this project
 func (pc *ProjectContext) GetWorktreePath(branch string) string {
 	sanitizedBranch := sanitizeBranchName(branch)
-
-	if pc.IsLinked && pc.WorktreeBase != "" {
-		// Linked project: use centralized worktree location
+	if pc.WorktreeBase != "" {
 		return filepath.Join(pc.WorktreeBase, pc.ProjectName, sanitizedBranch)
 	}
-
-	// Legacy project: worktrees are siblings to .bare
 	return filepath.Join(pc.ProjectPath, sanitizedBranch)
 }
 
 // sanitizeBranchName converts branch name to a safe directory name
 func sanitizeBranchName(branch string) string {
-	// Replace / with - for feature branches
 	result := ""
 	for _, c := range branch {
 		if c == '/' {
@@ -196,39 +146,35 @@ func sanitizeBranchName(branch string) string {
 }
 
 func (pc *ProjectContext) IsInWorktree() bool {
-	// Check if .bare exists in parent hierarchy
-	barePath, err := git.FindBarePath(pc.CWD)
+	// Use git to check if we're inside a worktree
+	gitDir, err := git.FindGitDir(pc.CWD)
 	if err != nil {
+		// No .git found - check if CWD is under worktree base
+		if pc.WorktreeBase != "" {
+			rel, err := filepath.Rel(pc.WorktreeBase, pc.CWD)
+			if err == nil && len(rel) > 0 && rel[0] != '.' {
+				return true
+			}
+		}
 		return false
 	}
 
-	// Check if CWD is inside a worktree directory (not the project root)
-	projectPath := filepath.Dir(barePath)
+	// If the gitDir is a file-based reference (worktree), we're in a worktree
+	_ = gitDir
+	cwdAbs, _ := filepath.Abs(pc.CWD)
+	projectAbs, _ := filepath.Abs(pc.ProjectPath)
 
-	// If CWD equals project path, we're in the project root, not a worktree
-	cwdAbs, err := filepath.Abs(pc.CWD)
-	if err != nil {
+	// If we're in the project root itself, we're not in a worktree
+	if cwdAbs == projectAbs {
 		return false
 	}
 
-	projectAbs, err := filepath.Abs(projectPath)
-	if err != nil {
-		return false
-	}
-
-	// If we're in the project root or its direct child .bare, we're not in a worktree
-	if cwdAbs == projectAbs || cwdAbs == filepath.Join(projectAbs, ".bare") {
-		return false
-	}
-
-	// We're somewhere under the project root but not the root itself
-	// Check if we're actually in a worktree by seeing if CWD is within a worktree path
 	return true
 }
 
 func (pc *ProjectContext) MustBeInWorktree() error {
 	if !pc.IsInWorktree() {
-		return arborerrors.ErrWorktreeNotFound
+		return fmt.Errorf("not inside a worktree")
 	}
 	return nil
 }
@@ -248,11 +194,9 @@ func (pc *ProjectContext) ScaffoldManager() *scaffold.ScaffoldManager {
 }
 
 func (pc *ProjectContext) initManagers() {
-	// Create explicit step registry with default steps
 	stepRegistry := steps.NewRegistry()
 	stepRegistry.RegisterDefaults()
 
-	// Initialize managers with dependency injection
 	pc.presetManager = presets.NewManager()
 	pc.scaffoldManager = scaffold.NewScaffoldManagerWithRegistry(stepRegistry)
 	presets.RegisterAllWithScaffold(pc.scaffoldManager)

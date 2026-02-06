@@ -5,11 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Project renamed from Arbor to Anvil** - Binary, module path, config files, and all references renamed
+  - Module path changed from `github.com/artisanexperiences/arbor` to `github.com/naoray/anvil`
+  - Config file renamed from `arbor.yaml` to `anvil.yaml`
+  - Local state file renamed from `.arbor.local` to `.anvil.local`
+  - Default worktree base changed from `~/.arbor/worktrees` to `~/.anvil/worktrees`
+  - Global config directory changed from `~/.config/arbor/` to `~/.config/anvil/`
+- **Removed `anvil init` and `anvil destroy` commands** - The legacy bare repository (`.bare`) approach has been removed entirely. Use `anvil link` to register existing git repositories for centralized worktree management, and `anvil unlink --clean` to unregister and clean up.
+- **Removed `.bare` directory support** - Anvil now exclusively uses the linked project approach with worktrees stored in `~/.anvil/worktrees/`.
+
+### Removed
+
+- `anvil init` command (use `anvil link` instead)
+- `anvil destroy` command (use `anvil unlink --clean` instead)
+- `CloneRepo`, `CloneRepoWithGH`, `FindBarePath`, `IsAnvilProject` internal functions
+- `IsLinked` field from `ProjectContext` (all projects are now linked)
+- `BarePath` field renamed to `GitDir` in `ProjectContext`
+
+### Changed
+
+- Simplified all CLI commands by removing dual-path branching (`if pc.IsLinked`)
+- Unified worktree function signatures: `CreateWorktree`, `RemoveWorktree`, `ListWorktrees` now operate on a `gitDir` parameter
+- Updated banner to show `link`, `unlink`, and `cd` commands
+
 ## [0.10.1] - 2026-02-05
 
 ### Performance
 
-- **Significantly improved `arbor sync` auto-stash performance** - Changed auto-stash to skip ignored files (node_modules, vendor, etc.) for much faster operation
+- **Significantly improved `anvil sync` auto-stash performance** - Changed auto-stash to skip ignored files (node_modules, vendor, etc.) for much faster operation
   - Auto-stash now completes in seconds instead of minutes on large projects
   - Changed from `git stash push --all` to `git stash push --include-untracked`
   - Still protects tracked modifications and untracked files
@@ -53,14 +80,14 @@ No changes in this release.
 ## [0.9.2] - 2026-02-04
 
 ### Added
-- **Homebrew Support** - Arbor is now available via Homebrew
-  - Install with `brew tap artisanexperiences/tap && brew install arbor`
+- **Homebrew Support** - Anvil is now available via Homebrew
+  - Install with `brew tap artisanexperiences/tap && brew install anvil`
   - Automated formula updates on new releases
   - Support for macOS (arm64/amd64) and Linux (arm64/amd64)
 
 ### Changed
 - **BREAKING:** Migrated repository from `michaeldyrynda` to `artisanexperiences` organization
-  - Module path changed from `github.com/michaeldyrynda/arbor` to `github.com/artisanexperiences/arbor`
+  - Module path changed from `github.com/michaeldyrynda/anvil` to `github.com/naoray/anvil`
   - All import paths updated across the codebase
   - GitHub URLs updated in documentation
   - Users installing via `go install` must update their commands
@@ -99,7 +126,7 @@ No changes in this release.
 
 ### Fixed
 
-- Prevent `arbor init` from overwriting copied repository config
+- Prevent `anvil init` from overwriting copied repository config
   - Now skips unnecessary SaveProject call when repo config is copied
   - Only saves when explicitly setting a preset flag
   
@@ -113,14 +140,14 @@ No changes in this release.
 ### Added
 
 - Separate local state from team config
-  - New `.arbor.local` file for runtime state (gitignored)
+  - New `.anvil.local` file for runtime state (gitignored)
   - Local state stores `db_suffix` for database naming
   - Automatic migration from old config format on first run
   - No manual intervention required - seamless upgrade
 
 ### Changed
 
-- `arbor.yaml` now contains only team-shared configuration
+- `anvil.yaml` now contains only team-shared configuration
   - Scaffold steps and presets remain in team config
   - Database suffix moves to local state file
   - Cleaner separation between shared and local settings
@@ -135,10 +162,10 @@ No changes in this release.
 
 ### Added
 
-- New `arbor sync` command for synchronizing worktrees with upstream branches
+- New `anvil sync` command for synchronizing worktrees with upstream branches
   - Fetch from remote and rebase (default) or merge with upstream
   - Interactive prompts for upstream branch and strategy selection
-  - Configuration persistence to `arbor.yaml`
+  - Configuration persistence to `anvil.yaml`
   - Support for custom remotes (default: origin)
   - Conflict detection with actionable error messages
   - Pre-flight checks for detached HEAD, dirty worktree, and in-progress operations
@@ -151,7 +178,7 @@ No changes in this release.
 
 ### Added
 
-- New `arbor repair` command for fixing git configuration in existing projects
+- New `anvil repair` command for fixing git configuration in existing projects
   - Configure fetch refspec in `.bare` directory for remote branch tracking
   - Automatically set up branch tracking for all local branches with remote counterparts
   - Interactive prompts for remote URL confirmation and editing
@@ -159,12 +186,12 @@ No changes in this release.
   - `--refspec-only` and `--tracking-only` flags for partial repairs
   - Idempotent - safe to run multiple times
 
-- Automatic branch tracking in `arbor work` command
+- Automatic branch tracking in `anvil work` command
   - New worktrees automatically set up upstream tracking to origin
   - `--no-track` flag to skip tracking setup when needed
   - Non-fatal errors - worktree creation continues even if tracking fails
 
-- Automatic fetch refspec configuration in `arbor init`
+- Automatic fetch refspec configuration in `anvil init`
   - Bare repositories now automatically configured for remote tracking
   - Enables fetch, merge, and rebase operations from remote branches
 
@@ -264,7 +291,7 @@ No changes in this release.
 
 ### Major Changes
 - Complete interactive UI overhaul using Charm libraries
-  - Styled tables for 'arbor list'
+  - Styled tables for 'anvil list'
   - Interactive prompts for all commands
   - Spinners for long-running operations
   - Command output styling
@@ -272,13 +299,13 @@ No changes in this release.
   - Tree-themed color palette
 
 ### Enhanced
-- Enhanced 'arbor remove' command
+- Enhanced 'anvil remove' command
   - Add --delete-branch flag
   - Interactive prompt for branch deletion
   - Improved worktree picker when folder arg missing
 
 ### Added
-- New 'arbor destroy' command for project cleanup
+- New 'anvil destroy' command for project cleanup
 
 ### Fixed
 - Strip '+' prefix from branch names
@@ -293,7 +320,7 @@ No changes in this release.
 ## [0.1.0] - 2026-01-20
 
 ### Added
-- 'arbor list' command to display worktrees with their status
+- 'anvil list' command to display worktrees with their status
 - Comprehensive documentation updates
 
 ### Fixed
@@ -313,7 +340,7 @@ No changes in this release.
 ## [0.0.2] - 2026-01-20
 
 ### Added
-- 'arbor list' command to display worktrees
+- 'anvil list' command to display worktrees
 - Update documentation with list command
 - Use tag annotation for release notes
 
@@ -327,23 +354,23 @@ No changes in this release.
 - Interactive commands (work, prune)
 - Multi-platform builds and CI/CD
 
-[0.10.0]: https://github.com/artisanexperiences/arbor/compare/v0.9.5...v0.10.0
-[0.9.5]: https://github.com/artisanexperiences/arbor/compare/v0.9.4...v0.9.5
-[0.9.4]: https://github.com/artisanexperiences/arbor/compare/v0.9.3...v0.9.4
-[0.9.3]: https://github.com/artisanexperiences/arbor/compare/v0.9.2...v0.9.3
-[0.9.2]: https://github.com/artisanexperiences/arbor/compare/v0.9.1...v0.9.2
-[0.9.1]: https://github.com/artisanexperiences/arbor/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/artisanexperiences/arbor/compare/v0.8.1...v0.9.0
-[0.8.1]: https://github.com/artisanexperiences/arbor/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/artisanexperiences/arbor/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/artisanexperiences/arbor/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/artisanexperiences/arbor/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/artisanexperiences/arbor/compare/v0.4.2...v0.5.0
-[0.4.2]: https://github.com/artisanexperiences/arbor/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/artisanexperiences/arbor/compare/v0.4.0...v0.4.1
-[0.3.1]: https://github.com/artisanexperiences/arbor/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/artisanexperiences/arbor/compare/v0.2.4...v0.3.0
-[0.2.0]: https://github.com/artisanexperiences/arbor/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/artisanexperiences/arbor/compare/v0.0.2...v0.1.0
-[0.0.2]: https://github.com/artisanexperiences/arbor/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/artisanexperiences/arbor/releases/tag/v0.0.1
+[0.10.0]: https://github.com/naoray/anvil/compare/v0.9.5...v0.10.0
+[0.9.5]: https://github.com/naoray/anvil/compare/v0.9.4...v0.9.5
+[0.9.4]: https://github.com/naoray/anvil/compare/v0.9.3...v0.9.4
+[0.9.3]: https://github.com/naoray/anvil/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/naoray/anvil/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/naoray/anvil/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/naoray/anvil/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/naoray/anvil/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/naoray/anvil/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/naoray/anvil/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/naoray/anvil/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/naoray/anvil/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/naoray/anvil/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/naoray/anvil/compare/v0.4.0...v0.4.1
+[0.3.1]: https://github.com/naoray/anvil/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/naoray/anvil/compare/v0.2.4...v0.3.0
+[0.2.0]: https://github.com/naoray/anvil/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/naoray/anvil/compare/v0.0.2...v0.1.0
+[0.0.2]: https://github.com/naoray/anvil/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/naoray/anvil/releases/tag/v0.0.1

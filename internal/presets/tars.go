@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/naoray/anvil/internal/config"
 )
 
 // Tars is a preset for TARS (memory system for AI assistants).

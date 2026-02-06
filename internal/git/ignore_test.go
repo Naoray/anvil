@@ -18,19 +18,19 @@ func TestIsIgnored(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	// Create .gitignore with .arbor.local
+	// Create .gitignore with .anvil.local
 	gitignorePath := filepath.Join(tmpDir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte(".arbor.local\n"), 0644); err != nil {
+	if err := os.WriteFile(gitignorePath, []byte(".anvil.local\n"), 0644); err != nil {
 		t.Fatalf("failed to write .gitignore: %v", err)
 	}
 
 	// Test ignored file
-	ignored, err := IsIgnored(tmpDir, ".arbor.local")
+	ignored, err := IsIgnored(tmpDir, ".anvil.local")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !ignored {
-		t.Error("expected .arbor.local to be ignored")
+		t.Error("expected .anvil.local to be ignored")
 	}
 
 	// Test non-ignored file

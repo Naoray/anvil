@@ -22,7 +22,7 @@ func TestSaveProject(t *testing.T) {
 		}
 
 		// Verify file was created
-		configPath := filepath.Join(tmpDir, "arbor.yaml")
+		configPath := filepath.Join(tmpDir, "anvil.yaml")
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			t.Error("config file was not created")
 		}
@@ -46,7 +46,7 @@ func TestSaveProject(t *testing.T) {
 
 	t.Run("preserves existing config data", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "arbor.yaml")
+		configPath := filepath.Join(tmpDir, "anvil.yaml")
 
 		// Create initial config with extra fields
 		initialContent := `site_name: OldSite

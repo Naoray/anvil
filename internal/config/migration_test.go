@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestMigrateDbSuffixToLocal_NoArborYaml(t *testing.T) {
+func TestMigrateDbSuffixToLocal_NoAnvilYaml(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	migrated, err := MigrateDbSuffixToLocal(tmpDir)
@@ -17,13 +17,13 @@ func TestMigrateDbSuffixToLocal_NoArborYaml(t *testing.T) {
 	}
 
 	if migrated {
-		t.Error("expected migrated=false when arbor.yaml doesn't exist")
+		t.Error("expected migrated=false when anvil.yaml doesn't exist")
 	}
 }
 
 func TestMigrateDbSuffixToLocal_NoDbSuffix(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "arbor.yaml")
+	configPath := filepath.Join(tmpDir, "anvil.yaml")
 
 	content := []byte("preset: laravel\nsite_name: test\n")
 	if err := os.WriteFile(configPath, content, 0644); err != nil {
@@ -42,16 +42,16 @@ func TestMigrateDbSuffixToLocal_NoDbSuffix(t *testing.T) {
 
 func TestMigrateDbSuffixToLocal_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "arbor.yaml")
-	localPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, "anvil.yaml")
+	localPath := filepath.Join(tmpDir, ".anvil.local")
 
-	// Create arbor.yaml with db_suffix
-	arborContent := map[string]interface{}{
+	// Create anvil.yaml with db_suffix
+	anvilContent := map[string]interface{}{
 		"preset":    "laravel",
 		"site_name": "test",
 		"db_suffix": "sunset",
 	}
-	content, err := yaml.Marshal(arborContent)
+	content, err := yaml.Marshal(anvilContent)
 	if err != nil {
 		t.Fatalf("failed to marshal content: %v", err)
 	}
@@ -69,58 +69,58 @@ func TestMigrateDbSuffixToLocal_Success(t *testing.T) {
 		t.Fatal("expected migrated=true")
 	}
 
-	// Verify .arbor.local was created with db_suffix
+	// Verify .anvil.local was created with db_suffix
 	if _, err := os.Stat(localPath); os.IsNotExist(err) {
-		t.Fatal("expected .arbor.local to be created")
+		t.Fatal("expected .anvil.local to be created")
 	}
 
 	localContent, err := os.ReadFile(localPath)
 	if err != nil {
-		t.Fatalf("failed to read .arbor.local: %v", err)
+		t.Fatalf("failed to read .anvil.local: %v", err)
 	}
 
 	var localData map[string]interface{}
 	if err := yaml.Unmarshal(localContent, &localData); err != nil {
-		t.Fatalf("failed to parse .arbor.local: %v", err)
+		t.Fatalf("failed to parse .anvil.local: %v", err)
 	}
 
 	if localData["db_suffix"] != "sunset" {
-		t.Errorf("expected db_suffix 'sunset' in .arbor.local, got: %v", localData["db_suffix"])
+		t.Errorf("expected db_suffix 'sunset' in .anvil.local, got: %v", localData["db_suffix"])
 	}
 
-	// Verify db_suffix was removed from arbor.yaml
-	arborContent2, err := os.ReadFile(configPath)
+	// Verify db_suffix was removed from anvil.yaml
+	anvilContent2, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatalf("failed to read arbor.yaml: %v", err)
+		t.Fatalf("failed to read anvil.yaml: %v", err)
 	}
 
-	var arborData map[string]interface{}
-	if err := yaml.Unmarshal(arborContent2, &arborData); err != nil {
-		t.Fatalf("failed to parse arbor.yaml: %v", err)
+	var anvilData map[string]interface{}
+	if err := yaml.Unmarshal(anvilContent2, &anvilData); err != nil {
+		t.Fatalf("failed to parse anvil.yaml: %v", err)
 	}
 
-	if _, hasDbSuffix := arborData["db_suffix"]; hasDbSuffix {
-		t.Error("expected db_suffix to be removed from arbor.yaml")
+	if _, hasDbSuffix := anvilData["db_suffix"]; hasDbSuffix {
+		t.Error("expected db_suffix to be removed from anvil.yaml")
 	}
 
 	// Verify other fields preserved
-	if arborData["preset"] != "laravel" {
-		t.Errorf("expected preset 'laravel', got: %v", arborData["preset"])
+	if anvilData["preset"] != "laravel" {
+		t.Errorf("expected preset 'laravel', got: %v", anvilData["preset"])
 	}
-	if arborData["site_name"] != "test" {
-		t.Errorf("expected site_name 'test', got: %v", arborData["site_name"])
+	if anvilData["site_name"] != "test" {
+		t.Errorf("expected site_name 'test', got: %v", anvilData["site_name"])
 	}
 }
 
 func TestMigrateDbSuffixToLocal_EmptyDbSuffix(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "arbor.yaml")
+	configPath := filepath.Join(tmpDir, "anvil.yaml")
 
-	arborContent := map[string]interface{}{
+	anvilContent := map[string]interface{}{
 		"preset":    "laravel",
 		"db_suffix": "",
 	}
-	content, err := yaml.Marshal(arborContent)
+	content, err := yaml.Marshal(anvilContent)
 	if err != nil {
 		t.Fatalf("failed to marshal content: %v", err)
 	}

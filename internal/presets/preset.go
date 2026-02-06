@@ -1,7 +1,7 @@
 package presets
 
 import (
-	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/naoray/anvil/internal/config"
 )
 
 type Preset interface {

@@ -1,4 +1,4 @@
-# golangci-lint configuration for Arbor
+# golangci-lint configuration for Anvil
 # Run: golangci-lint run ./...
 # Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
@@ -40,7 +40,7 @@ linters:
           - errcheck
 
       # Allow fmt.Println in main
-      - path: cmd/arbor/main\.go
+      - path: cmd/anvil/main\.go
         linters:
           - forbidigo
 
@@ -55,7 +55,7 @@ formatters:
 
     goimports:
       local-prefixes:
-        - github.com/artisanexperiences/arbor
+        - github.com/naoray/anvil
 
 issues:
   max-issues-per-linter: 50

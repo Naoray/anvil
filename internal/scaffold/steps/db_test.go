@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 func TestDbCreateStep(t *testing.T) {
@@ -178,7 +178,7 @@ func TestDbCreateStep(t *testing.T) {
 
 		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .arbor.local")
+		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .anvil.local")
 	})
 
 	t.Run("reads APP_NAME from .env if SiteName is empty", func(t *testing.T) {

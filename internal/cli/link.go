@@ -7,16 +7,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/presets"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var linkCmd = &cobra.Command{
 	Use:   "link [PATH]",
 	Short: "Link an existing git repository for centralized worktree management",
-	Long: `Links an existing git repository to arbor for centralized worktree management.
+	Long: `Links an existing git repository to anvil for centralized worktree management.
 
 This allows you to keep your project folder clean while storing worktrees
 in a centralized location (configured via worktree_base in global config).
@@ -26,16 +26,16 @@ Arguments:
 
 Examples:
   # Link current directory
-  arbor link
+  anvil link
 
   # Link with a specific preset
-  arbor link --preset laravel
+  anvil link --preset laravel
 
   # Link a specific path
-  arbor link ~/Projects/my-app
+  anvil link ~/Projects/my-app
 
   # Link with a custom name
-  arbor link --name my-custom-name`,
+  anvil link --name my-custom-name`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Determine the path to link
@@ -54,11 +54,6 @@ Examples:
 			return fmt.Errorf("%s is not a git repository (no .git directory found)", absPath)
 		}
 
-		// Check if it's already an arbor project (has .bare)
-		if git.IsArborProject(absPath) {
-			return fmt.Errorf("%s is already an arbor project (has .bare directory). Use 'arbor work' directly", absPath)
-		}
-
 		// Load or create global config
 		globalCfg, err := config.LoadOrCreateGlobalConfig()
 		if err != nil {
@@ -73,16 +68,16 @@ Examples:
 
 		if worktreeBase == "" {
 			ui.PrintWarning("No worktree_base configured in global config")
-			ui.PrintInfo("Worktrees will be created in ~/.arbor/worktrees by default")
-			ui.PrintInfo("To change this, run: arbor config set worktree_base <path>")
+			ui.PrintInfo("Worktrees will be created in ~/.anvil/worktrees by default")
+			ui.PrintInfo("To change this, run: anvil config set worktree_base <path>")
 
 			// Set default worktree base
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("getting home directory: %w", err)
 			}
-			worktreeBase = filepath.Join(home, ".arbor", "worktrees")
-			globalCfg.WorktreeBase = "~/.arbor/worktrees"
+			worktreeBase = filepath.Join(home, ".anvil", "worktrees")
+			globalCfg.WorktreeBase = "~/.anvil/worktrees"
 		}
 
 		// Determine project name
@@ -101,7 +96,7 @@ Examples:
 		}
 
 		// Get the git directory and detect default branch
-		gitDir, _, err := git.FindGitDir(absPath)
+		gitDir, err := git.FindGitDir(absPath)
 		if err != nil {
 			return fmt.Errorf("finding git directory: %w", err)
 		}
@@ -165,7 +160,7 @@ Examples:
 		ui.PrintInfo(fmt.Sprintf("Worktrees will be stored in: %s", projectWorktreeDir))
 		ui.PrintInfo("")
 		ui.PrintInfo("Create a new worktree with:")
-		ui.PrintInfo(fmt.Sprintf("  cd %s && arbor work feature/my-feature", absPath))
+		ui.PrintInfo(fmt.Sprintf("  cd %s && anvil work feature/my-feature", absPath))
 
 		return nil
 	},

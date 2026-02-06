@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
-	"github.com/artisanexperiences/arbor/internal/utils"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/utils"
 )
 
 type EnvCopyStep struct {

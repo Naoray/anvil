@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 type ExecutionResult struct {

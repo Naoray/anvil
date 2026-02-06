@@ -52,7 +52,7 @@ changelog:
 announce:
   twitter:
     enabled: true
-    hashtag: arbor
+    hashtag: anvil
   mastodon:
     enabled: true
     server: fosstodon.org

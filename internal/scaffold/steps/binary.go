@@ -6,10 +6,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	arbor_exec "github.com/artisanexperiences/arbor/internal/exec"
-	"github.com/artisanexperiences/arbor/internal/scaffold/template"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/config"
+	anvil_exec "github.com/naoray/anvil/internal/exec"
+	"github.com/naoray/anvil/internal/scaffold/template"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 type BinaryStep struct {
@@ -18,7 +18,7 @@ type BinaryStep struct {
 	args      []string
 	condition map[string]interface{}
 	storeAs   string
-	executor  *arbor_exec.CommandExecutor
+	executor  *anvil_exec.CommandExecutor
 }
 
 // NewBinaryStep creates a binary step with the default command executor.
@@ -28,9 +28,9 @@ func NewBinaryStep(name, binary string, args []string, storeAs string) *BinarySt
 
 // NewBinaryStepWithExecutor creates a binary step with a custom command executor.
 // This is useful for testing with mock executors.
-func NewBinaryStepWithExecutor(name, binary string, args []string, storeAs string, executor *arbor_exec.CommandExecutor) *BinaryStep {
+func NewBinaryStepWithExecutor(name, binary string, args []string, storeAs string, executor *anvil_exec.CommandExecutor) *BinaryStep {
 	if executor == nil {
-		executor = arbor_exec.NewCommandExecutor(nil)
+		executor = anvil_exec.NewCommandExecutor(nil)
 	}
 	return &BinaryStep{
 		name:      name,
@@ -51,7 +51,7 @@ func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary strin
 		args:      cfg.Args,
 		condition: cfg.Condition,
 		storeAs:   cfg.StoreAs,
-		executor:  arbor_exec.NewCommandExecutor(nil),
+		executor:  anvil_exec.NewCommandExecutor(nil),
 	}
 }
 

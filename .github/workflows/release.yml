@@ -72,11 +72,11 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           go build -trimpath -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }} -X main.Commit=$COMMIT -X main.BuildDate=$DATE" \
-            -o arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }} ./cmd/arbor
+            -o anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }} ./cmd/anvil
 
       - name: Create archive (tar.gz)
         if: matrix.zip_extension == 'tar.gz'
-        run: tar -czf arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }}
+        run: tar -czf anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }}
 
       - name: Create archive (zip)
         if: matrix.zip_extension == 'zip'
@@ -84,19 +84,19 @@ jobs:
         run: |
           $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
           $target = "${{ matrix.target }}"
-          7z a "arbor-$version-$target.zip" "arbor-$version-$target.exe"
+          7z a "anvil-$version-$target.zip" "anvil-$version-$target.exe"
 
       - name: Generate checksum
         shell: bash
-        run: sha256sum arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} > arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
+        run: sha256sum anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} > anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arbor-${{ matrix.target }}
+          name: anvil-${{ matrix.target }}
           path: |
-            arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }}
-            arbor-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
+            anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }}
+            anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
 
   create-release:
     name: Create Release
@@ -169,7 +169,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          gh api repos/artisanexperiences/homebrew-tap/dispatches \
+          gh api repos/naoray/homebrew-tap/dispatches \
             --method POST \
             --field event_type=update-formula \
             --field client_payload[version]="${{ steps.version.outputs.VERSION }}" \

@@ -8,8 +8,8 @@ import (
 )
 
 // FetchRemote runs git fetch for the specified remote
-func FetchRemote(barePath, remote string) error {
-	cmd := exec.Command("git", "-C", barePath, "fetch", remote)
+func FetchRemote(gitDir, remote string) error {
+	cmd := exec.Command("git", "-C", gitDir, "fetch", remote)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git fetch failed: %w\n%s", err, string(output))

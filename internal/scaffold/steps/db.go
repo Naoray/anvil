@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
-	"github.com/artisanexperiences/arbor/internal/scaffold/words"
-	"github.com/artisanexperiences/arbor/internal/utils"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/scaffold/words"
+	"github.com/naoray/anvil/internal/utils"
 )
 
 type DbCreateStep struct {
@@ -215,7 +215,7 @@ func (s *DbCreateStep) persistDbSuffix(ctx *types.ScaffoldContext) error {
 		return nil
 	}
 
-	// Write to .arbor.local instead of arbor.yaml
+	// Write to .anvil.local instead of anvil.yaml
 	return config.WriteLocalState(ctx.WorktreePath, config.LocalState{DbSuffix: suffix})
 }
 

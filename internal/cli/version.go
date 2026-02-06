@@ -16,9 +16,9 @@ var (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Long:  `Display the current version of Arbor.`,
+	Long:  `Display the current version of Anvil.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("arbor version %s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+		fmt.Printf("anvil version %s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 	},
 }
 

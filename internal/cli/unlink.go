@@ -7,15 +7,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var unlinkCmd = &cobra.Command{
 	Use:   "unlink [NAME]",
 	Short: "Unlink a project from centralized worktree management",
-	Long: `Unlinks a project from arbor's centralized worktree management.
+	Long: `Unlinks a project from anvil's centralized worktree management.
 
 This removes the project registration from the global config. By default,
 existing worktrees are preserved. Use --clean to remove them.
@@ -25,13 +25,13 @@ Arguments:
 
 Examples:
   # Unlink current project
-  arbor unlink
+  anvil unlink
 
   # Unlink by name
-  arbor unlink my-project
+  anvil unlink my-project
 
   # Unlink and remove all worktrees
-  arbor unlink --clean`,
+  anvil unlink --clean`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load global config
@@ -94,11 +94,11 @@ Examples:
 						}
 
 						// Remove worktrees from git first
-						if _, _, err := git.FindGitDir(projectInfo.Path); err == nil {
+						if gitDir, err := git.FindGitDir(projectInfo.Path); err == nil {
 							for _, entry := range entries {
 								if entry.IsDir() {
 									worktreePath := filepath.Join(projectWorktreeDir, entry.Name())
-									_ = git.RemoveWorktree(worktreePath, true)
+									_ = git.RemoveWorktree(gitDir, worktreePath, true)
 								}
 							}
 						}
@@ -125,7 +125,7 @@ Examples:
 		}
 
 		ui.PrintSuccess(fmt.Sprintf("Unlinked '%s'", projectName))
-		ui.PrintInfo(fmt.Sprintf("Project at %s is no longer managed by arbor", projectInfo.Path))
+		ui.PrintInfo(fmt.Sprintf("Project at %s is no longer managed by anvil", projectInfo.Path))
 
 		return nil
 	},

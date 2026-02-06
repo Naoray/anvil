@@ -13,9 +13,9 @@ type LocalState struct {
 	DbSuffix string `yaml:"db_suffix"`
 }
 
-// ReadLocalState reads worktree-local state from .arbor.local
+// ReadLocalState reads worktree-local state from .anvil.local
 func ReadLocalState(worktreePath string) (*LocalState, error) {
-	configPath := filepath.Join(worktreePath, ".arbor.local")
+	configPath := filepath.Join(worktreePath, ".anvil.local")
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &LocalState{}, nil
@@ -34,9 +34,9 @@ func ReadLocalState(worktreePath string) (*LocalState, error) {
 	return &state, nil
 }
 
-// WriteLocalState writes worktree-local state to .arbor.local
+// WriteLocalState writes worktree-local state to .anvil.local
 func WriteLocalState(worktreePath string, data LocalState) error {
-	configPath := filepath.Join(worktreePath, ".arbor.local")
+	configPath := filepath.Join(worktreePath, ".anvil.local")
 
 	// Read existing state if it exists
 	var existing map[string]interface{}

@@ -8,14 +8,14 @@ import (
 
 // SetBranchUpstream configures a branch to track a remote.
 // This is idempotent - safe to call multiple times.
-func SetBranchUpstream(barePath, branch, remote string) error {
-	cmd := exec.Command("git", "-C", barePath, "config",
+func SetBranchUpstream(gitDir, branch, remote string) error {
+	cmd := exec.Command("git", "-C", gitDir, "config",
 		fmt.Sprintf("branch.%s.remote", branch), remote)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setting branch remote: %w\n%s", err, string(output))
 	}
 
-	cmd = exec.Command("git", "-C", barePath, "config",
+	cmd = exec.Command("git", "-C", gitDir, "config",
 		fmt.Sprintf("branch.%s.merge", branch), fmt.Sprintf("refs/heads/%s", branch))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setting branch merge: %w\n%s", err, string(output))
@@ -25,8 +25,8 @@ func SetBranchUpstream(barePath, branch, remote string) error {
 }
 
 // HasBranchTracking checks if a branch has upstream tracking configured.
-func HasBranchTracking(barePath, branch string) (bool, error) {
-	cmd := exec.Command("git", "-C", barePath, "config", "--get", fmt.Sprintf("branch.%s.remote", branch))
+func HasBranchTracking(gitDir, branch string) (bool, error) {
+	cmd := exec.Command("git", "-C", gitDir, "config", "--get", fmt.Sprintf("branch.%s.remote", branch))
 	err := cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -40,9 +40,9 @@ func HasBranchTracking(barePath, branch string) (bool, error) {
 // GetBranchRefs returns all local and remote branch names.
 // Local branches are returned as-is (e.g., "main", "feature/foo").
 // Remote branches are returned with remote prefix (e.g., "origin/main").
-func GetBranchRefs(barePath string) (local []string, remote []string, err error) {
+func GetBranchRefs(gitDir string) (local []string, remote []string, err error) {
 	// Get local branches
-	cmd := exec.Command("git", "-C", barePath, "for-each-ref",
+	cmd := exec.Command("git", "-C", gitDir, "for-each-ref",
 		"--format=%(refname:short)", "refs/heads/")
 	output, err := cmd.Output()
 	if err != nil {
@@ -56,7 +56,7 @@ func GetBranchRefs(barePath string) (local []string, remote []string, err error)
 	}
 
 	// Get remote branches
-	cmd = exec.Command("git", "-C", barePath, "for-each-ref",
+	cmd = exec.Command("git", "-C", gitDir, "for-each-ref",
 		"--format=%(refname:short)", "refs/remotes/")
 	output, err = cmd.Output()
 	if err != nil {
@@ -73,7 +73,7 @@ func GetBranchRefs(barePath string) (local []string, remote []string, err error)
 }
 
 // ListLocalBranches returns all local branch names.
-func ListLocalBranches(barePath string) ([]string, error) {
-	local, _, err := GetBranchRefs(barePath)
+func ListLocalBranches(gitDir string) ([]string, error) {
+	local, _, err := GetBranchRefs(gitDir)
 	return local, err
 }

@@ -1,6 +1,6 @@
-# AGENTS.md - Development Guide for Arbor
+# AGENTS.md - Development Guide for Anvil
 
-This file provides important context for developing the Arbor project.
+This file provides important context for developing the Anvil project.
 
 ## Documentation
 
@@ -11,21 +11,21 @@ The project documentation is split between user-facing and development documenta
 
 **Development Documentation:**
 - This file (AGENTS.md) - Development workflow, architecture, and contribution guidelines
-- `.ai/plans/arbor.md` - Historical development plan (phases 1-5, complete). Note: This file is gitignored and contains the original implementation plan.
+- `.ai/plans/anvil.md` - Historical development plan (phases 1-5, complete). Note: This file is gitignored and contains the original implementation plan.
 
 ## Development Location
 
 All development occurs **inside a worktree**. This allows:
 - Feature development on dedicated branches
-- Clean separation from the bare repository
+- Clean separation from the main repository
 - Easy worktree creation/removal for testing
 
 ```bash
 # Start development in a worktree
-arbor work feature/my-feature
+anvil work feature/my-feature
 cd feature-my-feature
 # Make changes, test, commit
-arbor remove feature-my-feature  # When done
+anvil remove feature-my-feature  # When done
 ```
 
 ## Quick Reference
@@ -40,7 +40,7 @@ arbor remove feature-my-feature  # When done
 | Scaffold system | `internal/scaffold/` |
 | Presets | `internal/presets/` |
 | Utilities | `internal/utils/` |
-| Entry point | `cmd/arbor/main.go` |
+| Entry point | `cmd/anvil/main.go` |
 | Tests | Alongside implementation files (`*_test.go`) |
 | Deployment plans | `.ai/plans/` |
 
@@ -48,10 +48,10 @@ arbor remove feature-my-feature  # When done
 
 | Config | Location | Purpose | Versioned? |
 |--------|----------|---------|------------|
-| Project | `<project-root>/arbor.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
-| Repository | `<worktree>/arbor.yaml` | Team defaults (copied during init) | Yes (committed to git) |
-| Local State | `<worktree>/.arbor.local` | Runtime state (db_suffix) | No (gitignored) |
-| Global | `~/.config/arbor/arbor.yaml` | User defaults | No (local machine) |
+| Project | `<project-root>/anvil.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
+| Repository | `<worktree>/anvil.yaml` | Team defaults | Yes (committed to git) |
+| Local State | `<worktree>/.anvil.local` | Runtime state (db_suffix) | No (gitignored) |
+| Global | `~/.config/anvil/anvil.yaml` | User defaults | No (local machine) |
 
 ### Step Naming
 
@@ -202,7 +202,7 @@ All phases 1-5 are complete. The project has:
 - Interactive commands (work, prune)
 - Distribution via GitHub Actions
 
-See `.ai/plans/arbor.md` for the detailed phase history and learnings (gitignored file).
+See `.ai/plans/anvil.md` for the detailed phase history and learnings (gitignored file).
 
 ## Refactoring Work
 

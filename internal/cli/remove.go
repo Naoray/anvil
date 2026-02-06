@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	arborerrors "github.com/artisanexperiences/arbor/internal/errors"
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	anvilerrors "github.com/naoray/anvil/internal/errors"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var removeCmd = &cobra.Command{
@@ -40,17 +40,12 @@ Cleanup steps may include:
 			return fmt.Errorf("getting current directory: %w", err)
 		}
 
-		defaultBranch, err := git.GetDefaultBranch(pc.BarePath)
+		defaultBranch, err := git.GetDefaultBranch(pc.GitDir)
 		if err != nil {
 			return fmt.Errorf("getting default branch: %w", err)
 		}
 
-		var worktrees []git.Worktree
-		if pc.IsLinked {
-			worktrees, err = git.ListWorktreesFromGitDir(pc.BarePath)
-		} else {
-			worktrees, err = git.ListWorktreesDetailed(pc.BarePath, currentWorktreePath, defaultBranch)
-		}
+		worktrees, err := git.ListWorktreesDetailed(pc.GitDir, currentWorktreePath, defaultBranch)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
@@ -66,7 +61,7 @@ Cleanup steps may include:
 				}
 			}
 			if targetWorktree == nil {
-				return fmt.Errorf("worktree '%s' not found: %w", folderName, arborerrors.ErrWorktreeNotFound)
+				return fmt.Errorf("worktree '%s' not found: %w", folderName, anvilerrors.ErrWorktreeNotFound)
 			}
 		} else if ui.IsInteractive() {
 			selected, err := ui.SelectWorktreeToRemove(worktrees)
@@ -100,7 +95,7 @@ Cleanup steps may include:
 				return nil
 			}
 
-			if git.BranchExists(pc.BarePath, targetWorktree.Branch) {
+			if git.BranchExists(pc.GitDir, targetWorktree.Branch) {
 				deleteBranch, err = ui.Confirm(fmt.Sprintf("Also delete branch '%s'?", targetWorktree.Branch))
 				if err != nil {
 					return fmt.Errorf("branch deletion confirmation: %w", err)
@@ -129,19 +124,13 @@ Cleanup steps may include:
 				}
 			}
 
-			if pc.IsLinked {
-				if err := git.RemoveWorktreeWithGitDir(pc.BarePath, targetWorktree.Path, true); err != nil {
-					return fmt.Errorf("removing worktree: %w", err)
-				}
-			} else {
-				if err := git.RemoveWorktree(targetWorktree.Path, true); err != nil {
-					return fmt.Errorf("removing worktree: %w", err)
-				}
+			if err := git.RemoveWorktree(pc.GitDir, targetWorktree.Path, true); err != nil {
+				return fmt.Errorf("removing worktree: %w", err)
 			}
 			ui.PrintSuccessPath("Removed", targetWorktree.Path)
 
-			if deleteBranch && git.BranchExists(pc.BarePath, targetWorktree.Branch) {
-				if err := git.DeleteBranch(pc.BarePath, targetWorktree.Branch, true); err != nil {
+			if deleteBranch && git.BranchExists(pc.GitDir, targetWorktree.Branch) {
+				if err := git.DeleteBranch(pc.GitDir, targetWorktree.Branch, true); err != nil {
 					ui.PrintErrorWithHint("Failed to delete branch", err.Error())
 				} else {
 					ui.PrintSuccess(fmt.Sprintf("Deleted branch '%s'", targetWorktree.Branch))

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/artisanexperiences/arbor/internal/fs"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/fs"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 type FileCopyStep struct {

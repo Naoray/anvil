@@ -50,23 +50,23 @@ func TestExtractRepoName(t *testing.T) {
 	}{
 		{
 			name:     "SSH URL",
-			input:    "git@github.com:michaeldyrynda/arbor.git",
-			expected: "arbor",
+			input:    "git@github.com:michaeldyrynda/anvil.git",
+			expected: "anvil",
 		},
 		{
 			name:     "HTTPS URL",
-			input:    "https://github.com/artisanexperiences/arbor.git",
-			expected: "arbor",
+			input:    "https://github.com/naoray/anvil.git",
+			expected: "anvil",
 		},
 		{
 			name:     "Short format",
-			input:    "michaeldyrynda/arbor",
-			expected: "arbor",
+			input:    "michaeldyrynda/anvil",
+			expected: "anvil",
 		},
 		{
 			name:     "Just repo name",
-			input:    "arbor.git",
-			expected: "arbor",
+			input:    "anvil.git",
+			expected: "anvil",
 		},
 	}
 
@@ -86,7 +86,7 @@ func TestIsGitShortFormat(t *testing.T) {
 	}{
 		{
 			name:     "Short format with user/repo",
-			input:    "michaeldyrynda/arbor",
+			input:    "michaeldyrynda/anvil",
 			expected: true,
 		},
 		{
@@ -101,7 +101,7 @@ func TestIsGitShortFormat(t *testing.T) {
 		},
 		{
 			name:     "Just repo name",
-			input:    "arbor",
+			input:    "anvil",
 			expected: true,
 		},
 		{

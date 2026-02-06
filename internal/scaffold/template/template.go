@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 func ReplaceTemplateVars(str string, ctx *types.ScaffoldContext) (string, error) {

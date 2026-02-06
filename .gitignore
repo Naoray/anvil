@@ -5,5 +5,5 @@
 !.opencode/skills/**/*.md
 
 # Ignore built binary
-arbor
-arbor.exe
+anvil
+anvil.exe

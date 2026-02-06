@@ -9,8 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/naoray/anvil/internal/git"
 )
 
 var cdCmd = &cobra.Command{
@@ -24,22 +23,22 @@ Arguments:
 
 Usage with shell:
   # Print path only
-  arbor cd feature-auth
+  anvil cd feature-auth
 
   # Use with cd (bash/zsh)
-  cd $(arbor cd feature-auth)
+  cd $(anvil cd feature-auth)
 
   # Or create a shell function in ~/.zshrc:
-  awt() { cd $(arbor cd "$1"); }
+  awt() { cd $(anvil cd "$1"); }
 
   # Then use:
   awt feature-auth
 
 Examples:
-  arbor cd                    # List all worktrees
-  arbor cd feature-auth       # Print path to feature-auth worktree
-  arbor cd auth               # Partial match (if unambiguous)
-  arbor cd feature/auth       # Match by branch name`,
+  anvil cd                    # List all worktrees
+  anvil cd feature-auth       # Print path to feature-auth worktree
+  anvil cd auth               # Partial match (if unambiguous)
+  anvil cd feature/auth       # Match by branch name`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
@@ -51,13 +50,13 @@ Examples:
 
 		// If no argument, list worktrees
 		if len(args) == 0 {
-			return listWorktreesForCd(os.Stdout, pc.BarePath, pc.IsLinked)
+			return listWorktreesForCd(os.Stdout, pc.GitDir)
 		}
 
 		query := args[0]
 
 		// Find the worktree
-		path, err := findWorktreePath(pc.ProjectPath, pc.BarePath, query, pc.IsLinked, pc.GlobalConfig)
+		path, err := findWorktreePath(pc.GitDir, query)
 		if err != nil {
 			return err
 		}
@@ -69,15 +68,8 @@ Examples:
 }
 
 // findWorktreePath finds a worktree by folder name, branch name, or partial match
-func findWorktreePath(projectPath, barePath, query string, isLinked bool, globalCfg *config.GlobalConfig) (string, error) {
-	var worktrees []git.Worktree
-	var err error
-
-	if isLinked {
-		worktrees, err = git.ListWorktreesFromGitDir(barePath)
-	} else {
-		worktrees, err = git.ListWorktrees(barePath)
-	}
+func findWorktreePath(gitDir, query string) (string, error) {
+	worktrees, err := git.ListWorktrees(gitDir)
 	if err != nil {
 		return "", fmt.Errorf("listing worktrees: %w", err)
 	}
@@ -128,15 +120,8 @@ func formatCdOutput(path string, shell bool) string {
 }
 
 // listWorktreesForCd lists all worktrees in a format suitable for cd selection
-func listWorktreesForCd(w io.Writer, barePath string, isLinked bool) error {
-	var worktrees []git.Worktree
-	var err error
-
-	if isLinked {
-		worktrees, err = git.ListWorktreesFromGitDir(barePath)
-	} else {
-		worktrees, err = git.ListWorktrees(barePath)
-	}
+func listWorktreesForCd(w io.Writer, gitDir string) error {
+	worktrees, err := git.ListWorktrees(gitDir)
 	if err != nil {
 		return fmt.Errorf("listing worktrees: %w", err)
 	}

@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
-	"github.com/artisanexperiences/arbor/internal/scaffold/words"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/steps"
+	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/scaffold/words"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 type ScaffoldManager struct {
@@ -198,7 +198,7 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 		}
 	}
 
-	// Migrate db_suffix from arbor.yaml to .arbor.local if present
+	// Migrate db_suffix from anvil.yaml to .anvil.local if present
 	if !dryRun {
 		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
 			return fmt.Errorf("migrating db_suffix: %w", err)

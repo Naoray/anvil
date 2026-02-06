@@ -1,4 +1,4 @@
-module github.com/artisanexperiences/arbor
+module github.com/naoray/anvil
 
 go 1.24.0
 

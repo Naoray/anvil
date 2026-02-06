@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/scaffold/steps"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/steps"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 func TestIntegration_TemplateReplacementChain(t *testing.T) {
@@ -80,7 +80,7 @@ APP_NAME=myapp
 
 		localState, err := config.ReadLocalState(tmpDir)
 		require.NoError(t, err)
-		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .arbor.local")
+		assert.Equal(t, suffix, localState.DbSuffix, "DbSuffix should be persisted to .anvil.local")
 
 		parts := strings.Split(suffix, "_")
 		assert.Len(t, parts, 2, "Suffix should be in format {adjective}_{noun}")

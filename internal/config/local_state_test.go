@@ -23,7 +23,7 @@ func TestReadLocalState_MissingFile(t *testing.T) {
 
 func TestReadLocalState_ValidFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	content := []byte("db_suffix: sunset\n")
 	if err := os.WriteFile(configPath, content, 0644); err != nil {
@@ -42,7 +42,7 @@ func TestReadLocalState_ValidFile(t *testing.T) {
 
 func TestReadLocalState_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	content := []byte("invalid: yaml: content: [")
 	if err := os.WriteFile(configPath, content, 0644); err != nil {
@@ -57,7 +57,7 @@ func TestReadLocalState_InvalidYAML(t *testing.T) {
 
 func TestWriteLocalState_CreateNew(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	state := LocalState{DbSuffix: "morning"}
 	if err := WriteLocalState(tmpDir, state); err != nil {
@@ -66,7 +66,7 @@ func TestWriteLocalState_CreateNew(t *testing.T) {
 
 	// Verify file was created
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Fatal("expected .arbor.local to be created")
+		t.Fatal("expected .anvil.local to be created")
 	}
 
 	// Verify content
@@ -87,7 +87,7 @@ func TestWriteLocalState_CreateNew(t *testing.T) {
 
 func TestWriteLocalState_MergeExisting(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	// Create existing file with some data
 	existing := map[string]interface{}{
@@ -129,7 +129,7 @@ func TestWriteLocalState_MergeExisting(t *testing.T) {
 
 func TestWriteLocalState_EmptyDbSuffix(t *testing.T) {
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, ".arbor.local")
+	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	// Create existing file
 	existing := map[string]interface{}{

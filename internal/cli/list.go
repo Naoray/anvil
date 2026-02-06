@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var listCmd = &cobra.Command{
@@ -30,7 +30,7 @@ and main branch highlighting.`,
 		sortBy := mustGetString(cmd, "sort-by")
 		reverse := mustGetBool(cmd, "reverse")
 
-		worktrees, err := git.ListWorktreesDetailed(pc.BarePath, pc.CWD, pc.DefaultBranch)
+		worktrees, err := git.ListWorktreesDetailed(pc.GitDir, pc.CWD, pc.DefaultBranch)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}

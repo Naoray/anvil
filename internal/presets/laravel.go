@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/utils"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/utils"
 )
 
 type Laravel struct {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan implements dynamic template variables, environment file operations, database naming enhancements, and Bun package manager support for the Arbor scaffold system.
+This plan implements dynamic template variables, environment file operations, database naming enhancements, and Bun package manager support for the Anvil scaffold system.
 
 ## Phase Completion Criteria
 
@@ -402,8 +402,8 @@ Refactor database steps to support multiple engines and add cleanup capabilities
 - [x] Import words package in db.go
 - [x] Implement `db.destroy` step for cleanup
 - [x] Implement collision retry logic (max 5 attempts) in db.create
-- [x] Write generated DbSuffix to worktree-local arbor.yaml
-- [x] Update `arbor remove` to read DbSuffix and run db.destroy
+- [x] Write generated DbSuffix to worktree-local anvil.yaml
+- [x] Update `anvil remove` to read DbSuffix and run db.destroy
 - [x] Write unit tests for database name generation
 - [x] Write unit tests for collision retry behavior
 - [x] Write unit tests for db.destroy
@@ -455,9 +455,9 @@ func (s *DbStep) detectEngine(ctx *types.ScaffoldContext) (string, error) {
 - Examples: `myapp_swift_runner`, `shop_clear_data`, `api_stable_core`
 - Site name sanitized: lowercase, non-alphanumeric → underscore, collapsed, trimmed
 
-**Worktree-local arbor.yaml:**
+**Worktree-local anvil.yaml:**
 ```yaml
-# Stored in worktree root (e.g., feature-auth/arbor.yaml)
+# Stored in worktree root (e.g., feature-auth/anvil.yaml)
 db_suffix: swift_runner
 ```
 
@@ -466,7 +466,7 @@ db_suffix: swift_runner
 func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
     // ... create database ...
     
-    // Persist suffix to worktree-local arbor.yaml for cleanup
+    // Persist suffix to worktree-local anvil.yaml for cleanup
     if err := config.WriteWorktreeConfig(ctx.WorktreePath, map[string]string{
         "db_suffix": ctx.GetDbSuffix(),
     }); err != nil {
@@ -562,7 +562,7 @@ func isDatabaseExistsError(err error) bool {
 }
 ```
 
-**Integration with arbor remove:**
+**Integration with anvil remove:**
 ```go
 // In internal/cli/remove.go
 func runRemove(worktreePath string, force bool) error {
@@ -599,12 +599,12 @@ func runRemove(worktreePath string, force bool) error {
    - Uses `words.GenerateDatabaseName()` to create unique names
    - Checks for "already exists" or "database exists" errors
    - Extracts and sets `DbSuffix` from generated database name
-   - Persists `DbSuffix` to worktree-local `arbor.yaml` after successful creation
+   - Persists `DbSuffix` to worktree-local `anvil.yaml` after successful creation
    - Returns error only after all retries are exhausted
 
 5. **DbSuffix Persistence**: The `DbSuffix` is stored in two places for reliability:
    - In-memory context (`ctx.SetDbSuffix()`) for immediate use in same workflow
-   - Worktree-local `arbor.yaml` file for persistence across workflows (cleanup)
+   - Worktree-local `anvil.yaml` file for persistence across workflows (cleanup)
 
 6. **Database Destroy Pattern Matching**: The `db.destroy` step uses pattern matching to find databases:
    - MySQL: `SHOW DATABASES LIKE '%%_suffix'` pattern
@@ -624,7 +624,7 @@ func runRemove(worktreePath string, force bool) error {
 
 9. **Args Field in DbDestroyStep**: Added `args []string` field to `DbDestroyStep` to support configuration of database credentials (--username, --password, --host, --port). This mirrors design of `DbCreateStep` and provides flexibility for different database environments.
 
-10. **WriteWorktreeConfig Integration**: Leveraged existing `WriteWorktreeConfig()` function from Phase 1/2 worktree config implementation. This function writes to worktree-local `arbor.yaml` and handles merging with existing configuration.
+10. **WriteWorktreeConfig Integration**: Leveraged existing `WriteWorktreeConfig()` function from Phase 1/2 worktree config implementation. This function writes to worktree-local `anvil.yaml` and handles merging with existing configuration.
 
 11. **Error Handling Strategy**:
     - Client not found errors are fatal for create (allows users to know they need to install client)
@@ -980,11 +980,11 @@ Comprehensive testing of all new functionality.
 
 **Files to create:**
 - `internal/scaffold/integration_test.go` - Integration tests
-- `cmd/arbor/e2e_test.go` - E2E tests if needed
+- `cmd/anvil/e2e_test.go` - E2E tests if needed
 
 **Test scenarios:**
 1. Template variable replacement chain
-2. Database creation with suffix storage and worktree arbor.yaml persistence
+2. Database creation with suffix storage and worktree anvil.yaml persistence
 3. env.read → env.write workflow
 4. db.create → env.write → artisan migration
 5. db.destroy cleanup (reads suffix from worktree config)
@@ -1003,7 +1003,7 @@ Update documentation to reflect new features.
 
 ### Tasks
 
-- [x] Update Step Identifier Format section in arbor.md
+- [x] Update Step Identifier Format section in anvil.md
 - [x] Add new template variables to documentation
 - [x] Add env.read step to Built-in Steps
 - [x] Add env.write step to Built-in Steps
@@ -1015,7 +1015,7 @@ Update documentation to reflect new features.
 ### Implementation Details
 
 **Files to modify:**
-- `.ai/plans/arbor.md`
+- `.ai/plans/anvil.md`
 
 **Documentation additions:**
 
@@ -1042,11 +1042,11 @@ database.create → db.create  (BREAKING: renamed)
                 - Now accepts `type: mysql|pgsql` config
                 - Auto-detects from DB_CONNECTION if type omitted
                 - Generates readable {site_name}_{adjective}_{noun} names
-                - Stores suffix in context and worktree arbor.yaml
+                - Stores suffix in context and worktree anvil.yaml
 
 db.destroy (NEW)
-                - Runs during `arbor remove` cleanup
-                - Reads DbSuffix from worktree arbor.yaml
+                - Runs during `anvil remove` cleanup
+                - Reads DbSuffix from worktree anvil.yaml
                 - Drops all databases matching the suffix pattern
 ```
 
@@ -1088,7 +1088,7 @@ cleanup:
 
 **Key Decisions:**
 
-1. **Documentation Update Strategy**: Updated `.ai/plans/arbor.md` with new features in logical sections:
+1. **Documentation Update Strategy**: Updated `.ai/plans/anvil.md` with new features in logical sections:
    - Added `node.bun` to Node.js Steps table
    - Added `env.read` and `env.write` to File Operations table
    - Added `db.create` and `db.destroy` to new Database Steps table
@@ -1134,7 +1134,7 @@ cleanup:
    - Checking example configurations are syntactically correct
    - Ensuring examples demonstrate real workflows
 
-8. **Existing Documentation**: Found that `.ai/plans/arbor.md` already contains:
+8. **Existing Documentation**: Found that `.ai/plans/anvil.md` already contains:
    - References to `db.create` and `db.destroy` in example configurations
    - Database Steps table with correct descriptions
    - Template variables documentation was partial, now complete
@@ -1412,10 +1412,10 @@ This plan was reviewed to identify gaps before implementation. The following iss
 ### Database Cleanup Design
 
 6. **DbSuffix persistence for cleanup**
-   - **Problem**: Need to clean up databases when running `arbor remove`
+   - **Problem**: Need to clean up databases when running `anvil remove`
    - **Solution**:
-     - Store DbSuffix in worktree-local `arbor.yaml` after `db.create`
-     - Add `db.destroy` step for cleanup (runs during `arbor remove`)
+     - Store DbSuffix in worktree-local `anvil.yaml` after `db.create`
+     - Add `db.destroy` step for cleanup (runs during `anvil remove`)
      - Auto-detect engine from DB_CONNECTION (same as db.create)
      - Pattern-match databases by suffix and drop them
 

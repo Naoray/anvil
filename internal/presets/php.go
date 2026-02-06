@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/naoray/anvil/internal/config"
 )
 
 type PHP struct {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/naoray/anvil/internal/git"
 )
 
 func TestWorkCommand_SetsUpBranchTracking(t *testing.T) {
@@ -39,46 +39,50 @@ func TestWorkCommand_SetsUpBranchTracking(t *testing.T) {
 	cmd.Dir = sourceDir
 	requireNoError(t, cmd.Run())
 
-	// Clone to bare repo and set up like arbor init does
-	projectDir := t.TempDir()
-	barePath := filepath.Join(projectDir, ".bare")
-	cmd = exec.Command("git", "clone", "--bare", sourceDir, barePath)
+	// Use the source repo's .git as gitDir
+	gitDir := filepath.Join(sourceDir, ".git")
+	parentDir := filepath.Dir(sourceDir)
+
+	// Add a remote so tracking can be set
+	cmd = exec.Command("git", "-C", sourceDir, "remote", "add", "origin", sourceDir)
 	requireNoError(t, cmd.Run())
 
 	// Configure fetch refspec
-	requireNoError(t, git.ConfigureFetchRefspec(barePath, sourceDir))
+	requireNoError(t, git.ConfigureFetchRefspec(gitDir, sourceDir))
+
+	detachHEAD(t, sourceDir)
 
 	// Create main worktree
-	mainPath := filepath.Join(projectDir, "main")
-	requireNoError(t, git.CreateWorktree(barePath, mainPath, "main", ""))
+	mainPath := filepath.Join(parentDir, "main-wt")
+	requireNoError(t, git.CreateWorktree(gitDir, mainPath, "main", ""))
 
-	// Set up tracking for main (this is what would happen in work command)
-	requireNoError(t, git.SetBranchUpstream(barePath, "main", "origin"))
+	// Set up tracking for main
+	requireNoError(t, git.SetBranchUpstream(gitDir, "main", "origin"))
 
 	// Verify main has tracking
-	hasTracking, err := git.HasBranchTracking(barePath, "main")
+	hasTracking, err := git.HasBranchTracking(gitDir, "main")
 	assert.NoError(t, err)
 	assert.True(t, hasTracking)
 
 	// Create feature branch worktree
-	featurePath := filepath.Join(projectDir, "feature")
-	requireNoError(t, git.CreateWorktree(barePath, featurePath, "feature", "main"))
+	featurePath := filepath.Join(parentDir, "feature-wt")
+	requireNoError(t, git.CreateWorktree(gitDir, featurePath, "feature", "main"))
 
-	// Set up tracking for feature (this is what would happen in work command)
-	requireNoError(t, git.SetBranchUpstream(barePath, "feature", "origin"))
+	// Set up tracking for feature
+	requireNoError(t, git.SetBranchUpstream(gitDir, "feature", "origin"))
 
 	// Verify feature has tracking
-	hasTracking, err = git.HasBranchTracking(barePath, "feature")
+	hasTracking, err = git.HasBranchTracking(gitDir, "feature")
 	assert.NoError(t, err)
 	assert.True(t, hasTracking)
 
 	// Check the tracking config
-	cmd = exec.Command("git", "-C", barePath, "config", "--get", "branch.feature.remote")
+	cmd = exec.Command("git", "-C", sourceDir, "config", "--get", "branch.feature.remote")
 	output, err := cmd.Output()
 	assert.NoError(t, err)
 	assert.Equal(t, "origin", strings.TrimSpace(string(output)))
 
-	cmd = exec.Command("git", "-C", barePath, "config", "--get", "branch.feature.merge")
+	cmd = exec.Command("git", "-C", sourceDir, "config", "--get", "branch.feature.merge")
 	output, err = cmd.Output()
 	assert.NoError(t, err)
 	assert.Equal(t, "refs/heads/feature", strings.TrimSpace(string(output)))

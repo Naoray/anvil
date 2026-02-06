@@ -1,6 +1,6 @@
-# Arbor
+# Anvil
 
-Arbor is a self-contained binary for managing git worktrees to assist with agentic development of applications. It is cross-project, cross-language, and cross-environment compatible.
+Anvil is a self-contained binary for managing git worktrees to assist with agentic development of applications. It is cross-project, cross-language, and cross-environment compatible.
 
 ## Development
 
@@ -8,16 +8,16 @@ All development occurs inside a worktree:
 
 ```bash
 # Create a worktree for development
-arbor work feature/new-feature
+anvil work feature/new-feature
 cd feature-new-feature
 
 # Make changes, test, commit
 go test ./...
-arbor work another-feature  # Create another if needed
+anvil work another-feature  # Create another if needed
 
 # When done with a worktree
 cd ..
-arbor remove feature-new-feature
+anvil remove feature-new-feature
 ```
 
 ## Installation
@@ -25,23 +25,23 @@ arbor remove feature-new-feature
 ### Via Homebrew (Recommended for macOS/Linux)
 
 ```bash
-brew tap artisanexperiences/tap
-brew install arbor
+brew tap naoray/tap
+brew install anvil
 ```
 
 **Upgrade:**
 ```bash
-brew upgrade arbor
+brew upgrade anvil
 ```
 
 ### Via Direct Download
 
-Download the latest release for your platform from the [releases page](https://github.com/artisanexperiences/arbor/releases).
+Download the latest release for your platform from the [releases page](https://github.com/naoray/anvil/releases).
 
 ### Via Go Install
 
 ```bash
-go install github.com/artisanexperiences/arbor/cmd/arbor@latest
+go install github.com/naoray/anvil/cmd/anvil@latest
 ```
 
 *Note: Installing via `go install` builds without version information. Use Homebrew or download releases for proper version metadata.*
@@ -50,61 +50,64 @@ go install github.com/artisanexperiences/arbor/cmd/arbor@latest
 
 ```bash
 # Clone the repository
-git clone https://github.com/artisanexperiences/arbor.git
-cd arbor
+git clone https://github.com/naoray/anvil.git
+cd anvil
 
 # Build for your platform
-go build -o arbor ./cmd/arbor
+go build -o anvil ./cmd/anvil
 
 # Or build with version information
 VERSION=$(git describe --tags --always)
 COMMIT=$(git rev-parse --short HEAD)
 DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-go build -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" -o arbor ./cmd/arbor
+go build -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" -o anvil ./cmd/anvil
 ```
 
 ## Quick Start
 
 ```bash
-# Check arbor version
-arbor version
+# Check anvil version
+anvil version
 
-# Initialise a new Laravel project
-arbor init git@github.com:user/my-laravel-app.git
+# Link an existing project for worktree management
+anvil link
 
 # Create a feature worktree
-arbor work feature/user-auth
+anvil work feature/user-auth
 
 # Create a worktree from a specific base branch
-arbor work feature/user-auth -b develop
+anvil work feature/user-auth -b develop
+
+# Switch to a worktree
+anvil cd feature/user-auth
 
 # Sync current worktree with upstream (defaults to main, uses rebase)
-arbor sync
+anvil sync
 
 # Sync with a specific upstream branch
-arbor sync --upstream develop
+anvil sync --upstream develop
 
 # Sync using merge instead of rebase
-arbor sync --strategy merge
+anvil sync --strategy merge
 
-# Save sync settings to arbor.yaml for future use
-arbor sync --upstream develop --strategy rebase --save
+# Save sync settings to anvil.yaml for future use
+anvil sync --upstream develop --strategy rebase --save
 
 # List all worktrees with their status
-arbor list
+anvil list
 
 # Remove a worktree when done
-arbor remove feature/user-auth
+anvil remove feature/user-auth
 
 # Clean up merged worktrees
-arbor prune
+anvil prune
 
 # Run scaffold steps on an existing worktree
-arbor scaffold main
-arbor scaffold feature/user-auth
+anvil scaffold main
+anvil scaffold feature/user-auth
 
-# Destroy the entire project (removes worktrees and bare repo)
-arbor destroy
+# Unlink a project (stop managing it)
+anvil unlink
 ```
 
 ## Documentation
@@ -118,13 +121,13 @@ See [AGENTS.md](./AGENTS.md) for development guide.
 
 ## Commands
 
-### `arbor sync`
+### `anvil sync`
 
 Synchronizes the current worktree branch with an upstream branch by fetching the latest changes and rebasing or merging.
 
 **Auto-Stashing (Default):**
 
-By default, `arbor sync` automatically stashes changes before syncing, including:
+By default, `anvil sync` automatically stashes changes before syncing, including:
 - Tracked modifications
 - Untracked files
 
@@ -134,37 +137,37 @@ After a successful sync, the stashed changes are automatically restored.
 
 ```bash
 # Sync with default settings (upstream: main, strategy: rebase, auto-stash: on)
-arbor sync
+anvil sync
 
 # Sync with a specific upstream branch
-arbor sync --upstream develop
-arbor sync -u develop
+anvil sync --upstream develop
+anvil sync -u develop
 
 # Sync using merge instead of rebase
-arbor sync --strategy merge
-arbor sync -s merge
+anvil sync --strategy merge
+anvil sync -s merge
 
 # Use a specific remote
-arbor sync --remote upstream
-arbor sync -r upstream
+anvil sync --remote upstream
+anvil sync -r upstream
 
 # Disable auto-stashing (not recommended)
-arbor sync --no-auto-stash
+anvil sync --no-auto-stash
 
 # Skip all confirmations
-arbor sync --yes
-arbor sync -y
+anvil sync --yes
+anvil sync -y
 
-# Save sync settings to arbor.yaml for future use
-arbor sync --save
+# Save sync settings to anvil.yaml for future use
+anvil sync --save
 
 # Combination of options
-arbor sync --upstream main --strategy rebase --save
+anvil sync --upstream main --strategy rebase --save
 ```
 
 **Configuration:**
 
-Sync settings can be persisted in `arbor.yaml`:
+Sync settings can be persisted in `anvil.yaml`:
 
 ```yaml
 sync:
@@ -176,7 +179,7 @@ sync:
 
 The command resolves settings in this order:
 1. CLI flags (`--upstream`, `--strategy`, `--remote`, `--no-auto-stash`)
-2. Project config (`arbor.yaml`)
+2. Project config (`anvil.yaml`)
 3. Project `default_branch`
 4. Interactive selection (if in interactive mode)
 
@@ -188,79 +191,62 @@ The command resolves settings in this order:
 - Detects and blocks if rebase or merge is already in progress
 - Provides guidance when conflicts occur
 
-### `arbor scaffold [PATH]`
+### `anvil scaffold [PATH]`
 
 Run scaffold steps for an existing worktree. This is useful when:
 
-- You used `arbor init --skip-scaffold` to clone without running scaffold
 - You want to re-run scaffold steps on an existing worktree
 - You need to scaffold a worktree you're not currently in
 
 ```bash
 # Scaffold a specific worktree by path
-arbor scaffold main
-arbor scaffold feature/user-auth
+anvil scaffold main
+anvil scaffold feature/user-auth
 
 # When inside a worktree, scaffold current (prompts for confirmation)
-arbor scaffold
+anvil scaffold
 
 # When at project root without args, interactively select worktree
-arbor scaffold
-```
-
-### `arbor init` with `--skip-scaffold`
-
-Skip scaffold steps during init and run them manually later:
-
-```bash
-# Clone without scaffolding
-arbor init git@github.com:user/repo.git --skip-scaffold
-
-# Scaffold when ready
-arbor scaffold main
+anvil scaffold
 ```
 
 ## Configuration
 
-Arbor uses a three-tier configuration system to separate team configuration from local state.
+Anvil uses a three-tier configuration system to separate team configuration from local state.
 
 ### Configuration Hierarchy
 
-#### 1. Project Config (`<project-root>/arbor.yaml`)
+#### 1. Project Config (`<project-root>/anvil.yaml`)
 
-Located at the project root (alongside `.bare/`), this file contains:
+Located at the project root, this file contains:
 - Scaffold steps and cleanup steps
 - Preset selection
 - Tool configurations
 - Project-wide settings
 
-This file is **not versioned** (the project root is not a git repository).
+This file can be committed to git for team sharing.
 
-During `arbor init`, if an `arbor.yaml` file is found in the repository, you'll be prompted to copy it to the project root.
+#### 2. Worktree Config (`<worktree>/anvil.yaml`)
 
-#### 2. Repository Config (`<worktree>/arbor.yaml`)
-
-Located inside each worktree and **committed to git**, this file contains:
+Located inside each worktree, this file can contain worktree-specific overrides:
 - Team default scaffold steps
 - Shared cleanup steps
 - Tool configurations
 
-This file serves as the source of truth for team configuration and is copied to the project root during `arbor init`.
-
-#### 3. Local State (`<worktree>/.arbor.local`)
+#### 3. Local State (`<worktree>/.anvil.local`)
 
 Located inside each worktree and **NOT versioned** (should be in `.gitignore`), this file contains:
 - `db_suffix` - unique database suffix for the worktree
 - Other worktree-specific runtime state
 
-This file is automatically created by Arbor and should never be committed.
+This file is automatically created by Anvil and should never be committed.
 
 **Example `.gitignore` entry:**
 ```
-.arbor.local
+.anvil.local
 ```
 
-**Example `.arbor.local` file:**
+**Example `.anvil.local` file:**
 ```yaml
 db_suffix: "sunset"
 ```
@@ -269,7 +255,7 @@ db_suffix: "sunset"
 
 To share scaffold configuration with your team:
 
-1. Create `arbor.yaml` in your repository with scaffold steps:
+1. Create `anvil.yaml` in your repository with scaffold steps:
 ```yaml
 preset: laravel
 scaffold:
@@ -284,19 +270,18 @@ scaffold:
 
 2. Commit and push to git:
 ```bash
-git add arbor.yaml
-git commit -m "Add Arbor scaffold configuration"
+git add anvil.yaml
+git commit -m "Add Anvil scaffold configuration"
 git push
 ```
 
-3. Team members run `arbor init`:
+3. Team members link the project:
 ```bash
-arbor init user/repo
-# → Found arbor.yaml in repository. Copy to project root for team config? [Y/n]
-# → Press Enter to use team config
+cd my-project
+anvil link
 ```
 
-The config will be automatically copied to their project root and used for all worktrees.
+The config will be used for all worktrees.
 
 ### Scaffold Steps
 
@@ -463,7 +448,7 @@ All steps support template variables that are replaced at runtime:
 - Suffix is generated once per `init` or `work` invocation and shared across all `db.create` steps
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
-- Persists suffix to `.arbor.local` for cleanup
+- Persists suffix to `.anvil.local` for cleanup
 
 **Multiple databases with shared suffix:**
 
@@ -488,7 +473,7 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```
 
 - Drops all databases matching the suffix pattern
-- Runs automatically during `arbor remove`
+- Runs automatically during `anvil remove`
 
 #### Environment Steps
 
@@ -785,7 +770,7 @@ This creates: `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 **Database Cleanup**
 - Automatically drops databases when worktree is removed
 - Uses pattern matching to find all databases with same suffix
-- Integrates with `arbor remove` command
+- Integrates with `anvil remove` command
 
 **Template Variables**
 - All template syntax uses Go's `text/template`

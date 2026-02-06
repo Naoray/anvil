@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"strings"
 
-	arbor_exec "github.com/artisanexperiences/arbor/internal/exec"
-	"github.com/artisanexperiences/arbor/internal/scaffold/template"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	anvil_exec "github.com/naoray/anvil/internal/exec"
+	"github.com/naoray/anvil/internal/scaffold/template"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 type BashRunStep struct {
 	command  string
 	storeAs  string
-	executor *arbor_exec.CommandExecutor
+	executor *anvil_exec.CommandExecutor
 }
 
 // NewBashRunStep creates a bash step with the default command executor.
@@ -23,9 +23,9 @@ func NewBashRunStep(command string, storeAs string) *BashRunStep {
 
 // NewBashRunStepWithExecutor creates a bash step with a custom command executor.
 // This is useful for testing with mock executors.
-func NewBashRunStepWithExecutor(command string, storeAs string, executor *arbor_exec.CommandExecutor) *BashRunStep {
+func NewBashRunStepWithExecutor(command string, storeAs string, executor *anvil_exec.CommandExecutor) *BashRunStep {
 	if executor == nil {
-		executor = arbor_exec.NewCommandExecutor(nil)
+		executor = anvil_exec.NewCommandExecutor(nil)
 	}
 	return &BashRunStep{
 		command:  command,

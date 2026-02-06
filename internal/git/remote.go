@@ -8,15 +8,15 @@ import (
 
 // ConfigureFetchRefspec sets up remote.origin.url and fetch refspec in bare repo.
 // This is idempotent - safe to call multiple times.
-func ConfigureFetchRefspec(barePath, remoteURL string) error {
+func ConfigureFetchRefspec(gitDir, remoteURL string) error {
 	// Set remote.origin.url
-	cmd := exec.Command("git", "-C", barePath, "config", "remote.origin.url", remoteURL)
+	cmd := exec.Command("git", "-C", gitDir, "config", "remote.origin.url", remoteURL)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setting remote.origin.url: %w\n%s", err, string(output))
 	}
 
 	// Set fetch refspec
-	cmd = exec.Command("git", "-C", barePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	cmd = exec.Command("git", "-C", gitDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setting fetch refspec: %w\n%s", err, string(output))
 	}
@@ -26,8 +26,8 @@ func ConfigureFetchRefspec(barePath, remoteURL string) error {
 
 // GetRemoteURL retrieves the remote URL for a given remote name.
 // Returns empty string and nil error if remote is not configured.
-func GetRemoteURL(barePath, remote string) (string, error) {
-	cmd := exec.Command("git", "-C", barePath, "config", "--get", fmt.Sprintf("remote.%s.url", remote))
+func GetRemoteURL(gitDir, remote string) (string, error) {
+	cmd := exec.Command("git", "-C", gitDir, "config", "--get", fmt.Sprintf("remote.%s.url", remote))
 	output, err := cmd.Output()
 	if err != nil {
 		// Not configured is not an error
@@ -50,8 +50,8 @@ func GetRemoteURLFromWorktree(worktreePath string) (string, error) {
 }
 
 // HasFetchRefspec checks if fetch refspec is already configured.
-func HasFetchRefspec(barePath string) (bool, error) {
-	cmd := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch")
+func HasFetchRefspec(gitDir string) (bool, error) {
+	cmd := exec.Command("git", "-C", gitDir, "config", "--get", "remote.origin.fetch")
 	err := cmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {

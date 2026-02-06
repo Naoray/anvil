@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/artisanexperiences/arbor/internal/config"
-	"github.com/artisanexperiences/arbor/internal/fs"
-	"github.com/artisanexperiences/arbor/internal/scaffold/template"
-	"github.com/artisanexperiences/arbor/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/fs"
+	"github.com/naoray/anvil/internal/scaffold/template"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 // fileLocks ensures only one goroutine modifies a given file at a time

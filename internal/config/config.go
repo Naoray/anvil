@@ -196,17 +196,17 @@ type GlobalScaffoldConfig struct {
 	Interactive          bool `mapstructure:"interactive"`
 }
 
-// LoadProject loads project configuration from arbor.yaml
+// LoadProject loads project configuration from anvil.yaml
 func LoadProject(path string) (*Config, error) {
 	v := viper.New()
 
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(path)
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			return nil, fmt.Errorf("arbor.yaml not found in %s", path)
+			return nil, fmt.Errorf("anvil.yaml not found in %s", path)
 		}
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
@@ -219,7 +219,7 @@ func LoadProject(path string) (*Config, error) {
 	return &config, nil
 }
 
-// LoadGlobal loads global configuration from arbor.yaml
+// LoadGlobal loads global configuration from anvil.yaml
 func LoadGlobal() (*GlobalConfig, error) {
 	configDir, err := GetGlobalConfigDir()
 	if err != nil {
@@ -228,13 +228,13 @@ func LoadGlobal() (*GlobalConfig, error) {
 
 	v := viper.New()
 
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			return nil, fmt.Errorf("global arbor.yaml not found in %s", configDir)
+			return nil, fmt.Errorf("global anvil.yaml not found in %s", configDir)
 		}
 		return nil, fmt.Errorf("reading global config: %w", err)
 	}
@@ -247,10 +247,10 @@ func LoadGlobal() (*GlobalConfig, error) {
 	return &config, nil
 }
 
-// SaveProject saves project configuration to arbor.yaml.
+// SaveProject saves project configuration to anvil.yaml.
 // Preserves existing YAML structure, comments, and formatting.
 func SaveProject(path string, config *Config) error {
-	configPath := filepath.Join(path, "arbor.yaml")
+	configPath := filepath.Join(path, "anvil.yaml")
 
 	// Read existing file content if it exists
 	var doc *yaml.Node
@@ -474,7 +474,7 @@ func interfaceToNode(v interface{}) *yaml.Node {
 // GetGlobalConfigDir returns the global config directory
 func GetGlobalConfigDir() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "arbor"), nil
+		return filepath.Join(xdg, "anvil"), nil
 	}
 
 	home, err := os.UserHomeDir()
@@ -482,7 +482,7 @@ func GetGlobalConfigDir() (string, error) {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
 
-	return filepath.Join(home, ".config", "arbor"), nil
+	return filepath.Join(home, ".config", "anvil"), nil
 }
 
 // CreateGlobalConfig creates the global config directory and file
@@ -497,7 +497,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 	}
 
 	v := viper.New()
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
 
@@ -509,7 +509,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("merging config: %w", err)
 	}
 
-	configPath := filepath.Join(configDir, "arbor.yaml")
+	configPath := filepath.Join(configDir, "anvil.yaml")
 	if err := v.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -522,16 +522,16 @@ type WorktreeConfig struct {
 	DbSuffix string `mapstructure:"db_suffix"`
 }
 
-// ReadWorktreeConfig reads worktree-local configuration from arbor.yaml
+// ReadWorktreeConfig reads worktree-local configuration from anvil.yaml
 func ReadWorktreeConfig(worktreePath string) (*WorktreeConfig, error) {
-	configPath := filepath.Join(worktreePath, "arbor.yaml")
+	configPath := filepath.Join(worktreePath, "anvil.yaml")
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &WorktreeConfig{}, nil
 	}
 
 	v := viper.New()
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(worktreePath)
 
@@ -547,10 +547,10 @@ func ReadWorktreeConfig(worktreePath string) (*WorktreeConfig, error) {
 	return &config, nil
 }
 
-// WriteWorktreeConfig writes worktree-local configuration to arbor.yaml
+// WriteWorktreeConfig writes worktree-local configuration to anvil.yaml
 func WriteWorktreeConfig(worktreePath string, data map[string]string) error {
 	v := viper.New()
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(worktreePath)
 
@@ -563,7 +563,7 @@ func WriteWorktreeConfig(worktreePath string, data map[string]string) error {
 		return fmt.Errorf("merging worktree config: %w", err)
 	}
 
-	configPath := filepath.Join(worktreePath, "arbor.yaml")
+	configPath := filepath.Join(worktreePath, "anvil.yaml")
 
 	if err := v.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing worktree config: %w", err)
@@ -572,7 +572,7 @@ func WriteWorktreeConfig(worktreePath string, data map[string]string) error {
 	return nil
 }
 
-// SaveGlobalConfig saves the global configuration to arbor.yaml
+// SaveGlobalConfig saves the global configuration to anvil.yaml
 func SaveGlobalConfig(config *GlobalConfig) error {
 	configDir, err := GetGlobalConfigDir()
 	if err != nil {
@@ -584,7 +584,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 	}
 
 	v := viper.New()
-	v.SetConfigName("arbor")
+	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
 
@@ -619,7 +619,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("merging config: %w", err)
 	}
 
-	configPath := filepath.Join(configDir, "arbor.yaml")
+	configPath := filepath.Join(configDir, "anvil.yaml")
 	if err := v.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}

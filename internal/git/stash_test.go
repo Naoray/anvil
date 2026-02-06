@@ -11,7 +11,7 @@ import (
 func setupStashTestRepo(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "arbor-stash-test-*")
+	tmpDir, err := os.MkdirTemp("", "anvil-stash-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

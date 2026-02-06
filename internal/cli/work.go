@@ -7,9 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/artisanexperiences/arbor/internal/git"
-	"github.com/artisanexperiences/arbor/internal/ui"
-	"github.com/artisanexperiences/arbor/internal/utils"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
 )
 
 var workCmd = &cobra.Command{
@@ -39,14 +38,14 @@ available branches or entering a new branch name.`,
 		if len(args) > 0 {
 			branch = args[0]
 		} else if ui.IsInteractive() {
-			localBranches, err := git.ListAllBranches(pc.BarePath)
+			localBranches, err := git.ListAllBranches(pc.GitDir)
 			if err != nil {
 				return fmt.Errorf("listing local branches: %w", err)
 			}
 
-			remoteBranches, _ := git.ListRemoteBranches(pc.BarePath)
+			remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
-			selected, err := ui.SelectBranchInteractive(pc.BarePath, localBranches, remoteBranches)
+			selected, err := ui.SelectBranchInteractive(pc.GitDir, localBranches, remoteBranches)
 			if err != nil {
 				return fmt.Errorf("selecting branch: %w", err)
 			}
@@ -64,11 +63,8 @@ available branches or entering a new branch name.`,
 		worktreePath := ""
 		if len(args) > 1 {
 			worktreePath = args[1]
-		} else if pc.IsLinked {
-			// For linked projects, use centralized worktree location
-			worktreePath = pc.GetWorktreePath(branch)
 		} else {
-			worktreePath = filepath.Join(pc.ProjectPath, utils.SanitisePath(branch))
+			worktreePath = pc.GetWorktreePath(branch)
 		}
 
 		absWorktreePath, err := filepath.Abs(worktreePath)
@@ -77,12 +73,7 @@ available branches or entering a new branch name.`,
 		}
 
 		// Check for existing worktrees
-		var worktrees []git.Worktree
-		if pc.IsLinked {
-			worktrees, err = git.ListWorktreesFromGitDir(pc.BarePath)
-		} else {
-			worktrees, err = git.ListWorktrees(pc.BarePath)
-		}
+		worktrees, err := git.ListWorktrees(pc.GitDir)
 		if err != nil {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
@@ -98,15 +89,8 @@ available branches or entering a new branch name.`,
 		ui.PrintInfo(fmt.Sprintf("Path: %s", absWorktreePath))
 
 		if !dryRun {
-			if pc.IsLinked {
-				// For linked projects, use the .git directory
-				if err := git.CreateWorktreeFromGitDir(pc.BarePath, absWorktreePath, branch, baseBranch); err != nil {
-					return fmt.Errorf("creating worktree: %w", err)
-				}
-			} else {
-				if err := git.CreateWorktree(pc.BarePath, absWorktreePath, branch, baseBranch); err != nil {
-					return fmt.Errorf("creating worktree: %w", err)
-				}
+			if err := git.CreateWorktree(pc.GitDir, absWorktreePath, branch, baseBranch); err != nil {
+				return fmt.Errorf("creating worktree: %w", err)
 			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would create worktree")
@@ -115,7 +99,7 @@ available branches or entering a new branch name.`,
 		// Set up branch tracking unless --no-track is specified
 		noTrack := mustGetBool(cmd, "no-track")
 		if !dryRun && !noTrack {
-			if err := git.SetBranchUpstream(pc.BarePath, branch, "origin"); err != nil {
+			if err := git.SetBranchUpstream(pc.GitDir, branch, "origin"); err != nil {
 				// Non-fatal - just inform user if verbose
 				if verbose {
 					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))
@@ -149,9 +133,9 @@ available branches or entering a new branch name.`,
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			}
 
-			// Check if .arbor.local should be gitignored
+			// Check if .anvil.local should be gitignored
 			if !quiet {
-				checkArborLocalGitignore(absWorktreePath)
+				checkAnvilLocalGitignore(absWorktreePath)
 			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would run scaffold steps")

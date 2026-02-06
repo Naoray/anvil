@@ -2,13 +2,12 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/naoray/anvil/internal/git"
 )
 
 func SelectBranchInteractive(barePath string, localBranches, remoteBranches []string) (string, error) {
@@ -233,80 +232,6 @@ func SelectWorktreeToRemove(worktrees []git.Worktree) (*git.Worktree, error) {
 	return nil, fmt.Errorf("worktree not found")
 }
 
-// SelectProjectToDestroy scans immediate children of cwd for arbor projects and returns selected path
-// Checks for both arbor.yaml and .bare folder to confirm valid project
-func SelectProjectToDestroy(cwd string) (string, error) {
-	entries, err := os.ReadDir(cwd)
-	if err != nil {
-		return "", err
-	}
-
-	var projects []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		path := filepath.Join(cwd, e.Name())
-		yamlPath := filepath.Join(path, "arbor.yaml")
-		barePath := filepath.Join(path, ".bare")
-		if _, err := os.Stat(yamlPath); err == nil {
-			if _, err := os.Stat(barePath); err == nil {
-				projects = append(projects, e.Name())
-			}
-		}
-	}
-
-	if len(projects) == 0 {
-		return "", fmt.Errorf("no arbor projects found in %s", cwd)
-	}
-
-	options := make([]huh.Option[string], len(projects))
-	for i, p := range projects {
-		options[i] = huh.NewOption(p, p)
-	}
-
-	var selected string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Select a project to destroy").
-				Description("Choose an arbor project to completely remove").
-				Options(options...).
-				Value(&selected),
-		),
-	).WithTheme(huh.ThemeCatppuccin())
-
-	if err := form.Run(); err != nil {
-		return "", NormalizeAbort(err)
-	}
-
-	return filepath.Join(cwd, selected), nil
-}
-
-// ConfirmDestroy shows confirmation dialog with worktree list
-func ConfirmDestroy(projectName string, worktrees []git.Worktree) (bool, error) {
-	var worktreeList string
-	for _, wt := range worktrees {
-		worktreeList += fmt.Sprintf("  • %s\n", wt.Branch)
-	}
-
-	var confirmed bool
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Destroy project").
-				Description(fmt.Sprintf("Destroy project %q?\n\nWorktrees to be removed:\n%s\nThis cannot be undone.", projectName, worktreeList)).
-				Value(&confirmed),
-		),
-	).WithTheme(huh.ThemeCatppuccin())
-
-	if err := form.Run(); err != nil {
-		return false, NormalizeAbort(err)
-	}
-
-	return confirmed, nil
-}
-
 // SelectWorktreeToScaffold allows selecting a worktree to scaffold
 func SelectWorktreeToScaffold(worktrees []git.Worktree) (*git.Worktree, error) {
 	if len(worktrees) == 0 {
@@ -480,14 +405,14 @@ func ConfirmSync(currentBranch, upstream, strategy string) (bool, error) {
 	return confirmed, nil
 }
 
-// ConfirmSaveSyncConfig asks user if they want to save sync settings to arbor.yaml
+// ConfirmSaveSyncConfig asks user if they want to save sync settings to anvil.yaml
 func ConfirmSaveSyncConfig() (bool, error) {
 	var confirmed bool
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Save sync settings").
-				Description("Save the selected upstream and strategy to arbor.yaml for future syncs?").
+				Description("Save the selected upstream and strategy to anvil.yaml for future syncs?").
 				Value(&confirmed),
 		),
 	).WithTheme(huh.ThemeCatppuccin())

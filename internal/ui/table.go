@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 
-	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/naoray/anvil/internal/git"
 )
 
 func RenderTable(headers []string, rows [][]string) string {
@@ -59,7 +59,7 @@ func RenderWorktreeTable(worktrees []git.Worktree) string {
 		Foreground(Primary).
 		Bold(true).
 		Padding(0, 1).
-		Render("🌳 Arbor Worktrees")
+		Render("🌳 Anvil Worktrees")
 
 	t := table.New().
 		Border(lipgloss.NormalBorder()).

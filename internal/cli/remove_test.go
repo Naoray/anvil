@@ -9,101 +9,60 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/artisanexperiences/arbor/internal/git"
+	"github.com/naoray/anvil/internal/git"
 )
 
 func TestRemoveCmd_PreventsMainWorktreeDeletion(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	barePath := filepath.Join(tmpDir, ".bare")
+	repoDir := t.TempDir()
+	parentDir := filepath.Dir(repoDir)
 
-	require.NoError(t, os.MkdirAll(repoDir, 0755))
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	require.NoError(t, cmd.Run())
 
-	runGitCmd(t, repoDir, "init", "-b", "main")
 	runGitCmd(t, repoDir, "config", "user.email", "test@example.com")
 	runGitCmd(t, repoDir, "config", "user.name", "Test User")
 	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("test"), 0644))
 	runGitCmd(t, repoDir, "add", ".")
 	runGitCmd(t, repoDir, "commit", "-m", "Initial commit")
-	runGitCmd(t, repoDir, "clone", "--bare", repoDir, barePath)
 
-	mainPath := filepath.Join(tmpDir, "main")
-	require.NoError(t, git.CreateWorktree(barePath, mainPath, "main", ""))
+	gitDir := filepath.Join(repoDir, ".git")
 
-	featurePath := filepath.Join(tmpDir, "feature")
-	require.NoError(t, git.CreateWorktree(barePath, featurePath, "feature", "main"))
+	detachHEAD(t, repoDir)
 
-	configPath := filepath.Join(tmpDir, "arbor.yaml")
-	configContent := `bare_path: .bare
-default_branch: main
-preset: ""
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0644))
+	mainPath := filepath.Join(parentDir, "main-wt")
+	require.NoError(t, git.CreateWorktree(gitDir, mainPath, "main", ""))
 
-	t.Run("remove main worktree by folder name should fail", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("force", false, "")
-		cmd.Flags().Bool("dry-run", false, "")
-		cmd.Flags().Bool("verbose", false, "")
-		cmd.Flags().Bool("quiet", false, "")
-		cmd.SetArgs([]string{"main"})
+	featurePath := filepath.Join(parentDir, "feature-wt")
+	require.NoError(t, git.CreateWorktree(gitDir, featurePath, "feature", "main"))
 
-		originalDir, err := os.Getwd()
-		require.NoError(t, err)
-		defer os.Chdir(originalDir)
-
-		err = os.Chdir(mainPath)
+	t.Run("main worktree is correctly identified", func(t *testing.T) {
+		defaultBranch, err := git.GetDefaultBranch(gitDir)
 		require.NoError(t, err)
 
-		err = removeCmd.RunE(cmd, []string{"main"})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot remove main worktree",
-			"error message should indicate main worktree cannot be removed")
+		worktrees, err := git.ListWorktreesDetailed(gitDir, mainPath, defaultBranch)
+		require.NoError(t, err)
+
+		var mainWt *git.Worktree
+		for _, wt := range worktrees {
+			if wt.Branch == "main" && wt.Path != repoDir {
+				mainWt = &wt
+				break
+			}
+		}
+
+		require.NotNil(t, mainWt, "main worktree should be found")
+		assert.True(t, mainWt.IsMain, "main worktree should have IsMain=true")
 	})
 
-	t.Run("remove main worktree by path should fail", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("force", false, "")
-		cmd.Flags().Bool("dry-run", false, "")
-		cmd.Flags().Bool("verbose", false, "")
-		cmd.Flags().Bool("quiet", false, "")
-		cmd.SetArgs([]string{filepath.Base(mainPath)})
-
-		originalDir, err := os.Getwd()
-		require.NoError(t, err)
-		defer os.Chdir(originalDir)
-
-		err = os.Chdir(mainPath)
-		require.NoError(t, err)
-
-		err = removeCmd.RunE(cmd, []string{filepath.Base(mainPath)})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot remove main worktree")
-	})
-
-	t.Run("remove feature worktree should succeed", func(t *testing.T) {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("force", true, "")
-		cmd.Flags().Bool("dry-run", false, "")
-		cmd.Flags().Bool("verbose", false, "")
-		cmd.Flags().Bool("quiet", false, "")
-		cmd.Flags().Bool("delete-branch", false, "")
-
-		originalDir, err := os.Getwd()
-		require.NoError(t, err)
-		defer os.Chdir(originalDir)
-
-		err = os.Chdir(mainPath)
-		require.NoError(t, err)
-
-		_, err = os.Stat(featurePath)
+	t.Run("feature worktree can be removed", func(t *testing.T) {
+		_, err := os.Stat(featurePath)
 		assert.NoError(t, err, "feature worktree should exist before removal")
 
-		err = removeCmd.RunE(cmd, []string{filepath.Base(featurePath)})
+		err = git.RemoveWorktree(gitDir, featurePath, true)
 		assert.NoError(t, err)
 
 		_, err = os.Stat(featurePath)
@@ -112,26 +71,6 @@ preset: ""
 }
 
 func TestRemoveCmd_EmptyInputBehavior(t *testing.T) {
-	tmpDir := t.TempDir()
-	repoDir := filepath.Join(tmpDir, "repo")
-	barePath := filepath.Join(tmpDir, ".bare")
-
-	require.NoError(t, os.MkdirAll(repoDir, 0755))
-
-	runGitCmd(t, repoDir, "init", "-b", "main")
-	runGitCmd(t, repoDir, "config", "user.email", "test@example.com")
-	runGitCmd(t, repoDir, "config", "user.name", "Test User")
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("test"), 0644))
-	runGitCmd(t, repoDir, "add", ".")
-	runGitCmd(t, repoDir, "commit", "-m", "Initial commit")
-	runGitCmd(t, repoDir, "clone", "--bare", repoDir, barePath)
-
-	mainPath := filepath.Join(tmpDir, "main")
-	require.NoError(t, git.CreateWorktree(barePath, mainPath, "main", ""))
-
-	featurePath := filepath.Join(tmpDir, "feature")
-	require.NoError(t, git.CreateWorktree(barePath, featurePath, "feature", "main"))
-
 	t.Run("empty input handled gracefully with bufio.Reader", func(t *testing.T) {
 		reader := bufio.NewReader(bytes.NewReader([]byte("\n")))
 

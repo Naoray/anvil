@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/naoray/anvil/internal/config"
 )
 
 // Rule defines a single validation rule that can be applied to a StepConfig.

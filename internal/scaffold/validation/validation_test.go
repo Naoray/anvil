@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/artisanexperiences/arbor/internal/config"
+	"github.com/naoray/anvil/internal/config"
 )
 
 func TestValidator(t *testing.T) {
