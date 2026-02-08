@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-02-08
 
 ### Breaking Changes
 
@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Global config directory changed from `~/.config/arbor/` to `~/.config/anvil/`
 - **Removed `anvil init` and `anvil destroy` commands** - The legacy bare repository (`.bare`) approach has been removed entirely. Use `anvil link` to register existing git repositories for centralized worktree management, and `anvil unlink --clean` to unregister and clean up.
 - **Removed `.bare` directory support** - Anvil now exclusively uses the linked project approach with worktrees stored in `~/.anvil/worktrees/`.
+
+### Added
+
+- TARS preset for shared-database worktrees — detects `config/tars.php`, skips db.create, env.write for DB_DATABASE, migrate:fresh, and db.destroy to preserve the centralized database
 
 ### Removed
 
@@ -31,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simplified all CLI commands by removing dual-path branching (`if pc.IsLinked`)
 - Unified worktree function signatures: `CreateWorktree`, `RemoveWorktree`, `ListWorktrees` now operate on a `gitDir` parameter
 - Updated banner to show `link`, `unlink`, and `cd` commands
+
+### Fixed
+
+- Preset availability test updated for new TARS preset
 
 ## [0.10.1] - 2026-02-05
 
@@ -129,7 +137,7 @@ No changes in this release.
 - Prevent `anvil init` from overwriting copied repository config
   - Now skips unnecessary SaveProject call when repo config is copied
   - Only saves when explicitly setting a preset flag
-  
+
 - Preserve YAML formatting and key ordering in config files
   - Use AST-based yaml.Node instead of map serialization
   - Maintain original structure, comments, and whitespace
@@ -354,6 +362,7 @@ No changes in this release.
 - Interactive commands (work, prune)
 - Multi-platform builds and CI/CD
 
+[1.0.0]: https://github.com/naoray/anvil/compare/v0.10.1...v1.0.0
 [0.10.0]: https://github.com/naoray/anvil/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/naoray/anvil/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/naoray/anvil/compare/v0.9.3...v0.9.4
