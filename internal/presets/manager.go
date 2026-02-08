@@ -39,7 +39,7 @@ func (m *Manager) Get(name string) (Preset, bool) {
 // generic ones (e.g., PHP) to ensure correct detection. When adding new presets,
 // place them according to specificity (e.g., Next.js before React before JavaScript).
 var builtInPresets = []Preset{
-	NewTars(), // TARS: shared-database Laravel app (must come before Laravel)
+	NewLaravelSharedDB(), // shared-database Laravel app (config-only, no auto-detect)
 	NewLaravel(),
 	NewPHP(),
 }

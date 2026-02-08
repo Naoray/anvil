@@ -211,5 +211,5 @@ func TestManager_Available(t *testing.T) {
 	assert.Len(t, available, 3)
 	assert.Contains(t, available, "laravel")
 	assert.Contains(t, available, "php")
-	assert.Contains(t, available, "tars")
+	assert.Contains(t, available, "laravel-shared-db")
 }
