@@ -78,8 +78,8 @@ anvil work feature/user-auth
 # Create a worktree from a specific base branch
 anvil work feature/user-auth -b develop
 
-# Switch to a worktree
-anvil cd feature/user-auth
+# Print path to a worktree
+anvil info feature/user-auth
 
 # Sync current worktree with upstream (defaults to main, uses rebase)
 anvil sync

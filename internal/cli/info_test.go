@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// createTestRepoForCd creates a regular git repo and returns the .git dir path
-func createTestRepoForCd(t *testing.T) string {
+// createTestRepoForInfo creates a regular git repo and returns the .git dir path
+func createTestRepoForInfo(t *testing.T) string {
 	t.Helper()
 	repoDir := t.TempDir()
 
@@ -41,8 +41,8 @@ func createTestRepoForCd(t *testing.T) string {
 	return filepath.Join(repoDir, ".git")
 }
 
-func TestCdCmd_FindsWorktreeByFolderName(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_FindsWorktreeByFolderName(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -59,8 +59,8 @@ func TestCdCmd_FindsWorktreeByFolderName(t *testing.T) {
 	assert.Equal(t, evalSymlinks(featurePath), evalSymlinks(path))
 }
 
-func TestCdCmd_FindsWorktreeByBranchName(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_FindsWorktreeByBranchName(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -77,8 +77,8 @@ func TestCdCmd_FindsWorktreeByBranchName(t *testing.T) {
 	assert.Equal(t, evalSymlinks(featurePath), evalSymlinks(path))
 }
 
-func TestCdCmd_FindsWorktreeByPartialMatch(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_FindsWorktreeByPartialMatch(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -95,8 +95,8 @@ func TestCdCmd_FindsWorktreeByPartialMatch(t *testing.T) {
 	assert.Equal(t, evalSymlinks(featurePath), evalSymlinks(path))
 }
 
-func TestCdCmd_ReturnsErrorForNoMatch(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_ReturnsErrorForNoMatch(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 
 	// Test: no matching worktree
 	_, err := findWorktreePath(gitDir, "nonexistent")
@@ -105,8 +105,8 @@ func TestCdCmd_ReturnsErrorForNoMatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "no worktree found")
 }
 
-func TestCdCmd_ReturnsErrorForAmbiguousMatch(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_ReturnsErrorForAmbiguousMatch(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -128,8 +128,8 @@ func TestCdCmd_ReturnsErrorForAmbiguousMatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "multiple worktrees match")
 }
 
-func TestCdCmd_OutputsPath(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_OutputsPath(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -139,17 +139,13 @@ func TestCdCmd_OutputsPath(t *testing.T) {
 	cmd.Dir = repoDir
 	require.NoError(t, cmd.Run())
 
-	// Test: formatCdOutput returns correct shell command
-	output := formatCdOutput(featurePath, false)
-	assert.Equal(t, featurePath, output)
-
-	// Test: with shell format
-	shellOutput := formatCdOutput(featurePath, true)
-	assert.Equal(t, "cd "+featurePath, shellOutput)
+	path, err := findWorktreePath(gitDir, "feature-test")
+	assert.NoError(t, err)
+	assert.Equal(t, evalSymlinks(featurePath), evalSymlinks(path))
 }
 
-func TestCdCmd_ListsWorktreesWhenNoArg(t *testing.T) {
-	gitDir := createTestRepoForCd(t)
+func TestInfoCmd_ListsWorktreesWhenNoArg(t *testing.T) {
+	gitDir := createTestRepoForInfo(t)
 	repoDir := filepath.Dir(gitDir)
 	projectDir := filepath.Dir(repoDir)
 
@@ -164,9 +160,9 @@ func TestCdCmd_ListsWorktreesWhenNoArg(t *testing.T) {
 	cmd.Dir = repoDir
 	require.NoError(t, cmd.Run())
 
-	// Test: listWorktreesForCd returns worktree names
+	// Test: listWorktreesForInfo returns worktree names
 	var buf bytes.Buffer
-	err := listWorktreesForCd(&buf, gitDir)
+	err := listWorktreesForInfo(&buf, gitDir)
 
 	assert.NoError(t, err)
 	output := buf.String()

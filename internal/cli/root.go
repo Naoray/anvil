@@ -114,7 +114,7 @@ Commands:
   unlink    Unlink a project from anvil
   work      Create or checkout a worktree
   list      List all worktrees
-  cd        Navigate to a worktree
+  info      Print the path to a worktree
   sync      Sync current worktree with upstream branch
   remove    Remove a worktree
   prune     Remove merged worktrees

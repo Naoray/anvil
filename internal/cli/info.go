@@ -12,33 +12,20 @@ import (
 	"github.com/naoray/anvil/internal/git"
 )
 
-var cdCmd = &cobra.Command{
-	Use:   "cd [WORKTREE]",
-	Short: "Print the path to a worktree for shell navigation",
-	Long: `Prints the path to a worktree, enabling easy shell navigation.
+var infoCmd = &cobra.Command{
+	Use:   "info [WORKTREE]",
+	Short: "Print the path to a worktree",
+	Long: `Prints the path to a worktree.
 
 Arguments:
   WORKTREE  Name of the worktree (folder name, branch name, or partial match)
             If omitted, lists all available worktrees
 
-Usage with shell:
-  # Print path only
-  anvil cd feature-auth
-
-  # Use with cd (bash/zsh)
-  cd $(anvil cd feature-auth)
-
-  # Or create a shell function in ~/.zshrc:
-  awt() { cd $(anvil cd "$1"); }
-
-  # Then use:
-  awt feature-auth
-
 Examples:
-  anvil cd                    # List all worktrees
-  anvil cd feature-auth       # Print path to feature-auth worktree
-  anvil cd auth               # Partial match (if unambiguous)
-  anvil cd feature/auth       # Match by branch name`,
+  anvil info                    # List all worktrees
+  anvil info feature-auth       # Print path to feature-auth worktree
+  anvil info auth               # Partial match (if unambiguous)
+  anvil info feature/auth       # Match by branch name`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
@@ -46,11 +33,9 @@ Examples:
 			return err
 		}
 
-		shell := mustGetBool(cmd, "shell")
-
 		// If no argument, list worktrees
 		if len(args) == 0 {
-			return listWorktreesForCd(os.Stdout, pc.GitDir)
+			return listWorktreesForInfo(os.Stdout, pc.GitDir)
 		}
 
 		query := args[0]
@@ -61,8 +46,7 @@ Examples:
 			return err
 		}
 
-		// Output the path
-		fmt.Println(formatCdOutput(path, shell))
+		fmt.Println(path)
 		return nil
 	},
 }
@@ -111,16 +95,8 @@ func findWorktreePath(gitDir, query string) (string, error) {
 	return matches[0].Path, nil
 }
 
-// formatCdOutput formats the output path, optionally with shell cd prefix
-func formatCdOutput(path string, shell bool) string {
-	if shell {
-		return "cd " + path
-	}
-	return path
-}
-
-// listWorktreesForCd lists all worktrees in a format suitable for cd selection
-func listWorktreesForCd(w io.Writer, gitDir string) error {
+// listWorktreesForInfo lists all worktrees in a format suitable for selection
+func listWorktreesForInfo(w io.Writer, gitDir string) error {
 	worktrees, err := git.ListWorktrees(gitDir)
 	if err != nil {
 		return fmt.Errorf("listing worktrees: %w", err)
@@ -145,7 +121,5 @@ func listWorktreesForCd(w io.Writer, gitDir string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(cdCmd)
-
-	cdCmd.Flags().Bool("shell", false, "Output as shell command (cd /path)")
+	rootCmd.AddCommand(infoCmd)
 }

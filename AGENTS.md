@@ -23,7 +23,7 @@ All development occurs **inside a worktree**. This allows:
 ```bash
 # Start development in a worktree
 anvil work feature/my-feature
-cd feature-my-feature
+anvil info feature-my-feature
 # Make changes, test, commit
 anvil remove feature-my-feature  # When done
 ```
