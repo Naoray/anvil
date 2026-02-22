@@ -1,0 +1,38 @@
+# Copy this file to .github/workflows/sable-notify.yml in any repo you want to track.
+# Add SABLE_BOT_TOKEN and SABLE_CHAT_ID as secrets in that repo (or at org level).
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    uses: Naoray/sable/.github/workflows/notify.yml@main
+    with:
+      event_type: >-
+        ${{
+          github.event_name == 'issues' && 'issue' ||
+          github.event_name == 'pull_request' && 'pr' ||
+          'release'
+        }}
+      title: >-
+        ${{
+          github.event.issue.title ||
+          github.event.pull_request.title ||
+          github.event.release.name
+        }}
+      url: >-
+        ${{
+          github.event.issue.html_url ||
+          github.event.pull_request.html_url ||
+          github.event.release.html_url
+        }}
+      repo: ${{ github.repository }}
+      actor: ${{ github.actor }}
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.SABLE_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.SABLE_CHAT_ID }}
