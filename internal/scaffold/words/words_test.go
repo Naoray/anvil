@@ -192,6 +192,42 @@ func TestGenerateDatabaseName(t *testing.T) {
 	})
 }
 
+func TestBuildDatabaseName(t *testing.T) {
+	t.Run("short name fits within limit", func(t *testing.T) {
+		name := BuildDatabaseName("myapp", "stable_resolver", 0)
+		if name != "myapp_stable_resolver" {
+			t.Errorf("expected myapp_stable_resolver, got %s", name)
+		}
+	})
+
+	t.Run("truncates long site name to fit 63 char default", func(t *testing.T) {
+		name := BuildDatabaseName("hotfix/track-collection-reflection-exception-handling", "stable_resolver", 0)
+		if len(name) > 63 {
+			t.Errorf("name should not exceed 63 characters, got %d: %s", len(name), name)
+		}
+		if !strings.HasSuffix(name, "_stable_resolver") {
+			t.Errorf("name should end with suffix, got %s", name)
+		}
+	})
+
+	t.Run("respects custom max length", func(t *testing.T) {
+		name := BuildDatabaseName("a_very_long_site_name_here", "stable_resolver", 30)
+		if len(name) > 30 {
+			t.Errorf("name should not exceed 30 characters, got %d: %s", len(name), name)
+		}
+	})
+
+	t.Run("does not end with trailing underscore after truncation", func(t *testing.T) {
+		// Construct a name where truncation would land on an underscore
+		name := BuildDatabaseName("my_app_feature_x", "stable_resolver", 30)
+		parts := strings.SplitN(name, "_stable_resolver", 2)
+		sitePart := parts[0]
+		if strings.HasSuffix(sitePart, "_") {
+			t.Errorf("site name part should not end with underscore, got %s", sitePart)
+		}
+	})
+}
+
 func TestMaxLengthEnforcement(t *testing.T) {
 	t.Run("respects PostgreSQL limit of 63", func(t *testing.T) {
 		name := GenerateDatabaseName("verylongsitenamethatdefinitelyexceedslimitsbyalot", 0)

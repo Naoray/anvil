@@ -410,7 +410,7 @@ APP_NAME=some-feature
 		actualDbName := createCalls[0]
 		assert.True(t, strings.HasPrefix(actualDbName, "some_feature_"), "Database should be created with sanitized name (underscores)")
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SanitizedSiteName }}_{{ .DbSuffix }}"})
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)

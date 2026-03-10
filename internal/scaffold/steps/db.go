@@ -171,7 +171,7 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine string
 		existingSuffix := ctx.GetDbSuffix()
 		if existingSuffix != "" {
 			suffix = existingSuffix
-			dbName = fmt.Sprintf("%s_%s", words.SanitizeSiteName(siteName), suffix)
+			dbName = words.BuildDatabaseName(siteName, suffix, 0)
 		} else {
 			dbName = words.GenerateDatabaseName(siteName, 0)
 			suffix = words.ExtractSuffix(dbName)
