@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.1](https://github.com/naoray/anvil/compare/v1.1.0...v1.1.1) - 2026-03-10
+
+### Bug Fixes
+
+- Fix worktree database names exceeding MySQL's 64-char identifier limit for long branch names (e.g., `hotfix/track-collection-reflection-exception`)
+- Extract `BuildDatabaseName()` to ensure site name truncation applies consistently
+- Add `{{ .DatabaseName }}` template variable for truncated database names in env.write steps
+
+**Full changelog:** [v1.1.0...v1.1.1](https://github.com/Naoray/anvil/compare/v1.1.0...v1.1.1)
+
 ## [v1.1.0](https://github.com/naoray/anvil/compare/v1.0.0...v1.1.0) - 2026-02-12
 
 ### Changes
@@ -17,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 - **Project renamed from Arbor to Anvil** - Binary, module path, config files, and all references renamed
+  
   - Module path changed from `github.com/artisanexperiences/arbor` to `github.com/naoray/anvil`
   - Config file renamed from `arbor.yaml` to `anvil.yaml`
   - Local state file renamed from `.arbor.local` to `.anvil.local`
@@ -24,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Global config directory changed from `~/.config/arbor/` to `~/.config/anvil/`
   
 - **Removed `anvil init` and `anvil destroy` commands** - The legacy bare repository (`.bare`) approach has been removed entirely. Use `anvil link` to register existing git repositories for centralized worktree management, and `anvil unlink --clean` to unregister and clean up.
+  
 - **Removed `.bare` directory support** - Anvil now exclusively uses the linked project approach with worktrees stored in `~/.anvil/worktrees/`.
+  
 
 ### Added
 
