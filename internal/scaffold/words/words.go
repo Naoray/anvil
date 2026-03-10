@@ -60,14 +60,20 @@ func SanitizeSiteName(name string) string {
 }
 
 func GenerateDatabaseName(siteName string, maxLength int) string {
+	return BuildDatabaseName(siteName, GenerateSuffix(), maxLength)
+}
+
+func BuildDatabaseName(siteName string, suffix string, maxLength int) string {
 	if maxLength == 0 {
 		maxLength = MaxDbNameLength
 	}
 
 	sanitized := SanitizeSiteName(siteName)
-	suffix := GenerateSuffix()
 
 	maxSiteLen := maxLength - len(suffix) - 1
+	if maxSiteLen < 1 {
+		maxSiteLen = 1
+	}
 	if len(sanitized) > maxSiteLen {
 		sanitized = sanitized[:maxSiteLen]
 		sanitized = strings.TrimRight(sanitized, "_")

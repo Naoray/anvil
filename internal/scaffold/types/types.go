@@ -356,19 +356,43 @@ func (ctx *ScaffoldContext) GetDbSuffix() string {
 func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
+
+	sanitized := sanitizeSiteName(ctx.SiteName)
+
+	// Build a truncated database name that respects identifier limits.
+	var dbName string
+	if ctx.DbSuffix != "" {
+		dbName = buildDatabaseName(sanitized, ctx.DbSuffix, maxDbNameLength)
+	}
+
 	snapshot := map[string]string{
 		"Path":              ctx.Path,
 		"RepoPath":          ctx.RepoPath,
 		"RepoName":          ctx.RepoName,
 		"SiteName":          ctx.SiteName,
-		"SanitizedSiteName": sanitizeSiteName(ctx.SiteName),
+		"SanitizedSiteName": sanitized,
 		"Branch":            ctx.Branch,
 		"DbSuffix":          ctx.DbSuffix,
+		"DatabaseName":      dbName,
 	}
 	for k, v := range ctx.Vars {
 		snapshot[k] = v
 	}
 	return snapshot
+}
+
+const maxDbNameLength = 63
+
+func buildDatabaseName(sanitized string, suffix string, maxLength int) string {
+	maxSiteLen := maxLength - len(suffix) - 1
+	if maxSiteLen < 1 {
+		maxSiteLen = 1
+	}
+	if len(sanitized) > maxSiteLen {
+		sanitized = sanitized[:maxSiteLen]
+		sanitized = strings.TrimRight(sanitized, "_")
+	}
+	return sanitized + "_" + suffix
 }
 
 func sanitizeSiteName(name string) string {

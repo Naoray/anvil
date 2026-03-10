@@ -99,6 +99,18 @@ func TestReplaceTemplateVars(t *testing.T) {
 			expected: "my_app_swift_runner",
 		},
 		{
+			name:     "DatabaseName template variable",
+			input:    "{{ .DatabaseName }}",
+			ctx:      &types.ScaffoldContext{SiteName: "myapp", DbSuffix: "swift_runner"},
+			expected: "myapp_swift_runner",
+		},
+		{
+			name:     "DatabaseName truncates long site names to 63 chars",
+			input:    "{{ .DatabaseName }}",
+			ctx:      &types.ScaffoldContext{SiteName: "hotfix/track-collection-reflection-exception-handling", DbSuffix: "stable_resolver"},
+			expected: "hotfix_track_collection_reflection_exception_ha_stable_resolver",
+		},
+		{
 			name:     "SanitizedSiteName removes hyphens",
 			input:    "{{ .SanitizedSiteName }}",
 			ctx:      &types.ScaffoldContext{SiteName: "feature-auth-system"},
