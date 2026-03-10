@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.2.0](https://github.com/naoray/anvil/compare/v1.1.1...v1.2.0) - 2026-03-10
+
+### New Features
+
+- **`--skip-scaffold` flag for `anvil work`** — Skip scaffold steps when creating a worktree for faster iteration. Run `anvil scaffold` later when ready.
+- **`anvil pull-config` command** — Copy `anvil.yaml` from the default branch worktree to the project root. Supports `--force`, `--dry-run`, and `--verbose` flags.
+
+### Bug Fixes
+
+- **Remote branch detached HEAD fix** — When selecting a remote branch (e.g. `origin/feature/foo`) from the interactive picker, the remote prefix is now stripped to create a proper local tracking branch instead of a detached HEAD.
+
+### Housekeeping
+
+- Remove unused `sable-notify` workflow
+- Align banner command listing spacing
+
+**Full changelog:** [v1.1.1...v1.2.0](https://github.com/Naoray/anvil/compare/v1.1.1...v1.2.0)
+
 ## [v1.1.1](https://github.com/naoray/anvil/compare/v1.1.0...v1.1.1) - 2026-03-10
 
 ### Bug Fixes
