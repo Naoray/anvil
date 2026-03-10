@@ -110,18 +110,19 @@ func printBanner() {
 
 	commands := `
 Commands:
-  link      Link an existing repository for worktree management
-  unlink    Unlink a project from anvil
-  work      Create or checkout a worktree
-  list      List all worktrees
-  info      Print the path to a worktree
-  sync      Sync current worktree with upstream branch
-  remove    Remove a worktree
-  prune     Remove merged worktrees
-  scaffold  Run scaffold steps for a worktree
-  repair    Repair git configuration for existing project
-  install   Setup global configuration
-  version   Show anvil version
+  link         Link an existing repository for worktree management
+  unlink       Unlink a project from anvil
+  work         Create or checkout a worktree
+  list         List all worktrees
+  info         Print the path to a worktree
+  sync         Sync current worktree with upstream branch
+  remove       Remove a worktree
+  prune        Remove merged worktrees
+  scaffold     Run scaffold steps for a worktree
+  pull-config  Copy anvil.yaml from default branch worktree
+  repair       Repair git configuration for existing project
+  install      Setup global configuration
+  version      Show anvil version
 
 Run 'anvil <command> --help' for more information.`
 

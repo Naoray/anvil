@@ -6,6 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"strings"
+
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -54,6 +56,10 @@ available branches or entering a new branch name.`,
 		if branch == "" {
 			return fmt.Errorf("branch name required (run interactively or provide branch as argument)")
 		}
+
+		// Strip remote prefix (e.g. "origin/feature/foo" -> "feature/foo")
+		// to avoid creating worktrees with detached HEAD
+		branch = stripRemotePrefix(branch)
 
 		if baseBranch == "" {
 			baseBranch = pc.DefaultBranch
@@ -108,7 +114,12 @@ available branches or entering a new branch name.`,
 			}
 		}
 
-		if !dryRun {
+		skipScaffold := mustGetBool(cmd, "skip-scaffold")
+		if skipScaffold {
+			if !quiet {
+				ui.PrintInfo("Scaffold skipped (run 'anvil scaffold' to set up later)")
+			}
+		} else if !dryRun {
 			preset := pc.Config.Preset
 			if preset == "" {
 				preset = pc.PresetManager().Detect(absWorktreePath)
@@ -145,9 +156,23 @@ available branches or entering a new branch name.`,
 	},
 }
 
+// stripRemotePrefix removes the remote prefix from a branch name
+// (e.g. "origin/feature/foo" -> "feature/foo") so that git creates
+// a proper local tracking branch instead of a detached HEAD.
+func stripRemotePrefix(branch string) string {
+	// Common remote prefixes to strip
+	for _, prefix := range []string{"origin/", "upstream/"} {
+		if strings.HasPrefix(branch, prefix) {
+			return strings.TrimPrefix(branch, prefix)
+		}
+	}
+	return branch
+}
+
 func init() {
 	rootCmd.AddCommand(workCmd)
 
 	workCmd.Flags().StringP("base", "b", "", "Base branch for new worktree")
 	workCmd.Flags().Bool("no-track", false, "Skip setting up remote tracking for new branches")
+	workCmd.Flags().Bool("skip-scaffold", false, "Skip scaffold steps (run 'anvil scaffold' later)")
 }
