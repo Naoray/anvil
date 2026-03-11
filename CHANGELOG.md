@@ -5,14 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.2.1](https://github.com/naoray/anvil/compare/v1.2.0...v1.2.1) - 2026-03-11
+## [v1.3.0](https://github.com/naoray/anvil/compare/v1.2.0...v1.3.0) - 2026-03-11
+
+### New Features
+
+- **`anvil open` command** — Open a worktree in your IDE and its Herd-linked site in the browser with a single command. Supports fuzzy matching by folder name, branch name, or partial match. Use `--editor` or `--browser` flags to open only one. IDE is configurable via `--editor-cmd` flag, per-project config, or global config (defaults to `cursor`).
+- **`editor_cmd` config option** — Configure your preferred IDE globally or per-project in the anvil config.
 
 ### Bug Fixes
 
 - Strip ANSI escape codes from captured command output to prevent malformed `APP_KEY` values with embedded color codes (e.g. `[33m`, `[39m`)
 - Add `--no-ansi` flag to `key:generate` artisan commands in Laravel and LaravelSharedDB presets
 
-**Full changelog:** [v1.2.0...v1.2.1](https://github.com/Naoray/anvil/compare/v1.2.0...v1.2.1)
+**Full changelog:** [v1.2.0...v1.3.0](https://github.com/Naoray/anvil/compare/v1.2.0...v1.3.0)
 
 ## [v1.2.0](https://github.com/naoray/anvil/compare/v1.1.1...v1.2.0) - 2026-03-10
 
