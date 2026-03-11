@@ -11,18 +11,19 @@ import (
 )
 
 var scaffoldCmd = &cobra.Command{
-	Use:   "scaffold [PATH]",
+	Use:   "scaffold [WORKTREE]",
 	Short: "Run scaffold steps for a worktree",
 	Long: `Run scaffold steps for an existing worktree.
 
-When run from the project root, you can specify a worktree
-path relative to the project root (e.g., 'main', 'feature/my-feature').
+Arguments:
+  WORKTREE  Name of the worktree (folder name, branch name, or partial match)
+            If omitted and inside a worktree, scaffolds the current worktree.
+            If omitted and not inside a worktree, prompts for selection.
 
-When run from inside a worktree without arguments, you'll be prompted to confirm
-scaffolding the current worktree.
-
-If no path is provided and not inside a worktree, you can interactively select
-a worktree to scaffold.`,
+Examples:
+  anvil scaffold feature-auth       # Scaffold by folder name
+  anvil scaffold auth               # Partial match
+  anvil scaffold feature/auth       # Match by branch name`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
@@ -46,13 +47,12 @@ a worktree to scaffold.`,
 		var selectedWorktree *git.Worktree
 
 		if len(args) > 0 {
-			worktreePath := args[0]
-
-			if !filepath.IsAbs(worktreePath) {
-				worktreePath = filepath.Join(pc.ProjectPath, worktreePath)
+			resolvedPath, err := findWorktreePath(pc.GitDir, args[0])
+			if err != nil {
+				return err
 			}
 
-			absWorktreePath, err := filepath.Abs(worktreePath)
+			absResolved, err := filepath.Abs(resolvedPath)
 			if err != nil {
 				return fmt.Errorf("getting absolute path: %w", err)
 			}
@@ -62,14 +62,14 @@ a worktree to scaffold.`,
 				if err != nil {
 					continue
 				}
-				if wtAbsPath == absWorktreePath {
+				if wtAbsPath == absResolved {
 					selectedWorktree = &wt
 					break
 				}
 			}
 
 			if selectedWorktree == nil {
-				return fmt.Errorf("worktree not found: %s", worktreePath)
+				return fmt.Errorf("worktree not found: %s", resolvedPath)
 			}
 		} else if pc.IsInWorktree() {
 			for _, wt := range worktrees {
