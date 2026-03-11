@@ -19,7 +19,7 @@ func NewLaravelSharedDB() *LaravelSharedDB {
 				{Name: "php.composer", Args: []string{"install"}, Condition: map[string]interface{}{"file_exists": "composer.lock"}},
 				{Name: "php.composer", Args: []string{"update"}, Condition: map[string]interface{}{"not": map[string]interface{}{"file_exists": "composer.lock"}}},
 				{Name: "file.copy", From: ".env.example", To: ".env"},
-				{Name: "php.laravel.artisan", Args: []string{"key:generate", "--no-interaction"}, Condition: map[string]interface{}{"env_file_missing": "APP_KEY"}},
+				{Name: "php.laravel.artisan", Args: []string{"key:generate", "--no-interaction", "--no-ansi"}, Condition: map[string]interface{}{"env_file_missing": "APP_KEY"}},
 				// NO db.create - shared database across all worktrees
 				// NO env.write for DB_DATABASE - preserve the shared database name
 				{Name: "node.npm", Args: []string{"ci"}, Condition: map[string]interface{}{"file_exists": "package-lock.json"}},

@@ -669,6 +669,27 @@ func TestBinaryStep_OutputCapture(t *testing.T) {
 		assert.Equal(t, "new value", ctx.GetVar("MyVar"))
 	})
 
+	t.Run("strips ANSI escape codes from captured output", func(t *testing.T) {
+		// Simulate output with ANSI color codes (e.g., \033[33m yellow \033[39m reset)
+		step := NewBinaryStep("test.printf", "printf", []string{"\033[33mbase64:abc123def456\033[39m"}, "AppKey")
+		ctx := &types.ScaffoldContext{WorktreePath: t.TempDir()}
+
+		err := step.Run(ctx, types.StepOptions{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, "base64:abc123def456", ctx.GetVar("AppKey"))
+	})
+
+	t.Run("strips multiple ANSI escape codes from captured output", func(t *testing.T) {
+		step := NewBinaryStep("test.printf", "printf", []string{"\033[1m\033[33mbase64:key\033[39m\033[0m"}, "AppKey")
+		ctx := &types.ScaffoldContext{WorktreePath: t.TempDir()}
+
+		err := step.Run(ctx, types.StepOptions{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, "base64:key", ctx.GetVar("AppKey"))
+	})
+
 	t.Run("creates step via Create with store_as", func(t *testing.T) {
 		step, err := Create("php", config.StepConfig{
 			Args:    []string{"-r", "echo 'hello';"},

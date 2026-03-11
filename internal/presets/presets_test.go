@@ -76,7 +76,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, ".env", steps[2].To)
 
 	assert.Equal(t, "php.laravel", steps[3].Name)
-	assert.Equal(t, []string{"key:generate", "--show", "--no-interaction"}, steps[3].Args)
+	assert.Equal(t, []string{"key:generate", "--show", "--no-interaction", "--no-ansi"}, steps[3].Args)
 	assert.Equal(t, "AppKey", steps[3].StoreAs)
 
 	assert.Equal(t, "env.write", steps[4].Name)
