@@ -23,7 +23,8 @@ Arguments:
 Cleanup steps may include:
   - Removing Herd site links
   - Database cleanup prompts`,
-	Args: cobra.MaximumNArgs(1),
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
 		if err != nil {

@@ -27,7 +27,8 @@ Examples:
   anvil open auth --editor      # IDE only
   anvil open auth --browser     # Browser only
   anvil open auth --editor-cmd=zed  # Use Zed instead of default`,
-	Args: cobra.ExactArgs(1),
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
 		if err != nil {

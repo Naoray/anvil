@@ -26,7 +26,8 @@ Examples:
   anvil info feature-auth       # Print path to feature-auth worktree
   anvil info auth               # Partial match (if unambiguous)
   anvil info feature/auth       # Match by branch name`,
-	Args: cobra.MaximumNArgs(1),
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := OpenProjectFromCWD()
 		if err != nil {

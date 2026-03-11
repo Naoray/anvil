@@ -124,6 +124,7 @@ Commands:
   repair       Repair git configuration for existing project
   install      Setup global configuration
   version      Show anvil version
+  completion   Generate shell completion scripts
 
 Run 'anvil <command> --help' for more information.`
 
