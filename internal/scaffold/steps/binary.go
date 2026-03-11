@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
@@ -11,6 +12,9 @@ import (
 	"github.com/naoray/anvil/internal/scaffold/template"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
+
+// ansiPattern matches ANSI escape sequences (colors, cursor movement, etc.)
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 type BinaryStep struct {
 	name      string
@@ -96,7 +100,8 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 	}
 
 	if s.storeAs != "" {
-		ctx.SetVar(s.storeAs, strings.TrimSpace(string(output)))
+		cleaned := ansiPattern.ReplaceAllString(string(output), "")
+		ctx.SetVar(s.storeAs, strings.TrimSpace(cleaned))
 		if opts.Verbose {
 			fmt.Printf("  Stored output as %s\n", s.storeAs)
 		}
