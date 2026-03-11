@@ -38,6 +38,7 @@ type Config struct {
 	SiteName      string                `mapstructure:"site_name"`
 	Preset        string                `mapstructure:"preset"`
 	DefaultBranch string                `mapstructure:"default_branch"`
+	EditorCmd     string                `mapstructure:"editor_cmd"`
 	Scaffold      ScaffoldConfig        `mapstructure:"scaffold"`
 	Cleanup       CleanupConfig         `mapstructure:"cleanup"`
 	Tools         map[string]ToolConfig `mapstructure:"tools"`
@@ -169,6 +170,7 @@ type ToolConfig struct {
 // GlobalConfig represents the global configuration
 type GlobalConfig struct {
 	DefaultBranch string                  `mapstructure:"default_branch"`
+	EditorCmd     string                  `mapstructure:"editor_cmd"`
 	DetectedTools map[string]bool         `mapstructure:"detected_tools"`
 	Tools         map[string]ToolInfo     `mapstructure:"tools"`
 	Scaffold      GlobalScaffoldConfig    `mapstructure:"scaffold"`
@@ -182,6 +184,7 @@ type ProjectInfo struct {
 	DefaultBranch string `mapstructure:"default_branch"`
 	Preset        string `mapstructure:"preset"`
 	SiteName      string `mapstructure:"site_name"`
+	EditorCmd     string `mapstructure:"editor_cmd"`
 }
 
 // ToolInfo represents detected tool information
@@ -382,6 +385,9 @@ func SaveProject(path string, config *Config) error {
 	}
 	if config.DefaultBranch != "" {
 		setValue("default_branch", config.DefaultBranch)
+	}
+	if config.EditorCmd != "" {
+		setValue("editor_cmd", config.EditorCmd)
 	}
 
 	// Update sync config if any values are set
@@ -601,6 +607,10 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 		configMap["worktree_base"] = config.WorktreeBase
 	}
 
+	if config.EditorCmd != "" {
+		configMap["editor_cmd"] = config.EditorCmd
+	}
+
 	if config.Projects != nil {
 		// Convert ProjectInfo pointers to plain maps for viper compatibility
 		projectsMap := make(map[string]interface{})
@@ -610,6 +620,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 				"default_branch": proj.DefaultBranch,
 				"preset":         proj.Preset,
 				"site_name":      proj.SiteName,
+				"editor_cmd":     proj.EditorCmd,
 			}
 		}
 		configMap["projects"] = projectsMap

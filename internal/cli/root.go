@@ -115,6 +115,7 @@ Commands:
   work         Create or checkout a worktree
   list         List all worktrees
   info         Print the path to a worktree
+  open         Open a worktree in your IDE and browser
   sync         Sync current worktree with upstream branch
   remove       Remove a worktree
   prune        Remove merged worktrees
