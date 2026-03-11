@@ -76,17 +76,36 @@ Examples:
 
 // resolveWorktreeURL determines the URL for a worktree.
 // Reads APP_URL from .env, falling back to https://<folder-name>.test.
+// Treats localhost URLs as unconfigured (common .env.example default).
 func resolveWorktreeURL(worktreePath string) string {
 	env := utils.ReadEnvFile(worktreePath, ".env")
 
 	if appURL := env["APP_URL"]; appURL != "" {
-		// Strip surrounding quotes if present (ReadEnvFile doesn't strip them)
 		appURL = strings.Trim(appURL, `"'`)
-		return appURL
+		if !isLocalhostURL(appURL) {
+			return appURL
+		}
 	}
 
 	folderName := filepath.Base(worktreePath)
 	return "https://" + folderName + ".test"
+}
+
+// isLocalhostURL returns true for URLs pointing to localhost,
+// which typically indicate an unconfigured .env.example default.
+func isLocalhostURL(url string) bool {
+	lower := strings.ToLower(url)
+	for _, prefix := range []string{
+		"http://localhost",
+		"https://localhost",
+		"http://127.0.0.1",
+		"https://127.0.0.1",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveEditorCmd determines the editor command from config hierarchy.

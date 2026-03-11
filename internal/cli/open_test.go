@@ -40,6 +40,26 @@ func TestResolveWorktreeURL_StripsQuotesFromAppURL(t *testing.T) {
 	assert.Equal(t, "https://my-feature.test", url)
 }
 
+func TestResolveWorktreeURL_LocalhostFallsBackToFolderName(t *testing.T) {
+	dir := t.TempDir()
+	envContent := "APP_URL=http://localhost\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte(envContent), 0644))
+
+	url := resolveWorktreeURL(dir)
+
+	assert.Equal(t, "https://"+filepath.Base(dir)+".test", url)
+}
+
+func TestResolveWorktreeURL_LocalhostWithPortFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	envContent := "APP_URL=http://localhost:8000\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte(envContent), 0644))
+
+	url := resolveWorktreeURL(dir)
+
+	assert.Equal(t, "https://"+filepath.Base(dir)+".test", url)
+}
+
 func TestResolveEditorCmd_DefaultsToCursor(t *testing.T) {
 	pc := &ProjectContext{
 		Config:       &config.Config{},
