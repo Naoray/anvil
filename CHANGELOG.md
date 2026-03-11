@@ -5,14 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.3.2](https://github.com/naoray/anvil/compare/v1.3.1...v1.3.2) - 2026-03-11
+## [v1.4.0](https://github.com/naoray/anvil/compare/v1.3.1...v1.4.0) - 2026-03-11
+
+### New Features
+
+- **Shell completion** — Tab completion for worktree names in `open`, `scaffold`, `info`, and `remove` commands. Generate scripts via `anvil completion zsh|bash|fish|powershell`.
 
 ### Bug Fixes
 
 - `anvil scaffold` now uses fuzzy worktree matching (like `info` and `open`) instead of joining the argument with the project path — fixes "worktree not found" for linked projects with centralized worktrees
 - `anvil open` now treats `http://localhost` (and variants with ports) as unconfigured and falls back to `https://<folder-name>.test` instead of opening a Herd 404
 
-**Full changelog:** [v1.3.1...v1.3.2](https://github.com/Naoray/anvil/compare/v1.3.1...v1.3.2)
+**Full changelog:** [v1.3.1...v1.4.0](https://github.com/Naoray/anvil/compare/v1.3.1...v1.4.0)
 
 ## [v1.3.1](https://github.com/naoray/anvil/compare/v1.3.0...v1.3.1) - 2026-03-11
 
