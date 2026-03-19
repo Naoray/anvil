@@ -44,6 +44,7 @@ available branches or entering a new branch name.`,
 				return fmt.Errorf("listing local branches: %w", err)
 			}
 
+			// Best-effort: remote branches enhance UI selection but are not required
 			remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 			selected, err := ui.SelectBranchInteractive(pc.GitDir, localBranches, remoteBranches)
