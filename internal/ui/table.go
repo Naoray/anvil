@@ -2,14 +2,34 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/naoray/anvil/internal/git"
 )
+
+func termWidth() int {
+	w, _, err := term.GetSize(os.Stdout.Fd())
+	if err != nil || w <= 0 {
+		return 120
+	}
+	return w
+}
+
+func truncate(s string, maxLen int) string {
+	if maxLen < 4 {
+		maxLen = 4
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
 
 func RenderTable(headers []string, rows [][]string) string {
 	t := table.New().
@@ -61,30 +81,41 @@ func RenderWorktreeTable(worktrees []git.Worktree) string {
 		Padding(0, 1).
 		Render("🌳 Anvil Worktrees")
 
+	// Reserve space: STATUS col fixed width + 4 border chars (│) + 6 padding chars (space per side × 3 cols)
+	const (
+		statusColWidth = 20 // fits "● current ○ active" + 1 char margin
+		tableOverhead  = 10 // 4 × │ + 6 × space padding
+	)
+	tw := termWidth()
+	remaining := tw - statusColWidth - tableOverhead
+	if remaining < 20 {
+		remaining = 20
+	}
+	worktreeMax := remaining * 2 / 5
+	branchMax := remaining - worktreeMax
+
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(Primary)).
+		BorderRow(false).
 		Headers("WORKTREE", "BRANCH", "STATUS").
 		StyleFunc(func(row, col int) lipgloss.Style {
+			base := lipgloss.NewStyle().Padding(0, 1)
 			if row == 0 {
-				return lipgloss.NewStyle().
-					Bold(true).
-					Foreground(Primary).
-					Padding(0, 1)
+				return base.Bold(true).Foreground(Primary)
 			}
 			if row > 0 && row-1 < len(worktrees) && worktrees[row-1].IsCurrent {
-				return lipgloss.NewStyle().
-					Bold(true).
-					Padding(0, 1)
+				return base.Bold(true)
 			}
-			return lipgloss.NewStyle().Padding(0, 1)
+			return base
 		})
 
 	var mergedCount int
 	for _, wt := range worktrees {
-		worktreeName := filepath.Base(wt.Path)
+		worktreeName := truncate(filepath.Base(wt.Path), worktreeMax)
+		branch := truncate(wt.Branch, branchMax)
 		status := formatWorktreeStatus(wt)
-		t.Row(worktreeName, wt.Branch, status)
+		t.Row(worktreeName, branch, status)
 		if wt.IsMerged && !wt.IsMain {
 			mergedCount++
 		}
