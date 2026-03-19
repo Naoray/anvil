@@ -19,7 +19,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	}
 
 	t.Run("empty conditions returns true", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{})
+		result, err := ctx.EvaluateCondition(map[string]any{})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_exists": "test.txt",
 		})
 		if err != nil {
@@ -56,7 +56,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("file_exists - file does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_exists": "nonexistent.txt",
 		})
 		if err != nil {
@@ -73,8 +73,8 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_contains": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_contains": map[string]any{
 				"file":    "test.txt",
 				"pattern": "hello",
 			},
@@ -93,8 +93,8 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_contains": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_contains": map[string]any{
 				"file":    "test.txt",
 				"pattern": "goodbye",
 			},
@@ -108,7 +108,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("command_exists - command exists", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"command_exists": "ls",
 		})
 		if err != nil {
@@ -120,7 +120,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("command_exists - command does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"command_exists": "this-command-does-not-exist-12345",
 		})
 		if err != nil {
@@ -133,7 +133,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 
 	t.Run("env_exists - env var exists", func(t *testing.T) {
 		t.Setenv("ANVIL_TEST_ENV_VAR", "test_value")
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"env_exists": "ANVIL_TEST_ENV_VAR",
 		})
 		if err != nil {
@@ -145,7 +145,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("env_exists - env var does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"env_exists": "NONEXISTENT_VAR_12345",
 		})
 		if err != nil {
@@ -157,7 +157,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("env_not_exists - env var does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"env_not_exists": "NONEXISTENT_VAR_12345",
 		})
 		if err != nil {
@@ -169,7 +169,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("os matches current OS", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"os": runtime.GOOS,
 		})
 		if err != nil {
@@ -192,7 +192,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 		default:
 			otherOS = "freebsd"
 		}
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"os": otherOS,
 		})
 		if err != nil {
@@ -204,8 +204,8 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("not condition", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"not": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"not": map[string]any{
 				"file_exists": "nonexistent.txt",
 			},
 		})
@@ -223,7 +223,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_exists":    "test.txt",
 			"command_exists": "ls",
 		})
@@ -236,7 +236,7 @@ func TestScaffoldContext_EvaluateCondition(t *testing.T) {
 	})
 
 	t.Run("multiple conditions - one does not match", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_exists":    "nonexistent.txt",
 			"command_exists": "ls",
 		})
@@ -262,7 +262,7 @@ func TestScaffoldContext_FileHasScript(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "test",
 		})
 		if err != nil {
@@ -279,7 +279,7 @@ func TestScaffoldContext_FileHasScript(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "test",
 		})
 		if err != nil {
@@ -293,7 +293,7 @@ func TestScaffoldContext_FileHasScript(t *testing.T) {
 	})
 
 	t.Run("package.json does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "test",
 		})
 		if err != nil {
@@ -318,8 +318,8 @@ func TestScaffoldContext_EnvFileConditions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "KEY",
 			},
@@ -338,8 +338,8 @@ func TestScaffoldContext_EnvFileConditions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "NONEXISTENT",
 			},
@@ -354,8 +354,8 @@ func TestScaffoldContext_EnvFileConditions(t *testing.T) {
 
 	t.Run("env_file_missing - file missing", func(t *testing.T) {
 		os.Remove(filepath.Join(tmpDir, ".env"))
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "KEY",
 			},
@@ -374,8 +374,8 @@ func TestScaffoldContext_EnvFileConditions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "KEY",
 			},
@@ -580,8 +580,8 @@ func TestScaffoldContext_EnvExists_Array(t *testing.T) {
 		t.Setenv("TEST_VAR_2", "value2")
 		t.Setenv("TEST_VAR_3", "value3")
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_exists": []interface{}{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_exists": []any{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -596,8 +596,8 @@ func TestScaffoldContext_EnvExists_Array(t *testing.T) {
 		t.Setenv("TEST_VAR_2", "value2")
 		// TEST_VAR_3 not set
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_exists": []interface{}{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_exists": []any{"TEST_VAR_1", "TEST_VAR_2", "TEST_VAR_3"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -608,8 +608,8 @@ func TestScaffoldContext_EnvExists_Array(t *testing.T) {
 	})
 
 	t.Run("empty array returns true", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_exists": []interface{}{},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_exists": []any{},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -620,8 +620,8 @@ func TestScaffoldContext_EnvExists_Array(t *testing.T) {
 	})
 
 	t.Run("all vars in array missing", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"env_exists": []interface{}{"NONEXISTENT_VAR_1", "NONEXISTENT_VAR_2"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"env_exists": []any{"NONEXISTENT_VAR_1", "NONEXISTENT_VAR_2"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -640,8 +640,8 @@ func TestScaffoldContext_CommandExists_Array(t *testing.T) {
 
 	t.Run("all commands in array exist", func(t *testing.T) {
 		// Using common commands that should exist on most systems
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"command_exists": []interface{}{"go", "ls"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"command_exists": []any{"go", "ls"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -652,8 +652,8 @@ func TestScaffoldContext_CommandExists_Array(t *testing.T) {
 	})
 
 	t.Run("one command in array missing", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"command_exists": []interface{}{"go", "nonexistentcommand12345"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"command_exists": []any{"go", "nonexistentcommand12345"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -664,8 +664,8 @@ func TestScaffoldContext_CommandExists_Array(t *testing.T) {
 	})
 
 	t.Run("empty array returns true", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"command_exists": []interface{}{},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"command_exists": []any{},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -676,8 +676,8 @@ func TestScaffoldContext_CommandExists_Array(t *testing.T) {
 	})
 
 	t.Run("all commands in array missing", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"command_exists": []interface{}{"nonexistentcmd1", "nonexistentcmd2"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"command_exists": []any{"nonexistentcmd1", "nonexistentcmd2"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -706,8 +706,8 @@ func TestScaffoldContext_FileExists_Array(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_exists": []interface{}{"file1.txt", "file2.txt", "file3.txt"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_exists": []any{"file1.txt", "file2.txt", "file3.txt"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -727,8 +727,8 @@ func TestScaffoldContext_FileExists_Array(t *testing.T) {
 		}
 		// missing.txt not created
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_exists": []interface{}{"exists1.txt", "exists2.txt", "missing.txt"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_exists": []any{"exists1.txt", "exists2.txt", "missing.txt"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -739,8 +739,8 @@ func TestScaffoldContext_FileExists_Array(t *testing.T) {
 	})
 
 	t.Run("empty array returns true", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_exists": []interface{}{},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_exists": []any{},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -751,8 +751,8 @@ func TestScaffoldContext_FileExists_Array(t *testing.T) {
 	})
 
 	t.Run("all files in array missing", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
-			"file_exists": []interface{}{"nonexistent1.txt", "nonexistent2.txt"},
+		result, err := ctx.EvaluateCondition(map[string]any{
+			"file_exists": []any{"nonexistent1.txt", "nonexistent2.txt"},
 		})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)

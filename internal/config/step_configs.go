@@ -12,9 +12,9 @@ type StepValidator interface {
 
 // BaseStepConfig contains fields common to all steps.
 type BaseStepConfig struct {
-	Name      string                 `mapstructure:"name"`
-	Enabled   *bool                  `mapstructure:"enabled"`
-	Condition map[string]interface{} `mapstructure:"condition"`
+	Name      string         `mapstructure:"name"`
+	Enabled   *bool          `mapstructure:"enabled"`
+	Condition map[string]any `mapstructure:"condition"`
 }
 
 // BinaryStepConfig represents configuration for binary execution steps (php, npm, etc.)

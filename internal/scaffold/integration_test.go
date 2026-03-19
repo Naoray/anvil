@@ -436,10 +436,10 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"env_exists":     []interface{}{"TEST_VAR_1"},
-						"command_exists": []interface{}{"go"},
-						"file_exists":    []interface{}{"test.txt"},
+					Condition: map[string]any{
+						"env_exists":     []any{"TEST_VAR_1"},
+						"command_exists": []any{"go"},
+						"file_exists":    []any{"test.txt"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -457,10 +457,10 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"env_exists":     map[string]interface{}{"env": "NONEXISTENT_MAP_ENV"},
-						"command_exists": map[string]interface{}{"command": "nonexistent-map-command"},
-						"file_exists":    map[string]interface{}{"file": "missing-map-file.txt"},
+					Condition: map[string]any{
+						"env_exists":     map[string]any{"env": "NONEXISTENT_MAP_ENV"},
+						"command_exists": map[string]any{"command": "nonexistent-map-command"},
+						"file_exists":    map[string]any{"file": "missing-map-file.txt"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -485,9 +485,9 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"not": map[string]interface{}{
-							"env_exists": []interface{}{"NESTED_MISSING_ENV"},
+					Condition: map[string]any{
+						"not": map[string]any{
+							"env_exists": []any{"NESTED_MISSING_ENV"},
 						},
 					},
 				},
@@ -507,8 +507,8 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"env_exists": []interface{}{"NONEXISTENT_VAR_12345"},
+					Condition: map[string]any{
+						"env_exists": []any{"NONEXISTENT_VAR_12345"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -529,8 +529,8 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"command_exists": []interface{}{"nonexistentcommand12345"},
+					Condition: map[string]any{
+						"command_exists": []any{"nonexistentcommand12345"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -551,8 +551,8 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"file_exists": []interface{}{"nonexistent.txt"},
+					Condition: map[string]any{
+						"file_exists": []any{"nonexistent.txt"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -573,10 +573,10 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"env_exists":     []interface{}{"MISSING_VAR_1", "MISSING_VAR_2"},
-						"command_exists": []interface{}{"missingcmd1", "missingcmd2"},
-						"file_exists":    []interface{}{"missing1.txt", "missing2.txt"},
+					Condition: map[string]any{
+						"env_exists":     []any{"MISSING_VAR_1", "MISSING_VAR_2"},
+						"command_exists": []any{"missingcmd1", "missingcmd2"},
+						"file_exists":    []any{"missing1.txt", "missing2.txt"},
 					},
 				},
 				Steps: []config.StepConfig{},
@@ -621,8 +621,8 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		cfg := &config.Config{
 			Scaffold: config.ScaffoldConfig{
 				PreFlight: &config.PreFlight{
-					Condition: map[string]interface{}{
-						"file_exists": []interface{}{"exists.txt", "missing.txt"},
+					Condition: map[string]any{
+						"file_exists": []any{"exists.txt", "missing.txt"},
 					},
 				},
 				Steps: []config.StepConfig{},

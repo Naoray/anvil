@@ -39,7 +39,7 @@ func WriteLocalState(worktreePath string, data LocalState) error {
 	configPath := filepath.Join(worktreePath, ".anvil.local")
 
 	// Read existing state if it exists
-	var existing map[string]interface{}
+	var existing map[string]any
 	if content, err := os.ReadFile(configPath); err == nil {
 		if err := yaml.Unmarshal(content, &existing); err != nil {
 			return fmt.Errorf("parsing existing local state: %w", err)
@@ -47,7 +47,7 @@ func WriteLocalState(worktreePath string, data LocalState) error {
 	}
 
 	if existing == nil {
-		existing = make(map[string]interface{})
+		existing = make(map[string]any)
 	}
 
 	// Merge new data into existing state

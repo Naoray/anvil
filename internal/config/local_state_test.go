@@ -75,7 +75,7 @@ func TestWriteLocalState_CreateNew(t *testing.T) {
 		t.Fatalf("failed to read file: %v", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal(content, &data); err != nil {
 		t.Fatalf("failed to parse YAML: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestWriteLocalState_MergeExisting(t *testing.T) {
 	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	// Create existing file with some data
-	existing := map[string]interface{}{
+	existing := map[string]any{
 		"db_suffix":  "original",
 		"other_data": "preserve",
 	}
@@ -114,7 +114,7 @@ func TestWriteLocalState_MergeExisting(t *testing.T) {
 		t.Fatalf("failed to read file: %v", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal(content, &data); err != nil {
 		t.Fatalf("failed to parse YAML: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestWriteLocalState_EmptyDbSuffix(t *testing.T) {
 	configPath := filepath.Join(tmpDir, ".anvil.local")
 
 	// Create existing file
-	existing := map[string]interface{}{
+	existing := map[string]any{
 		"db_suffix": "original",
 	}
 	existingContent, err := yaml.Marshal(existing)
@@ -155,7 +155,7 @@ func TestWriteLocalState_EmptyDbSuffix(t *testing.T) {
 		t.Fatalf("failed to read file: %v", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal(content, &data); err != nil {
 		t.Fatalf("failed to parse YAML: %v", err)
 	}
