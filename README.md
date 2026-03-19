@@ -63,6 +63,43 @@ DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 go build -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" -o anvil ./cmd/anvil
 ```
 
+## Setup
+
+After installation, run the setup wizard to configure anvil:
+
+```bash
+anvil install
+```
+
+The wizard will:
+1. Check your PATH
+2. Detect Herd/Valet
+3. Install shell completions
+4. Set a default projects root
+5. Optionally install AI CLI skills (Claude Code, etc.)
+
+### Shell Completions
+
+Shell completions are installed automatically by the wizard. To install or reinstall manually:
+
+```bash
+# Install completions for your current shell
+anvil completion zsh    # installs to zsh site-functions
+anvil completion bash   # installs to bash_completion.d
+anvil completion fish   # installs to fish completions dir
+
+# Print completion script to stdout (for manual setup)
+anvil completion zsh --print
+```
+
+For **zsh** with Homebrew, the completion file is written to `$(brew --prefix)/share/zsh/site-functions/_anvil`. For user-local installs, it goes to `~/.zsh/completions/_anvil`. Add the directory to your `fpath` if needed:
+
+```zsh
+# ~/.zshrc
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
 ## Quick Start
 
 ```bash

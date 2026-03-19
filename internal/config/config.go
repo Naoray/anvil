@@ -209,13 +209,15 @@ type ToolConfig struct {
 
 // GlobalConfig represents the global configuration
 type GlobalConfig struct {
-	DefaultBranch string                  `mapstructure:"default_branch"`
-	EditorCmd     string                  `mapstructure:"editor_cmd"`
-	DetectedTools map[string]bool         `mapstructure:"detected_tools"`
-	Tools         map[string]ToolInfo     `mapstructure:"tools"`
-	Scaffold      GlobalScaffoldConfig    `mapstructure:"scaffold"`
-	WorktreeBase  string                  `mapstructure:"worktree_base"`
-	Projects      map[string]*ProjectInfo `mapstructure:"projects"`
+	DefaultBranch       string                  `mapstructure:"default_branch"`
+	EditorCmd           string                  `mapstructure:"editor_cmd"`
+	DetectedTools       map[string]bool         `mapstructure:"detected_tools"`
+	Tools               map[string]ToolInfo     `mapstructure:"tools"`
+	Scaffold            GlobalScaffoldConfig    `mapstructure:"scaffold"`
+	WorktreeBase        string                  `mapstructure:"worktree_base"`
+	Projects            map[string]*ProjectInfo `mapstructure:"projects"`
+	SetupComplete       bool                    `mapstructure:"setup_complete"`
+	DefaultProjectsRoot string                  `mapstructure:"default_projects_root"`
 }
 
 // ProjectInfo represents a linked project's configuration
@@ -588,6 +590,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 		"default_branch": config.DefaultBranch,
 		"detected_tools": config.DetectedTools,
 		"scaffold":       config.Scaffold,
+		"setup_complete": config.SetupComplete,
 	}
 
 	if config.WorktreeBase != "" {
@@ -596,6 +599,10 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 
 	if config.EditorCmd != "" {
 		configMap["editor_cmd"] = config.EditorCmd
+	}
+
+	if config.DefaultProjectsRoot != "" {
+		configMap["default_projects_root"] = config.DefaultProjectsRoot
 	}
 
 	if config.Projects != nil {
