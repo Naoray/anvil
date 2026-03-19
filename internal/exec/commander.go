@@ -70,7 +70,3 @@ func (e *CommandExecutor) RunBash(ctx context.Context, dir string, command strin
 func (e *CommandExecutor) RunShell(ctx context.Context, dir string, command string) ([]byte, error) {
 	return e.commander.Run(ctx, dir, "sh", "-c", command)
 }
-
-// DefaultExecutor is a package-level default executor using RealCommander.
-// It can be used when you don't need to inject a custom Commander.
-var DefaultExecutor = NewCommandExecutor(nil)
