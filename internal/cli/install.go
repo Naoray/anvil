@@ -413,7 +413,7 @@ func skillDiff(existingPath string, newContent []byte) string {
 	if err != nil {
 		return ""
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if _, err := tmp.Write(newContent); err != nil {
 		return ""
