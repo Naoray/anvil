@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.0](https://github.com/naoray/anvil/compare/v1.4.0...v1.5.0) - 2026-03-19
+
+### Added
+
+- **Setup wizard** — `anvil install` now runs a 5-step interactive wizard: PATH check, Herd/Valet detection, shell completion install, default projects root prompt, and AI CLI skill setup (installs a Claude Code skill file)
+- **First-run detection** — new users are prompted to run the setup wizard on their first command; skips automatically in CI and non-interactive environments
+- **Completion install by default** — `anvil completion zsh|bash|fish` now installs the script to the appropriate system path; use `--print` to get the old stdout behavior. Piped usage (e.g. `source <(anvil completion zsh)`) continues to work unchanged
+
+### Changed
+
+- Idiomatic Go improvements across scaffold, config, and preset packages (reduced abstraction layers, simplified pass-throughs)
+- Improved error wrapping consistency throughout the codebase
+
+### Fixed
+
+- `anvil completion zsh|bash|fish` piped usage (e.g. `eval "$(anvil completion zsh)"`) now correctly falls back to stdout instead of showing an interactive prompt
+- Light terminal color rendering — muted/text styles now use `AdaptiveColor` for correct contrast on light backgrounds
+- `anvil list` table display — removed row separators and fixed status column wrapping
+
+**Full changelog:** [v1.4.0...v1.5.0](https://github.com/Naoray/anvil/compare/v1.4.0...v1.5.0)
+
 ## [v1.4.0](https://github.com/naoray/anvil/compare/v1.3.1...v1.4.0) - 2026-03-11
 
 ### New Features
