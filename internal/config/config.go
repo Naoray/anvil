@@ -523,61 +523,6 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 	return nil
 }
 
-// WorktreeConfig represents worktree-local configuration
-type WorktreeConfig struct {
-	DbSuffix string `mapstructure:"db_suffix"`
-}
-
-// ReadWorktreeConfig reads worktree-local configuration from anvil.yaml
-func ReadWorktreeConfig(worktreePath string) (*WorktreeConfig, error) {
-	configPath := filepath.Join(worktreePath, "anvil.yaml")
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &WorktreeConfig{}, nil
-	}
-
-	v := viper.New()
-	v.SetConfigName("anvil")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(worktreePath)
-
-	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("reading worktree config: %w", err)
-	}
-
-	var config WorktreeConfig
-	if err := v.Unmarshal(&config); err != nil {
-		return nil, fmt.Errorf("parsing worktree config: %w", err)
-	}
-
-	return &config, nil
-}
-
-// WriteWorktreeConfig writes worktree-local configuration to anvil.yaml
-func WriteWorktreeConfig(worktreePath string, data map[string]string) error {
-	v := viper.New()
-	v.SetConfigName("anvil")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(worktreePath)
-
-	dataMap := make(map[string]interface{})
-	for k, v := range data {
-		dataMap[k] = v
-	}
-
-	if err := v.MergeConfigMap(dataMap); err != nil {
-		return fmt.Errorf("merging worktree config: %w", err)
-	}
-
-	configPath := filepath.Join(worktreePath, "anvil.yaml")
-
-	if err := v.WriteConfigAs(configPath); err != nil {
-		return fmt.Errorf("writing worktree config: %w", err)
-	}
-
-	return nil
-}
-
 // SaveGlobalConfig saves the global configuration to anvil.yaml
 func SaveGlobalConfig(config *GlobalConfig) error {
 	configDir, err := GetGlobalConfigDir()
