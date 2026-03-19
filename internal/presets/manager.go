@@ -3,8 +3,6 @@ package presets
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/naoray/anvil/internal/scaffold"
@@ -107,24 +105,4 @@ func PromptForPreset(m *Manager, suggested string) (string, error) {
 
 	fmt.Printf("Unknown preset: %s. Using suggested: %s\n", choice, suggested)
 	return suggested, nil
-}
-
-func DirectoryExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
-func EnsureDirectory(path string) error {
-	if !DirectoryExists(path) {
-		return os.MkdirAll(path, 0755)
-	}
-	return nil
-}
-
-func JoinPath(base string, parts ...string) string {
-	result := base
-	for _, part := range parts {
-		result = filepath.Join(result, part)
-	}
-	return result
 }
