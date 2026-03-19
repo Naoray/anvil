@@ -67,7 +67,7 @@ Examples:
 		clean := mustGetBool(cmd, "clean")
 		force := mustGetBool(cmd, "force")
 
-		// Get worktree base
+		// Get worktree base (best-effort; empty worktreeBase means no centralized worktrees)
 		worktreeBase, _ := globalCfg.GetWorktreeBaseExpanded()
 		projectWorktreeDir := ""
 		if worktreeBase != "" {
@@ -77,7 +77,10 @@ Examples:
 		// Check for existing worktrees
 		if projectWorktreeDir != "" {
 			if info, err := os.Stat(projectWorktreeDir); err == nil && info.IsDir() {
-				entries, _ := os.ReadDir(projectWorktreeDir)
+				entries, err := os.ReadDir(projectWorktreeDir)
+				if err != nil {
+					return fmt.Errorf("reading worktree directory: %w", err)
+				}
 				if len(entries) > 0 {
 					if clean {
 						if !force {
@@ -98,6 +101,7 @@ Examples:
 							for _, entry := range entries {
 								if entry.IsDir() {
 									worktreePath := filepath.Join(projectWorktreeDir, entry.Name())
+									// Best-effort: directory will be removed by RemoveAll below regardless
 									_ = git.RemoveWorktree(gitDir, worktreePath, true)
 								}
 							}
