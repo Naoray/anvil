@@ -2,7 +2,6 @@ package cli
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -119,16 +118,4 @@ func TestPruneProject_DryRunDoesNotRemove(t *testing.T) {
 
 	_, err = os.Stat(wtPath)
 	assert.NoError(t, err, "dry-run should not remove the worktree")
-}
-
-// helper used by makeTestProject — reuses the one in remove_test.go but
-// accepts the repo path as first arg via "-C"
-func init() {
-	// runGitCmd is already defined in remove_test.go (same package)
-	// no redeclaration needed
-}
-
-func runGitCmdOut(dir string, args ...string) error {
-	allArgs := append([]string{"-C", dir}, args...)
-	return exec.Command("git", allArgs...).Run()
 }
