@@ -115,8 +115,14 @@ anvil work feature/user-auth
 # Create a worktree from a specific base branch
 anvil work feature/user-auth -b develop
 
+# Create a worktree without running scaffold steps
+anvil work feature/user-auth --skip-scaffold
+
 # Print path to a worktree
 anvil info feature/user-auth
+
+# Open a worktree in your IDE and browser
+anvil open feature/user-auth
 
 # Sync current worktree with upstream (defaults to main, uses rebase)
 anvil sync
@@ -142,6 +148,18 @@ anvil prune
 # Run scaffold steps on an existing worktree
 anvil scaffold main
 anvil scaffold feature/user-auth
+
+# Copy anvil.yaml from default branch to project root
+anvil pull-config
+
+# Repair git configuration (fetch refspec, branch tracking)
+anvil repair
+
+# Setup global configuration and detect tools
+anvil install
+
+# Generate shell completion scripts
+anvil completion zsh >> ~/.zshrc
 
 # Unlink a project (stop managing it)
 anvil unlink
@@ -247,6 +265,119 @@ anvil scaffold
 anvil scaffold
 ```
 
+### `anvil open <WORKTREE>`
+
+Open a worktree in your IDE and its Herd-linked site in the browser with a single command. Supports fuzzy matching by folder name, branch name, or partial match.
+
+```bash
+# Open in both IDE and browser
+anvil open feature-auth
+
+# Partial match
+anvil open auth
+
+# IDE only
+anvil open auth --editor
+
+# Browser only
+anvil open auth --browser
+
+# Use a specific editor command
+anvil open auth --editor-cmd=zed
+```
+
+**URL Resolution:**
+
+The browser URL is determined by reading `APP_URL` from the worktree's `.env` file. If `APP_URL` is missing or points to localhost (a common `.env.example` default), it falls back to `https://<folder-name>.test`.
+
+**Editor Configuration:**
+
+The IDE command is resolved in this order:
+1. `--editor-cmd` flag
+2. Project config (`editor_cmd` in `anvil.yaml`)
+3. Global config (`editor_cmd` in `~/.config/anvil/anvil.yaml`)
+4. Default: `cursor`
+
+### `anvil work [BRANCH] [PATH]`
+
+Create or checkout a feature worktree.
+
+```bash
+# Create a worktree for a new branch
+anvil work feature/user-auth
+
+# Create from a specific base branch
+anvil work feature/user-auth -b develop
+
+# Skip scaffold steps (run later with `anvil scaffold`)
+anvil work feature/user-auth --skip-scaffold
+
+# Skip remote tracking setup
+anvil work feature/user-auth --no-track
+
+# Interactive mode — select from available branches
+anvil work
+```
+
+### `anvil pull-config`
+
+Copy `anvil.yaml` from the default branch worktree to the project root. Useful for propagating team configuration changes from the main branch.
+
+```bash
+# Interactive — prompts before overwriting
+anvil pull-config
+
+# Force overwrite without prompt
+anvil pull-config --force
+
+# Preview what would happen
+anvil pull-config --dry-run
+```
+
+### `anvil repair`
+
+Repair git configuration for an existing anvil project. Fixes fetch refspec and branch tracking.
+
+```bash
+# Full repair (refspec + tracking)
+anvil repair
+
+# Preview changes
+anvil repair --dry-run
+
+# Only fix fetch refspec
+anvil repair --refspec-only
+
+# Only fix branch tracking
+anvil repair --tracking-only
+```
+
+### `anvil install`
+
+Setup global configuration and detect available tools (gh, herd, php, composer, npm). Creates `~/.config/anvil/anvil.yaml`.
+
+```bash
+anvil install
+```
+
+### `anvil completion`
+
+Generate shell completion scripts for tab-completing worktree names in `open`, `scaffold`, `info`, and `remove` commands.
+
+```bash
+# Zsh
+anvil completion zsh > "${fpath[1]}/_anvil"
+
+# Bash
+anvil completion bash > /etc/bash_completion.d/anvil
+
+# Fish
+anvil completion fish > ~/.config/fish/completions/anvil.fish
+
+# PowerShell
+anvil completion powershell > anvil.ps1
+```
+
 ## Configuration
 
 Anvil uses a three-tier configuration system to separate team configuration from local state.
@@ -262,6 +393,20 @@ Located at the project root, this file contains:
 - Project-wide settings
 
 This file can be committed to git for team sharing.
+
+**Example:**
+```yaml
+preset: laravel
+editor_cmd: cursor   # IDE for `anvil open` (optional)
+sync:
+  upstream: main
+  strategy: rebase
+scaffold:
+  steps:
+    - name: file.copy
+      from: .env.example
+      to: .env
+```
 
 #### 2. Worktree Config (`<worktree>/anvil.yaml`)
 
@@ -467,6 +612,7 @@ All steps support template variables that are replaced at runtime:
 | `{{ .SiteName }}` | Site/project name | `myapp` |
 | `{{ .Branch }}` | Git branch name | `feature-auth` |
 | `{{ .DbSuffix }}` | Database suffix (from db.create) | `swift_runner` |
+| `{{ .DatabaseName }}` | Full database name (truncated to 63 chars) | `myapp_swift_runner` |
 | `{{ .VarName }}` | Custom variable from env.read or captured output | Custom values |
 
 ### Built-in Steps
