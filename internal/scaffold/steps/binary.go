@@ -20,7 +20,7 @@ type BinaryStep struct {
 	name      string
 	binary    string
 	args      []string
-	condition map[string]interface{}
+	condition map[string]any
 	storeAs   string
 	executor  *anvil_exec.CommandExecutor
 }

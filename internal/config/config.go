@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ type SyncConfig struct {
 // PreFlight defines checks that run before scaffold execution.
 // All checks must pass before any scaffold steps are executed.
 type PreFlight struct {
-	Condition map[string]interface{} `mapstructure:"condition"`
+	Condition map[string]any `mapstructure:"condition"`
 }
 
 // ScaffoldConfig represents scaffold configuration
@@ -68,21 +69,21 @@ type ScaffoldConfig struct {
 
 // StepConfig represents a scaffold step configuration
 type StepConfig struct {
-	Name       string                 `mapstructure:"name"`
-	Enabled    *bool                  `mapstructure:"enabled"`
-	Args       []string               `mapstructure:"args"`
-	Command    string                 `mapstructure:"command"`
-	Condition  map[string]interface{} `mapstructure:"condition"`
-	From       string                 `mapstructure:"from"`
-	To         string                 `mapstructure:"to"`
-	Key        string                 `mapstructure:"key"`
-	Keys       []string               `mapstructure:"keys"`
-	Value      string                 `mapstructure:"value"`
-	StoreAs    string                 `mapstructure:"store_as"`
-	File       string                 `mapstructure:"file"`
-	Source     string                 `mapstructure:"source"`
-	SourceFile string                 `mapstructure:"source_file"`
-	Type       string                 `mapstructure:"type"`
+	Name       string         `mapstructure:"name"`
+	Enabled    *bool          `mapstructure:"enabled"`
+	Args       []string       `mapstructure:"args"`
+	Command    string         `mapstructure:"command"`
+	Condition  map[string]any `mapstructure:"condition"`
+	From       string         `mapstructure:"from"`
+	To         string         `mapstructure:"to"`
+	Key        string         `mapstructure:"key"`
+	Keys       []string       `mapstructure:"keys"`
+	Value      string         `mapstructure:"value"`
+	StoreAs    string         `mapstructure:"store_as"`
+	File       string         `mapstructure:"file"`
+	Source     string         `mapstructure:"source"`
+	SourceFile string         `mapstructure:"source_file"`
+	Type       string         `mapstructure:"type"`
 }
 
 // GetConditionString returns a string value from the condition map for the given key.
@@ -99,11 +100,11 @@ func (s StepConfig) GetConditionString(key string) string {
 
 // GetConditionMap returns a map value from the condition map for the given key.
 // Returns nil if the key doesn't exist or the value is not a map.
-func (s StepConfig) GetConditionMap(key string) map[string]interface{} {
+func (s StepConfig) GetConditionMap(key string) map[string]any {
 	if s.Condition == nil {
 		return nil
 	}
-	if v, ok := s.Condition[key].(map[string]interface{}); ok {
+	if v, ok := s.Condition[key].(map[string]any); ok {
 		return v
 	}
 	return nil
@@ -120,8 +121,8 @@ func (s StepConfig) HasCondition(key string) bool {
 
 // CleanupStep represents a cleanup step configuration
 type CleanupStep struct {
-	Name      string                 `mapstructure:"name"`
-	Condition map[string]interface{} `mapstructure:"condition"`
+	Name      string         `mapstructure:"name"`
+	Condition map[string]any `mapstructure:"condition"`
 }
 
 // GetConditionString returns a string value from the condition map for the given key.
@@ -138,11 +139,11 @@ func (s CleanupStep) GetConditionString(key string) string {
 
 // GetConditionMap returns a map value from the condition map for the given key.
 // Returns nil if the key doesn't exist or the value is not a map.
-func (s CleanupStep) GetConditionMap(key string) map[string]interface{} {
+func (s CleanupStep) GetConditionMap(key string) map[string]any {
 	if s.Condition == nil {
 		return nil
 	}
-	if v, ok := s.Condition[key].(map[string]interface{}); ok {
+	if v, ok := s.Condition[key].(map[string]any); ok {
 		return v
 	}
 	return nil
@@ -208,7 +209,8 @@ func LoadProject(path string) (*Config, error) {
 	v.AddConfigPath(path)
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) {
 			return nil, fmt.Errorf("anvil.yaml not found in %s", path)
 		}
 		return nil, fmt.Errorf("reading config: %w", err)
@@ -236,7 +238,8 @@ func LoadGlobal() (*GlobalConfig, error) {
 	v.AddConfigPath(configDir)
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) {
 			return nil, fmt.Errorf("global anvil.yaml not found in %s", configDir)
 		}
 		return nil, fmt.Errorf("reading global config: %w", err)
@@ -285,7 +288,7 @@ func SaveProject(path string, config *Config) error {
 	}
 
 	// Helper function to set or update a value in the mapping
-	setValue := func(key string, value interface{}) {
+	setValue := func(key string, value any) {
 		// Find if key already exists
 		for i := 0; i < len(root.Content); i += 2 {
 			if root.Content[i].Value == key {
@@ -311,7 +314,7 @@ func SaveProject(path string, config *Config) error {
 	}
 
 	// Helper function to set nested values (e.g., sync.upstream)
-	setNestedValue := func(section string, values map[string]interface{}, orderedKeys []string) {
+	setNestedValue := func(section string, values map[string]any, orderedKeys []string) {
 		// Find the section
 		var sectionNode *yaml.Node
 		var sectionIndex int
@@ -392,7 +395,7 @@ func SaveProject(path string, config *Config) error {
 
 	// Update sync config if any values are set
 	if config.Sync.Upstream != "" || config.Sync.Strategy != "" || config.Sync.Remote != "" || config.Sync.AutoStash != nil {
-		syncValues := make(map[string]interface{})
+		syncValues := make(map[string]any)
 		if config.Sync.Upstream != "" {
 			syncValues["upstream"] = config.Sync.Upstream
 		}
@@ -421,7 +424,7 @@ func SaveProject(path string, config *Config) error {
 }
 
 // interfaceToNode converts a Go interface to a yaml.Node
-func interfaceToNode(v interface{}) *yaml.Node {
+func interfaceToNode(v any) *yaml.Node {
 	switch val := v.(type) {
 	case string:
 		return &yaml.Node{
@@ -445,7 +448,7 @@ func interfaceToNode(v interface{}) *yaml.Node {
 			Tag:   "!!int",
 			Value: fmt.Sprintf("%d", val),
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		node := &yaml.Node{
 			Kind: yaml.MappingNode,
 			Tag:  "!!map",
@@ -459,7 +462,7 @@ func interfaceToNode(v interface{}) *yaml.Node {
 			node.Content = append(node.Content, interfaceToNode(v))
 		}
 		return node
-	case []interface{}:
+	case []any:
 		node := &yaml.Node{
 			Kind: yaml.SequenceNode,
 			Tag:  "!!seq",
@@ -507,7 +510,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
 
-	if err := v.MergeConfigMap(map[string]interface{}{
+	if err := v.MergeConfigMap(map[string]any{
 		"default_branch": config.DefaultBranch,
 		"detected_tools": config.DetectedTools,
 		"scaffold":       config.Scaffold,
@@ -542,7 +545,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 	// Best-effort: read existing config to merge with; missing file is expected on first save
 	_ = v.ReadInConfig()
 
-	configMap := map[string]interface{}{
+	configMap := map[string]any{
 		"default_branch": config.DefaultBranch,
 		"detected_tools": config.DetectedTools,
 		"scaffold":       config.Scaffold,
@@ -558,9 +561,9 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 
 	if config.Projects != nil {
 		// Convert ProjectInfo pointers to plain maps for viper compatibility
-		projectsMap := make(map[string]interface{})
+		projectsMap := make(map[string]any)
 		for name, proj := range config.Projects {
-			projectsMap[name] = map[string]interface{}{
+			projectsMap[name] = map[string]any{
 				"path":           proj.Path,
 				"default_branch": proj.DefaultBranch,
 				"preset":         proj.Preset,
