@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/ui"
 )
 
@@ -30,8 +31,8 @@ manual file copying.`,
 
 		// Find the default branch worktree where the latest config lives
 		srcWorktree := pc.GetWorktreePath(pc.DefaultBranch)
-		srcConfig := filepath.Join(srcWorktree, "anvil.yaml")
-		dstConfig := filepath.Join(pc.ProjectPath, "anvil.yaml")
+		srcConfig := filepath.Join(srcWorktree, config.ProjectConfigFile)
+		dstConfig := filepath.Join(pc.ProjectPath, config.ProjectConfigFile)
 
 		// Verify source exists
 		if _, err := os.Stat(srcConfig); err != nil {

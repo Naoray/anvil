@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -75,7 +76,7 @@ func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 	}
 
 	// Try to get remote URL from bare repo config
-	remoteURL, err := git.GetRemoteURL(pc.GitDir, "origin")
+	remoteURL, err := git.GetRemoteURL(pc.GitDir, config.DefaultRemote)
 	if err != nil {
 		return fmt.Errorf("getting remote URL: %w", err)
 	}
@@ -251,7 +252,7 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 			continue
 		}
 
-		if err := git.SetBranchUpstream(pc.GitDir, branch, "origin"); err != nil {
+		if err := git.SetBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
 			ui.PrintInfo(fmt.Sprintf("Could not set up tracking for '%s': %v", branch, err))
 			continue
 		}

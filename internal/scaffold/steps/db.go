@@ -11,6 +11,33 @@ import (
 	"github.com/naoray/anvil/internal/utils"
 )
 
+// detectDatabaseEngine determines the database engine from explicit type or .env file.
+// This is shared between DbCreateStep and DbDestroyStep.
+func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.DatabaseEngine, error) {
+	if dbType != "" {
+		switch dbType {
+		case string(config.DBEngineMySQL), string(config.DBEnginePgSQL), string(config.DBEngineSQLite):
+			return config.DatabaseEngine(dbType), nil
+		default:
+			return "", fmt.Errorf("unsupported database type: %s", dbType)
+		}
+	}
+
+	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
+	if conn := env["DB_CONNECTION"]; conn != "" {
+		switch conn {
+		case "mysql", "mariadb":
+			return config.DBEngineMySQL, nil
+		case "pgsql", "postgres", "postgresql":
+			return config.DBEnginePgSQL, nil
+		case "sqlite":
+			return config.DBEngineSQLite, nil
+		}
+	}
+
+	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
+}
+
 type DbCreateStep struct {
 	name          string
 	args          []string
@@ -20,7 +47,7 @@ type DbCreateStep struct {
 
 func NewDbCreateStep(cfg config.StepConfig) *DbCreateStep {
 	return &DbCreateStep{
-		name:          "db.create",
+		name:          config.StepDbCreate,
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		clientFactory: DefaultDatabaseClientFactory,
@@ -29,7 +56,7 @@ func NewDbCreateStep(cfg config.StepConfig) *DbCreateStep {
 
 func NewDbCreateStepWithFactory(cfg config.StepConfig, factory DatabaseClientFactory) *DbCreateStep {
 	return &DbCreateStep{
-		name:          "db.create",
+		name:          config.StepDbCreate,
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		clientFactory: factory,
@@ -45,7 +72,7 @@ func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) bool {
 }
 
 func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
-	engine, err := s.detectEngine(ctx)
+	engine, err := detectDatabaseEngine(s.dbType, ctx)
 	if err != nil {
 		if opts.Verbose {
 			fmt.Printf("  %v\n", err)
@@ -57,7 +84,7 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 		fmt.Printf("  Creating database (%s)...\n", engine)
 	}
 
-	if engine == "sqlite" {
+	if engine == config.DBEngineSQLite {
 		dbName := ""
 		for i, arg := range s.args {
 			if arg == "--database" && i+1 < len(s.args) {
@@ -75,31 +102,6 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 	}
 
 	return s.createWithRetry(ctx, engine, opts)
-}
-
-func (s *DbCreateStep) detectEngine(ctx *types.ScaffoldContext) (string, error) {
-	if s.dbType != "" {
-		switch s.dbType {
-		case "mysql", "pgsql", "sqlite":
-			return s.dbType, nil
-		default:
-			return "", fmt.Errorf("unsupported database type: %s", s.dbType)
-		}
-	}
-
-	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
-	if conn := env["DB_CONNECTION"]; conn != "" {
-		switch conn {
-		case "mysql", "mariadb":
-			return "mysql", nil
-		case "pgsql", "postgres", "postgresql":
-			return "pgsql", nil
-		case "sqlite":
-			return "sqlite", nil
-		}
-	}
-
-	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
 }
 
 func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext) string {
@@ -146,11 +148,11 @@ func (s *DbCreateStep) parseConnectionOptions() DatabaseOptions {
 
 const maxDbCreateRetries = 5
 
-func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine string, opts types.StepOptions) error {
+func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine config.DatabaseEngine, opts types.StepOptions) error {
 	siteName := s.getPrefixOrSiteName(ctx)
 	dbOpts := s.parseConnectionOptions()
 
-	client, err := s.clientFactory(engine, dbOpts)
+	client, err := s.clientFactory(string(engine), dbOpts)
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
@@ -259,7 +261,7 @@ type DbDestroyStep struct {
 
 func NewDbDestroyStep(cfg config.StepConfig) *DbDestroyStep {
 	return &DbDestroyStep{
-		name:          "db.destroy",
+		name:          config.StepDbDestroy,
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		clientFactory: DefaultDatabaseClientFactory,
@@ -268,7 +270,7 @@ func NewDbDestroyStep(cfg config.StepConfig) *DbDestroyStep {
 
 func NewDbDestroyStepWithFactory(cfg config.StepConfig, factory DatabaseClientFactory) *DbDestroyStep {
 	return &DbDestroyStep{
-		name:          "db.destroy",
+		name:          config.StepDbDestroy,
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		clientFactory: factory,
@@ -302,7 +304,7 @@ func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 
 	ctx.SetDbSuffix(suffix)
 
-	engine, err := s.detectEngine(ctx)
+	engine, err := detectDatabaseEngine(s.dbType, ctx)
 	if err != nil {
 		if opts.Verbose {
 			fmt.Printf("  %v\n", err)
@@ -314,44 +316,19 @@ func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 		fmt.Printf("  Cleaning up databases matching suffix: %s\n", suffix)
 	}
 
-	if engine == "sqlite" {
+	if engine == config.DBEngineSQLite {
 		return nil
 	}
 
 	return s.destroyDatabases(engine, suffix, opts)
 }
 
-func (s *DbDestroyStep) detectEngine(ctx *types.ScaffoldContext) (string, error) {
-	if s.dbType != "" {
-		switch s.dbType {
-		case "mysql", "pgsql", "sqlite":
-			return s.dbType, nil
-		default:
-			return "", fmt.Errorf("unsupported database type: %s", s.dbType)
-		}
-	}
-
-	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
-	if conn := env["DB_CONNECTION"]; conn != "" {
-		switch conn {
-		case "mysql", "mariadb":
-			return "mysql", nil
-		case "pgsql", "postgres", "postgresql":
-			return "pgsql", nil
-		case "sqlite":
-			return "sqlite", nil
-		}
-	}
-
-	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
-}
-
-func (s *DbDestroyStep) parseConnectionOptions(engine string) DatabaseOptions {
+func (s *DbDestroyStep) parseConnectionOptions(engine config.DatabaseEngine) DatabaseOptions {
 	opts := DatabaseOptions{
 		Host: "127.0.0.1",
 	}
 
-	if engine == "pgsql" {
+	if engine == config.DBEnginePgSQL {
 		opts.Username = "postgres"
 		opts.Port = "5432"
 	} else {
@@ -377,10 +354,10 @@ func (s *DbDestroyStep) parseConnectionOptions(engine string) DatabaseOptions {
 	return opts
 }
 
-func (s *DbDestroyStep) destroyDatabases(engine, suffix string, opts types.StepOptions) error {
+func (s *DbDestroyStep) destroyDatabases(engine config.DatabaseEngine, suffix string, opts types.StepOptions) error {
 	dbOpts := s.parseConnectionOptions(engine)
 
-	client, err := s.clientFactory(engine, dbOpts)
+	client, err := s.clientFactory(string(engine), dbOpts)
 	if err != nil {
 		if opts.Verbose {
 			fmt.Printf("  Could not create database client: %v\n", err)

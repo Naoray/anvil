@@ -8,6 +8,7 @@ import (
 
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -105,7 +106,7 @@ available branches or entering a new branch name.`,
 		// Set up branch tracking unless --no-track is specified
 		noTrack := mustGetBool(cmd, "no-track")
 		if !dryRun && !noTrack {
-			if err := git.SetBranchUpstream(pc.GitDir, branch, "origin"); err != nil {
+			if err := git.SetBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
 				// Non-fatal - just inform user if verbose
 				if verbose {
 					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))

@@ -23,7 +23,73 @@ const (
 
 const DefaultBranch = "main"
 
+// DefaultRemote is the default git remote name.
+const DefaultRemote = "origin"
+
 var DefaultBranchCandidates = []string{"main", "master", "develop"}
+
+// File name constants used throughout the project.
+const (
+	ProjectConfigFile = "anvil.yaml"
+	LocalStateFile    = ".anvil.local"
+)
+
+// SyncStrategy represents the strategy used to sync branches.
+type SyncStrategy string
+
+const (
+	SyncStrategyRebase SyncStrategy = "rebase"
+	SyncStrategyMerge  SyncStrategy = "merge"
+)
+
+// ValidSyncStrategies returns all valid sync strategies.
+func ValidSyncStrategies() []SyncStrategy {
+	return []SyncStrategy{SyncStrategyRebase, SyncStrategyMerge}
+}
+
+// IsValid checks whether the sync strategy is a known valid value.
+func (s SyncStrategy) IsValid() bool {
+	switch s {
+	case SyncStrategyRebase, SyncStrategyMerge:
+		return true
+	}
+	return false
+}
+
+// String returns the string representation of the sync strategy.
+func (s SyncStrategy) String() string {
+	return string(s)
+}
+
+// SortCriteria represents the criteria for sorting worktrees.
+type SortCriteria string
+
+const (
+	SortByName    SortCriteria = "name"
+	SortByBranch  SortCriteria = "branch"
+	SortByCreated SortCriteria = "created"
+)
+
+// DatabaseEngine represents a supported database engine.
+type DatabaseEngine string
+
+const (
+	DBEngineMySQL  DatabaseEngine = "mysql"
+	DBEnginePgSQL  DatabaseEngine = "pgsql"
+	DBEngineSQLite DatabaseEngine = "sqlite"
+)
+
+// Step name constants for scaffold step types.
+const (
+	StepFileCopy   = "file.copy"
+	StepBashRun    = "bash.run"
+	StepCommandRun = "command.run"
+	StepEnvRead    = "env.read"
+	StepEnvWrite   = "env.write"
+	StepEnvCopy    = "env.copy"
+	StepDbCreate   = "db.create"
+	StepDbDestroy  = "db.destroy"
+)
 
 // Condition key constants for use in step configurations
 const (
@@ -67,71 +133,19 @@ type ScaffoldConfig struct {
 	Override  bool         `mapstructure:"override"`
 }
 
-// StepConfig represents a scaffold step configuration
-type StepConfig struct {
-	Name       string         `mapstructure:"name"`
-	Enabled    *bool          `mapstructure:"enabled"`
-	Args       []string       `mapstructure:"args"`
-	Command    string         `mapstructure:"command"`
-	Condition  map[string]any `mapstructure:"condition"`
-	From       string         `mapstructure:"from"`
-	To         string         `mapstructure:"to"`
-	Key        string         `mapstructure:"key"`
-	Keys       []string       `mapstructure:"keys"`
-	Value      string         `mapstructure:"value"`
-	StoreAs    string         `mapstructure:"store_as"`
-	File       string         `mapstructure:"file"`
-	Source     string         `mapstructure:"source"`
-	SourceFile string         `mapstructure:"source_file"`
-	Type       string         `mapstructure:"type"`
-}
-
-// GetConditionString returns a string value from the condition map for the given key.
-// Returns empty string if the key doesn't exist or the value is not a string.
-func (s StepConfig) GetConditionString(key string) string {
-	if s.Condition == nil {
-		return ""
-	}
-	if v, ok := s.Condition[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-// GetConditionMap returns a map value from the condition map for the given key.
-// Returns nil if the key doesn't exist or the value is not a map.
-func (s StepConfig) GetConditionMap(key string) map[string]any {
-	if s.Condition == nil {
-		return nil
-	}
-	if v, ok := s.Condition[key].(map[string]any); ok {
-		return v
-	}
-	return nil
-}
-
-// HasCondition checks if a condition key exists in the condition map.
-func (s StepConfig) HasCondition(key string) bool {
-	if s.Condition == nil {
-		return false
-	}
-	_, exists := s.Condition[key]
-	return exists
-}
-
-// CleanupStep represents a cleanup step configuration
-type CleanupStep struct {
-	Name      string         `mapstructure:"name"`
+// ConditionHolder provides shared condition-map accessors.
+// Embed it in any struct that has a Condition field.
+type ConditionHolder struct {
 	Condition map[string]any `mapstructure:"condition"`
 }
 
 // GetConditionString returns a string value from the condition map for the given key.
 // Returns empty string if the key doesn't exist or the value is not a string.
-func (s CleanupStep) GetConditionString(key string) string {
-	if s.Condition == nil {
+func (c ConditionHolder) GetConditionString(key string) string {
+	if c.Condition == nil {
 		return ""
 	}
-	if v, ok := s.Condition[key].(string); ok {
+	if v, ok := c.Condition[key].(string); ok {
 		return v
 	}
 	return ""
@@ -139,23 +153,48 @@ func (s CleanupStep) GetConditionString(key string) string {
 
 // GetConditionMap returns a map value from the condition map for the given key.
 // Returns nil if the key doesn't exist or the value is not a map.
-func (s CleanupStep) GetConditionMap(key string) map[string]any {
-	if s.Condition == nil {
+func (c ConditionHolder) GetConditionMap(key string) map[string]any {
+	if c.Condition == nil {
 		return nil
 	}
-	if v, ok := s.Condition[key].(map[string]any); ok {
+	if v, ok := c.Condition[key].(map[string]any); ok {
 		return v
 	}
 	return nil
 }
 
 // HasCondition checks if a condition key exists in the condition map.
-func (s CleanupStep) HasCondition(key string) bool {
-	if s.Condition == nil {
+func (c ConditionHolder) HasCondition(key string) bool {
+	if c.Condition == nil {
 		return false
 	}
-	_, exists := s.Condition[key]
+	_, exists := c.Condition[key]
 	return exists
+}
+
+// StepConfig represents a scaffold step configuration
+type StepConfig struct {
+	ConditionHolder `mapstructure:",squash"`
+	Name            string   `mapstructure:"name"`
+	Enabled         *bool    `mapstructure:"enabled"`
+	Args            []string `mapstructure:"args"`
+	Command         string   `mapstructure:"command"`
+	From            string   `mapstructure:"from"`
+	To              string   `mapstructure:"to"`
+	Key             string   `mapstructure:"key"`
+	Keys            []string `mapstructure:"keys"`
+	Value           string   `mapstructure:"value"`
+	StoreAs         string   `mapstructure:"store_as"`
+	File            string   `mapstructure:"file"`
+	Source          string   `mapstructure:"source"`
+	SourceFile      string   `mapstructure:"source_file"`
+	Type            string   `mapstructure:"type"`
+}
+
+// CleanupStep represents a cleanup step configuration
+type CleanupStep struct {
+	ConditionHolder `mapstructure:",squash"`
+	Name            string `mapstructure:"name"`
 }
 
 // CleanupConfig represents cleanup configuration
@@ -256,7 +295,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 // SaveProject saves project configuration to anvil.yaml.
 // Preserves existing YAML structure, comments, and formatting.
 func SaveProject(path string, config *Config) error {
-	configPath := filepath.Join(path, "anvil.yaml")
+	configPath := filepath.Join(path, ProjectConfigFile)
 
 	// Read existing file content if it exists
 	var doc *yaml.Node
@@ -518,7 +557,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("merging config: %w", err)
 	}
 
-	configPath := filepath.Join(configDir, "anvil.yaml")
+	configPath := filepath.Join(configDir, ProjectConfigFile)
 	if err := v.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -578,7 +617,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("merging config: %w", err)
 	}
 
-	configPath := filepath.Join(configDir, "anvil.yaml")
+	configPath := filepath.Join(configDir, ProjectConfigFile)
 	if err := v.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
