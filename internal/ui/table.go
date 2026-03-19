@@ -31,7 +31,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-1] + "…"
 }
 
-
 func RenderStatusTable(rows [][]string) string {
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
