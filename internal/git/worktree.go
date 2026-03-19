@@ -221,6 +221,15 @@ func GetDefaultBranch(gitDir string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// FetchOrigin fetches from the origin remote to update remote-tracking refs.
+func FetchOrigin(gitDir string) error {
+	cmd := exec.Command("git", "-C", gitDir, "fetch", "origin")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch origin: %w\n%s", err, string(output))
+	}
+	return nil
+}
+
 // IsMerged checks if a branch is merged into another branch
 func IsMerged(gitDir, branch, targetBranch string) (bool, error) {
 	cmd := exec.Command("git", "-C", gitDir, "merge-base", "--is-ancestor", branch, targetBranch)
