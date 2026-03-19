@@ -214,7 +214,9 @@ func overrideCompletionSubcommands(rootCmd *cobra.Command) {
 
 			sub.RunE = func(cmd *cobra.Command, args []string) error {
 				print, _ := cmd.Flags().GetBool("print")
-				if print {
+				// Fall back to stdout if --print is set OR if stdout is piped
+				// (e.g. source <(anvil completion zsh) — backwards compatible)
+				if print || !ui.IsInteractive() {
 					if original != nil {
 						return original(cmd, args)
 					}
