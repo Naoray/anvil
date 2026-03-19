@@ -10,7 +10,7 @@ var (
 	ColorWarning = lipgloss.Color("#FFA726")
 	ColorError   = lipgloss.Color("#EF5350")
 	ColorInfo    = lipgloss.Color("#29B6F6")
-	ColorMuted = lipgloss.AdaptiveColor{Dark: "#9E9E9E", Light: "#555555"}
+	ColorMuted   = lipgloss.AdaptiveColor{Dark: "#9E9E9E", Light: "#555555"}
 
 	Text    = lipgloss.AdaptiveColor{Dark: "#F9FAFB", Light: "#111111"}
 	TextDim = lipgloss.AdaptiveColor{Dark: "#9CA3AF", Light: "#6B7280"}
