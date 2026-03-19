@@ -41,7 +41,7 @@ type ScaffoldStep interface {
 	Condition(ctx *ScaffoldContext) bool
 }
 
-func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]interface{}) (bool, error) {
+func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]any) (bool, error) {
 	if len(conditions) == 0 {
 		return true, nil
 	}
@@ -57,18 +57,18 @@ func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]interface{})
 	return ctx.evaluateCondition(conditions)
 }
 
-func (ctx *ScaffoldContext) evaluateCondition(cond interface{}) (bool, error) {
+func (ctx *ScaffoldContext) evaluateCondition(cond any) (bool, error) {
 	switch c := cond.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return ctx.evaluateMapCondition(c)
-	case []interface{}:
+	case []any:
 		return ctx.evaluateArrayCondition(c)
 	default:
 		return true, nil
 	}
 }
 
-func (ctx *ScaffoldContext) evaluateMapCondition(conditions map[string]interface{}) (bool, error) {
+func (ctx *ScaffoldContext) evaluateMapCondition(conditions map[string]any) (bool, error) {
 	for key, value := range conditions {
 		result, err := ctx.evaluateSingle(key, value)
 		if err != nil {
@@ -81,9 +81,9 @@ func (ctx *ScaffoldContext) evaluateMapCondition(conditions map[string]interface
 	return true, nil
 }
 
-func (ctx *ScaffoldContext) evaluateArrayCondition(conditions []interface{}) (bool, error) {
+func (ctx *ScaffoldContext) evaluateArrayCondition(conditions []any) (bool, error) {
 	for _, item := range conditions {
-		result, err := ctx.evaluateCondition(item.(map[string]interface{}))
+		result, err := ctx.evaluateCondition(item.(map[string]any))
 		if err != nil {
 			return false, err
 		}
@@ -94,7 +94,7 @@ func (ctx *ScaffoldContext) evaluateArrayCondition(conditions []interface{}) (bo
 	return true, nil
 }
 
-func (ctx *ScaffoldContext) evaluateSingle(key string, value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) {
 	switch key {
 	case "file_exists":
 		return ctx.fileExists(value)
@@ -125,14 +125,14 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value interface{}) (bool,
 	}
 }
 
-func (ctx *ScaffoldContext) fileExists(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) fileExists(value any) (bool, error) {
 	switch v := value.(type) {
 	case string:
 		// Single file
 		fullPath := filepath.Join(ctx.WorktreePath, v)
 		_, err := os.Stat(fullPath)
 		return err == nil, nil
-	case []interface{}:
+	case []any:
 		// Array of files - all must exist
 		for _, item := range v {
 			if path, ok := item.(string); ok {
@@ -144,7 +144,7 @@ func (ctx *ScaffoldContext) fileExists(value interface{}) (bool, error) {
 			}
 		}
 		return true, nil
-	case map[string]interface{}:
+	case map[string]any:
 		// Map format with "file" key
 		if p, ok := v["file"].(string); ok {
 			fullPath := filepath.Join(ctx.WorktreePath, p)
@@ -156,14 +156,14 @@ func (ctx *ScaffoldContext) fileExists(value interface{}) (bool, error) {
 	return false, nil
 }
 
-func (ctx *ScaffoldContext) fileContains(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) fileContains(value any) (bool, error) {
 	var config struct {
 		File    string `mapstructure:"file"`
 		Pattern string `mapstructure:"pattern"`
 	}
 
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if err := mapstructure.Decode(v, &config); err != nil {
 			return false, nil
 		}
@@ -184,12 +184,12 @@ func (ctx *ScaffoldContext) fileContains(value interface{}) (bool, error) {
 	return strings.Contains(string(data), config.Pattern), nil
 }
 
-func (ctx *ScaffoldContext) fileHasScript(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) fileHasScript(value any) (bool, error) {
 	var scriptName string
 	switch v := value.(type) {
 	case string:
 		scriptName = v
-	case map[string]interface{}:
+	case map[string]any:
 		if s, ok := v["name"].(string); ok {
 			scriptName = s
 		}
@@ -208,13 +208,13 @@ func (ctx *ScaffoldContext) fileHasScript(value interface{}) (bool, error) {
 	return strings.Contains(string(data), `"`+scriptName+`"`), nil
 }
 
-func (ctx *ScaffoldContext) commandExists(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) commandExists(value any) (bool, error) {
 	switch v := value.(type) {
 	case string:
 		// Single command
 		_, err := exec.LookPath(v)
 		return err == nil, nil
-	case []interface{}:
+	case []any:
 		// Array of commands - all must exist
 		for _, item := range v {
 			if cmdName, ok := item.(string); ok {
@@ -225,7 +225,7 @@ func (ctx *ScaffoldContext) commandExists(value interface{}) (bool, error) {
 			}
 		}
 		return true, nil
-	case map[string]interface{}:
+	case map[string]any:
 		// Map format with "command" key
 		if c, ok := v["command"].(string); ok {
 			_, err := exec.LookPath(c)
@@ -236,12 +236,12 @@ func (ctx *ScaffoldContext) commandExists(value interface{}) (bool, error) {
 	return false, nil
 }
 
-func (ctx *ScaffoldContext) osMatches(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) osMatches(value any) (bool, error) {
 	var osList []string
 	switch v := value.(type) {
 	case string:
 		osList = []string{v}
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				osList = append(osList, s)
@@ -257,13 +257,13 @@ func (ctx *ScaffoldContext) osMatches(value interface{}) (bool, error) {
 	return false, nil
 }
 
-func (ctx *ScaffoldContext) envExists(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) envExists(value any) (bool, error) {
 	switch v := value.(type) {
 	case string:
 		// Single environment variable
 		_, exists := os.LookupEnv(v)
 		return exists, nil
-	case []interface{}:
+	case []any:
 		// Array of environment variables - all must exist
 		for _, item := range v {
 			if envName, ok := item.(string); ok {
@@ -274,7 +274,7 @@ func (ctx *ScaffoldContext) envExists(value interface{}) (bool, error) {
 			}
 		}
 		return true, nil
-	case map[string]interface{}:
+	case map[string]any:
 		// Map format with "env" key
 		if e, ok := v["env"].(string); ok {
 			_, exists := os.LookupEnv(e)
@@ -285,7 +285,7 @@ func (ctx *ScaffoldContext) envExists(value interface{}) (bool, error) {
 	return false, nil
 }
 
-func (ctx *ScaffoldContext) envNotExists(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) envNotExists(value any) (bool, error) {
 	exists, err := ctx.envExists(value)
 	if err != nil {
 		return false, err
@@ -293,14 +293,14 @@ func (ctx *ScaffoldContext) envNotExists(value interface{}) (bool, error) {
 	return !exists, nil
 }
 
-func (ctx *ScaffoldContext) envFileContains(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) envFileContains(value any) (bool, error) {
 	var config struct {
 		File string `mapstructure:"file"`
 		Key  string `mapstructure:"key"`
 	}
 
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if err := mapstructure.Decode(v, &config); err != nil {
 			return false, nil
 		}
@@ -318,7 +318,7 @@ func (ctx *ScaffoldContext) envFileContains(value interface{}) (bool, error) {
 	return exists && val != "", nil
 }
 
-func (ctx *ScaffoldContext) envFileMissing(value interface{}) (bool, error) {
+func (ctx *ScaffoldContext) envFileMissing(value any) (bool, error) {
 	contains, err := ctx.envFileContains(value)
 	if err != nil {
 		return false, err

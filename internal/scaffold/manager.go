@@ -323,7 +323,7 @@ func (m *ScaffoldManager) runPreFlightWithSpinner(ctx *types.ScaffoldContext, cf
 }
 
 // generatePreFlightError creates a detailed error message showing which checks failed.
-func (m *ScaffoldManager) generatePreFlightError(ctx *types.ScaffoldContext, conditions map[string]interface{}) error {
+func (m *ScaffoldManager) generatePreFlightError(ctx *types.ScaffoldContext, conditions map[string]any) error {
 	var errorParts []string
 
 	collected := m.collectPreFlightValues(conditions)
@@ -371,15 +371,15 @@ type preFlightValues struct {
 	files    []string
 }
 
-func (m *ScaffoldManager) collectPreFlightValues(conditions map[string]interface{}) preFlightValues {
+func (m *ScaffoldManager) collectPreFlightValues(conditions map[string]any) preFlightValues {
 	var values preFlightValues
 	collectPreFlightValuesFromCondition(conditions, &values)
 	return values
 }
 
-func collectPreFlightValuesFromCondition(condition interface{}, values *preFlightValues) {
+func collectPreFlightValuesFromCondition(condition any, values *preFlightValues) {
 	switch v := condition.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if notValue, ok := v["not"]; ok {
 			collectPreFlightValuesFromCondition(notValue, values)
 			return
@@ -401,18 +401,18 @@ func collectPreFlightValuesFromCondition(condition interface{}, values *preFligh
 				values.files = append(values.files, extractStringValues(value, "file")...)
 			}
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			collectPreFlightValuesFromCondition(item, values)
 		}
-	case []map[string]interface{}:
+	case []map[string]any:
 		for _, item := range v {
 			collectPreFlightValuesFromCondition(item, values)
 		}
 	}
 }
 
-func extractStringValues(value interface{}, mapKey string) []string {
+func extractStringValues(value any, mapKey string) []string {
 	var values []string
 
 	switch v := value.(type) {
@@ -420,13 +420,13 @@ func extractStringValues(value interface{}, mapKey string) []string {
 		values = append(values, v)
 	case []string:
 		values = append(values, v...)
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				values = append(values, s)
 			}
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		if s, ok := v[mapKey].(string); ok {
 			values = append(values, s)
 		}
@@ -454,7 +454,7 @@ func uniqueStringsPreserveOrder(values []string) []string {
 }
 
 // checkMissingEnvVars returns list of environment variables that don't exist.
-func (m *ScaffoldManager) checkMissingEnvVars(value interface{}) []string {
+func (m *ScaffoldManager) checkMissingEnvVars(value any) []string {
 	var missing []string
 
 	for _, envName := range extractStringValues(value, "env") {
@@ -467,7 +467,7 @@ func (m *ScaffoldManager) checkMissingEnvVars(value interface{}) []string {
 }
 
 // checkMissingCommands returns list of commands that don't exist in PATH.
-func (m *ScaffoldManager) checkMissingCommands(value interface{}) []string {
+func (m *ScaffoldManager) checkMissingCommands(value any) []string {
 	var missing []string
 
 	for _, cmdName := range extractStringValues(value, "command") {
@@ -480,7 +480,7 @@ func (m *ScaffoldManager) checkMissingCommands(value interface{}) []string {
 }
 
 // checkMissingFiles returns list of files that don't exist in worktree.
-func (m *ScaffoldManager) checkMissingFiles(ctx *types.ScaffoldContext, value interface{}) ([]string, []string) {
+func (m *ScaffoldManager) checkMissingFiles(ctx *types.ScaffoldContext, value any) ([]string, []string) {
 	var missing []string
 	var errors []string
 
