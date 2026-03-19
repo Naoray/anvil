@@ -165,7 +165,7 @@ func SortWorktrees(worktrees []Worktree, by string, reverse bool) []Worktree {
 	copy(sorted, worktrees)
 
 	var modTimeMap map[string]int64
-	if by == "created" {
+	if config.SortCriteria(by) == config.SortByCreated {
 		modTimeMap = make(map[string]int64, len(sorted))
 		for _, wt := range sorted {
 			if info, err := os.Stat(wt.Path); err == nil {
@@ -176,10 +176,10 @@ func SortWorktrees(worktrees []Worktree, by string, reverse bool) []Worktree {
 
 	sort.Slice(sorted, func(i, j int) bool {
 		var cmp int
-		switch by {
-		case "branch":
+		switch config.SortCriteria(by) {
+		case config.SortByBranch:
 			cmp = strings.Compare(sorted[i].Branch, sorted[j].Branch)
-		case "created":
+		case config.SortByCreated:
 			timeI := modTimeMap[sorted[i].Path]
 			timeJ := modTimeMap[sorted[j].Path]
 			if timeI == 0 || timeJ == 0 {

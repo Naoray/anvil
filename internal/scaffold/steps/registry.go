@@ -92,35 +92,35 @@ func (r *Registry) RegisterDefaults() {
 	}
 
 	// Other steps with validators
-	r.RegisterWithValidator("file.copy", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepFileCopy, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewFileCopyStep(cfg.From, cfg.To)
 	}, validation.NewFileCopyValidator())
 
-	r.RegisterWithValidator("bash.run", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepBashRun, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewBashRunStep(cfg.Command, cfg.StoreAs)
 	}, validation.NewBashRunValidator())
 
-	r.RegisterWithValidator("command.run", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepCommandRun, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewCommandRunStep(cfg.Command, cfg.StoreAs)
 	}, validation.NewCommandRunValidator())
 
-	r.RegisterWithValidator("env.read", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepEnvRead, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewEnvReadStep(cfg)
 	}, validation.NewEnvReadValidator())
 
-	r.RegisterWithValidator("env.write", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepEnvWrite, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewEnvWriteStep(cfg)
 	}, validation.NewEnvWriteValidator())
 
-	r.RegisterWithValidator("env.copy", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.RegisterWithValidator(config.StepEnvCopy, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewEnvCopyStep(cfg)
 	}, validation.NewEnvCopyValidator())
 
 	// Steps without custom validators (use built-in validation)
-	r.Register("db.create", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.Register(config.StepDbCreate, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewDbCreateStep(cfg)
 	})
-	r.Register("db.destroy", func(cfg config.StepConfig) types.ScaffoldStep {
+	r.Register(config.StepDbDestroy, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewDbDestroyStep(cfg)
 	})
 }

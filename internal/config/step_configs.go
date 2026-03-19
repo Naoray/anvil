@@ -171,39 +171,39 @@ func ValidateStepConfig(stepName string, cfg StepConfig) error {
 	}
 
 	switch stepName {
-	case "file.copy":
+	case StepFileCopy:
 		return FileCopyConfig{
 			BaseStepConfig: base,
 			From:           cfg.From,
 			To:             cfg.To,
 		}.Validate()
-	case "bash.run":
+	case StepBashRun:
 		return BashRunConfig{
 			BaseStepConfig: base,
 			Command:        cfg.Command,
 			StoreAs:        cfg.StoreAs,
 		}.Validate()
-	case "command.run":
+	case StepCommandRun:
 		return CommandRunConfig{
 			BaseStepConfig: base,
 			Command:        cfg.Command,
 			StoreAs:        cfg.StoreAs,
 		}.Validate()
-	case "env.read":
+	case StepEnvRead:
 		return EnvReadConfig{
 			BaseStepConfig: base,
 			Key:            cfg.Key,
 			StoreAs:        cfg.StoreAs,
 			File:           cfg.File,
 		}.Validate()
-	case "env.write":
+	case StepEnvWrite:
 		return EnvWriteConfig{
 			BaseStepConfig: base,
 			Key:            cfg.Key,
 			Value:          cfg.Value,
 			File:           cfg.File,
 		}.Validate()
-	case "env.copy":
+	case StepEnvCopy:
 		return EnvCopyConfig{
 			BaseStepConfig: base,
 			Source:         cfg.Source,
@@ -212,13 +212,13 @@ func ValidateStepConfig(stepName string, cfg StepConfig) error {
 			Keys:           cfg.Keys,
 			File:           cfg.File,
 		}.Validate()
-	case "db.create":
+	case StepDbCreate:
 		return DbCreateConfig{
 			BaseStepConfig: base,
 			Args:           cfg.Args,
 			Type:           cfg.Type,
 		}.Validate()
-	case "db.destroy":
+	case StepDbDestroy:
 		return DbDestroyConfig{
 			BaseStepConfig: base,
 			Args:           cfg.Args,
