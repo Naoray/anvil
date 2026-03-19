@@ -46,7 +46,7 @@ func TestMigrateDbSuffixToLocal_Success(t *testing.T) {
 	localPath := filepath.Join(tmpDir, ".anvil.local")
 
 	// Create anvil.yaml with db_suffix
-	anvilContent := map[string]interface{}{
+	anvilContent := map[string]any{
 		"preset":    "laravel",
 		"site_name": "test",
 		"db_suffix": "sunset",
@@ -79,7 +79,7 @@ func TestMigrateDbSuffixToLocal_Success(t *testing.T) {
 		t.Fatalf("failed to read .anvil.local: %v", err)
 	}
 
-	var localData map[string]interface{}
+	var localData map[string]any
 	if err := yaml.Unmarshal(localContent, &localData); err != nil {
 		t.Fatalf("failed to parse .anvil.local: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestMigrateDbSuffixToLocal_Success(t *testing.T) {
 		t.Fatalf("failed to read anvil.yaml: %v", err)
 	}
 
-	var anvilData map[string]interface{}
+	var anvilData map[string]any
 	if err := yaml.Unmarshal(anvilContent2, &anvilData); err != nil {
 		t.Fatalf("failed to parse anvil.yaml: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestMigrateDbSuffixToLocal_EmptyDbSuffix(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "anvil.yaml")
 
-	anvilContent := map[string]interface{}{
+	anvilContent := map[string]any{
 		"preset":    "laravel",
 		"db_suffix": "",
 	}

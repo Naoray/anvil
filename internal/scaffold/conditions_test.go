@@ -25,7 +25,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	evaluator := NewConditionEvaluator(ctx)
 
 	t.Run("empty conditions returns true", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{})
+		result, err := evaluator.Evaluate(map[string]any{})
 		assert.NoError(t, err)
 		assert.True(t, result)
 	})
@@ -41,7 +41,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 			t.Fatalf("writing test file: %v", err)
 		}
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"file_exists": "test.txt",
 		})
 		assert.NoError(t, err)
@@ -49,7 +49,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("file_exists - file does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"file_exists": "nonexistent.txt",
 		})
 		assert.NoError(t, err)
@@ -61,8 +61,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 			t.Fatalf("writing composer.json: %v", err)
 		}
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"file_contains": map[string]any{
 				"file":    "composer.json",
 				"pattern": "test/package",
 			},
@@ -74,8 +74,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("file_contains - file does not contain pattern", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "composer.json"), []byte(`{"name": "other/package"}`), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"file_contains": map[string]any{
 				"file":    "composer.json",
 				"pattern": "missing/pattern",
 			},
@@ -85,7 +85,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("command_exists - command exists", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"command_exists": "go",
 		})
 		assert.NoError(t, err)
@@ -93,7 +93,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("command_exists - command does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"command_exists": "nonexistentcommand123",
 		})
 		assert.NoError(t, err)
@@ -101,7 +101,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("os matches current OS", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"os": runtime.GOOS,
 		})
 		assert.NoError(t, err)
@@ -120,7 +120,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 		default:
 			otherOS = "windows"
 		}
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"os": otherOS,
 		})
 		assert.NoError(t, err)
@@ -130,7 +130,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_exists - env variable exists", func(t *testing.T) {
 		t.Setenv("TEST_VAR", "value")
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_exists": "TEST_VAR",
 		})
 		assert.NoError(t, err)
@@ -138,7 +138,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("env_exists - env variable does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_exists": "NONEXISTENT_VAR_123",
 		})
 		assert.NoError(t, err)
@@ -146,7 +146,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("env_not_exists - env variable does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_not_exists": "NONEXISTENT_VAR_123",
 		})
 		assert.NoError(t, err)
@@ -156,7 +156,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_not_exists - env variable exists", func(t *testing.T) {
 		t.Setenv("TEST_VAR", "value")
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_not_exists": "TEST_VAR",
 		})
 		assert.NoError(t, err)
@@ -166,8 +166,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_contains - key exists in .env file", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("DB_CONNECTION=sqlite\nAPP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "DB_CONNECTION",
 			},
@@ -179,8 +179,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_contains - key exists but is empty", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("DB_CONNECTION=\nAPP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "DB_CONNECTION",
 			},
@@ -192,8 +192,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_contains - key does not exist in .env file", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("APP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "DB_CONNECTION",
 			},
@@ -203,8 +203,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("env_file_contains - .env file does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_contains": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_contains": map[string]any{
 				"file": ".env",
 				"key":  "DB_CONNECTION",
 			},
@@ -216,7 +216,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_contains - key with default .env file", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("DB_CONNECTION=sqlite\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_file_contains": "DB_CONNECTION",
 		})
 		assert.NoError(t, err)
@@ -224,8 +224,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("env_file_missing - .env file does not exist", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "APP_KEY",
 			},
@@ -237,8 +237,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_missing - key does not exist", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("APP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "DB_CONNECTION",
 			},
@@ -250,8 +250,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_missing - key exists but is empty", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("APP_KEY=\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "APP_KEY",
 			},
@@ -263,8 +263,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_missing - key exists with value", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("APP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"env_file_missing": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"env_file_missing": map[string]any{
 				"file": ".env",
 				"key":  "APP_KEY",
 			},
@@ -276,7 +276,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("env_file_missing - key with default .env file", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env"), []byte("APP_KEY=base64:value\n"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"env_file_missing": "APP_KEY",
 		})
 		assert.NoError(t, err)
@@ -286,8 +286,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("not condition - negates true condition", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"not": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"not": map[string]any{
 				"file_exists": "test.txt",
 			},
 		})
@@ -296,8 +296,8 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	})
 
 	t.Run("not condition - negates false condition", func(t *testing.T) {
-		result, err := evaluator.Evaluate(map[string]interface{}{
-			"not": map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
+			"not": map[string]any{
 				"file_exists": "nonexistent.txt",
 			},
 		})
@@ -308,7 +308,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("multiple conditions - all true", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"file_exists":    "test.txt",
 			"command_exists": "go",
 		})
@@ -319,7 +319,7 @@ func TestConditionEvaluator_Evaluate(t *testing.T) {
 	t.Run("multiple conditions - one false", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("test"), 0644))
 
-		result, err := evaluator.Evaluate(map[string]interface{}{
+		result, err := evaluator.Evaluate(map[string]any{
 			"file_exists":    "test.txt",
 			"command_exists": "nonexistentcommand123",
 		})
@@ -341,7 +341,7 @@ func TestConditionEvaluator_fileHasScript(t *testing.T) {
 	t.Run("package.json has script", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"scripts": {"build": "vite build"}}`), 0644))
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "build",
 		})
 		require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestConditionEvaluator_fileHasScript(t *testing.T) {
 	t.Run("package.json does not have script", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"scripts": {"test": "jest"}}`), 0644))
 
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "build",
 		})
 		require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestConditionEvaluator_fileHasScript(t *testing.T) {
 	})
 
 	t.Run("package.json does not exist", func(t *testing.T) {
-		result, err := ctx.EvaluateCondition(map[string]interface{}{
+		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "build",
 		})
 		require.NoError(t, err)

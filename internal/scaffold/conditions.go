@@ -12,6 +12,6 @@ func NewConditionEvaluator(ctx *types.ScaffoldContext) *ConditionEvaluator {
 	return &ConditionEvaluator{ctx: ctx}
 }
 
-func (e *ConditionEvaluator) Evaluate(conditions map[string]interface{}) (bool, error) {
+func (e *ConditionEvaluator) Evaluate(conditions map[string]any) (bool, error) {
 	return e.ctx.EvaluateCondition(conditions)
 }

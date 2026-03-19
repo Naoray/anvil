@@ -156,37 +156,6 @@ func Confirm(message string) (bool, error) {
 	return confirmed, nil
 }
 
-func PromptRepoURL() (string, error) {
-	var repo string
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Repository").
-				Description("GitHub URL or owner/repo format").
-				Placeholder("owner/repo or git@github.com:owner/repo.git").
-				Value(&repo).
-				Validate(validateRepoURL),
-		),
-	).WithTheme(huh.ThemeCatppuccin())
-
-	if err := form.Run(); err != nil {
-		return "", NormalizeAbort(err)
-	}
-
-	return repo, nil
-}
-
-func validateRepoURL(s string) error {
-	if s == "" {
-		return fmt.Errorf("repository URL cannot be empty")
-	}
-	if len(s) < 3 {
-		return fmt.Errorf("repository URL must be at least 3 characters")
-	}
-	return nil
-}
-
 func SelectWorktreeToRemove(worktrees []git.Worktree) (*git.Worktree, error) {
 	var removable []git.Worktree
 	for _, wt := range worktrees {

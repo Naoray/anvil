@@ -32,7 +32,7 @@ func CreateWorktree(gitDir, worktreePath, branch, baseBranch string) error {
 
 	// Create worktree directory parent if needed
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
-		return err
+		return fmt.Errorf("creating worktree parent directory: %w", err)
 	}
 
 	// Check if branch already exists
@@ -84,7 +84,7 @@ func ListWorktrees(gitDir string) ([]Worktree, error) {
 	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
 	var worktrees []Worktree
@@ -121,9 +121,10 @@ func ListWorktrees(gitDir string) ([]Worktree, error) {
 func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([]Worktree, error) {
 	worktrees, err := ListWorktrees(gitDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
+	// Best-effort symlink resolution; falls back to raw path comparison
 	currentWorktreePathEval, _ := filepath.EvalSymlinks(currentWorktreePath)
 
 	mergeStatusCache := make(map[string]bool)
@@ -131,6 +132,7 @@ func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([
 	for i := range worktrees {
 		wt := &worktrees[i]
 		wt.IsMain = wt.Branch == defaultBranch
+		// Best-effort symlink resolution; falls back to raw path comparison
 		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
 		wt.IsCurrent = wtPathEval == currentWorktreePathEval
 		if wt.Branch != defaultBranch {
@@ -213,7 +215,7 @@ func GetDefaultBranch(gitDir string) (string, error) {
 	cmd := exec.Command("git", "-C", gitDir, "symbolic-ref", "HEAD", "--short")
 	output, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("detecting default branch: %w", err)
 	}
 
 	return strings.TrimSpace(string(output)), nil
@@ -262,22 +264,12 @@ func DeleteBranch(gitDir, branch string, force bool) error {
 	return nil
 }
 
-// PruneWorktrees prunes stale worktree refs from the repository
-func PruneWorktrees(gitDir string) error {
-	cmd := exec.Command("git", "-C", gitDir, "worktree", "prune")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git worktree prune failed: %w\n%s", err, string(output))
-	}
-	return nil
-}
-
 // ListBranches lists all local branches in the repository (excluding current branch)
 func ListBranches(gitDir string) ([]string, error) {
 	cmd := exec.Command("git", "-C", gitDir, "branch", "--list")
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing branches: %w", err)
 	}
 
 	var branches []string
@@ -306,7 +298,7 @@ func ListAllBranches(gitDir string) ([]string, error) {
 	cmd := exec.Command("git", "-C", gitDir, "branch", "--list")
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing all branches: %w", err)
 	}
 
 	var branches []string
@@ -332,7 +324,7 @@ func ListRemoteBranches(gitDir string) ([]string, error) {
 	cmd := exec.Command("git", "-C", gitDir, "branch", "-r", "--list")
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing remote branches: %w", err)
 	}
 
 	var branches []string
@@ -350,7 +342,7 @@ func ListRemoteBranches(gitDir string) ([]string, error) {
 func FindGitDir(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolving absolute path %q: %w", path, err)
 	}
 
 	// Check for .git directory
