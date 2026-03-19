@@ -154,7 +154,7 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine string
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close() }() // best-effort cleanup
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {
@@ -387,7 +387,7 @@ func (s *DbDestroyStep) destroyDatabases(engine, suffix string, opts types.StepO
 		}
 		return nil
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close() }() // best-effort cleanup
 
 	if err := client.Ping(); err != nil {
 		if opts.Verbose {

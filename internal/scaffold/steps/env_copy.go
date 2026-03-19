@@ -111,23 +111,23 @@ func (s *EnvCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 	tmpFileName := tmpFile.Name()
 
 	if _, err := tmpFile.Write(content); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFileName)
+		_ = tmpFile.Close()        // best-effort cleanup
+		_ = os.Remove(tmpFileName) // best-effort cleanup
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName) // best-effort cleanup
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	if err := os.Chmod(tmpFileName, oldPerms); err != nil {
-		_ = os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName) // best-effort cleanup
 		return fmt.Errorf("setting permissions: %w", err)
 	}
 
 	if err := os.Rename(tmpFileName, targetPath); err != nil {
-		_ = os.Remove(tmpFileName)
+		_ = os.Remove(tmpFileName) // best-effort cleanup
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 

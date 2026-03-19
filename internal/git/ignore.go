@@ -2,6 +2,7 @@ package git
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 )
 
@@ -13,7 +14,7 @@ func IsIgnored(worktreePath, relativePath string) (bool, error) {
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
-		return false, err
+		return false, fmt.Errorf("checking if path is ignored: %w", err)
 	}
 
 	return true, nil
