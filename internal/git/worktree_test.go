@@ -736,3 +736,119 @@ func TestListWorktrees_PathsWithSpaces(t *testing.T) {
 
 	assert.True(t, found, "feature worktree should be in list")
 }
+
+func TestFetchOrigin_Success(t *testing.T) {
+	// Create a "remote" bare repo
+	tmpDir := t.TempDir()
+	remoteDir := filepath.Join(tmpDir, "remote.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", remoteDir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("creating bare remote: %v", err)
+	}
+
+	// Push initial commit from our test repo to the bare remote
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("adding remote: %v", err)
+	}
+
+	cmd = exec.Command("git", "push", "origin", "main")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("pushing to remote: %v", err)
+	}
+
+	err := FetchOrigin(gitDir)
+	assert.NoError(t, err, "FetchOrigin should succeed when origin exists")
+}
+
+func TestFetchOrigin_NoRemote(t *testing.T) {
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+
+	err := FetchOrigin(gitDir)
+	assert.Error(t, err, "FetchOrigin should return error when no remote configured")
+}
+
+func TestIsMerged_AgainstRemoteRef(t *testing.T) {
+	// Set up a bare "remote"
+	tmpDir := t.TempDir()
+	remoteDir := filepath.Join(tmpDir, "remote.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", remoteDir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("creating bare remote: %v", err)
+	}
+
+	// Local repo with initial commit, push to remote
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("adding remote: %v", err)
+	}
+
+	cmd = exec.Command("git", "push", "origin", "main")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("pushing to remote: %v", err)
+	}
+
+	// Create a feature branch, commit, merge into local main
+	featurePath := filepath.Join(tmpDir, "feature-wt")
+	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
+		t.Fatalf("creating feature worktree: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = featurePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("setting user.email: %v", err)
+	}
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = featurePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("setting user.name: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(featurePath, "feature.txt"), []byte("feature"), 0644); err != nil {
+		t.Fatalf("writing feature file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = featurePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("staging: %v", err)
+	}
+	cmd = exec.Command("git", "commit", "-m", "feature commit")
+	cmd.Dir = featurePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+
+	// Merge feature into local main and push — simulates a merged PR
+	cmd = exec.Command("git", "merge", "feature", "--no-ff", "-m", "Merge feature")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("merging: %v", err)
+	}
+	cmd = exec.Command("git", "push", "origin", "main")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("pushing merged main: %v", err)
+	}
+
+	// Fetch so origin/main is up to date
+	if err := FetchOrigin(gitDir); err != nil {
+		t.Fatalf("fetching: %v", err)
+	}
+
+	// IsMerged against origin/main should detect the branch as merged
+	merged, err := IsMerged(gitDir, "feature", "origin/main")
+	assert.NoError(t, err)
+	assert.True(t, merged, "feature should be detected as merged against origin/main")
+}
