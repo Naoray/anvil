@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.0](https://github.com/naoray/anvil/compare/v1.5.1...v1.6.0) - 2026-03-19
+
+### Changed
+
+- **Global prune** — `anvil prune` now iterates every linked project from the global config instead of requiring CWD to be inside a linked repo, making it usable as a global housekeeping command
+- **Remote-aware merge detection** — prune fetches `origin` before checking merged status, comparing against `origin/<default-branch>` to avoid false negatives from stale local refs
+
 ## [v1.5.1](https://github.com/naoray/anvil/compare/v1.5.0...v1.5.1) - 2026-03-19
 
 ### Fixed
