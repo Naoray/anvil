@@ -24,7 +24,7 @@ func MigrateDbSuffixToLocal(worktreePath string) (bool, error) {
 		return false, fmt.Errorf("reading anvil.yaml: %w", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal(content, &data); err != nil {
 		return false, fmt.Errorf("parsing anvil.yaml: %w", err)
 	}

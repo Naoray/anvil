@@ -16,15 +16,15 @@ func NewLaravelSharedDB() *LaravelSharedDB {
 		basePreset: basePreset{
 			name: "laravel-shared-db",
 			defaultSteps: []config.StepConfig{
-				{Name: "php.composer", Args: []string{"install"}, Condition: map[string]interface{}{"file_exists": "composer.lock"}},
-				{Name: "php.composer", Args: []string{"update"}, Condition: map[string]interface{}{"not": map[string]interface{}{"file_exists": "composer.lock"}}},
+				{Name: "php.composer", Args: []string{"install"}, Condition: map[string]any{"file_exists": "composer.lock"}},
+				{Name: "php.composer", Args: []string{"update"}, Condition: map[string]any{"not": map[string]any{"file_exists": "composer.lock"}}},
 				{Name: "file.copy", From: ".env.example", To: ".env"},
-				{Name: "php.laravel.artisan", Args: []string{"key:generate", "--no-interaction", "--no-ansi"}, Condition: map[string]interface{}{"env_file_missing": "APP_KEY"}},
+				{Name: "php.laravel.artisan", Args: []string{"key:generate", "--no-interaction", "--no-ansi"}, Condition: map[string]any{"env_file_missing": "APP_KEY"}},
 				// NO db.create - shared database across all worktrees
 				// NO env.write for DB_DATABASE - preserve the shared database name
-				{Name: "node.npm", Args: []string{"ci"}, Condition: map[string]interface{}{"file_exists": "package-lock.json"}},
+				{Name: "node.npm", Args: []string{"ci"}, Condition: map[string]any{"file_exists": "package-lock.json"}},
 				// NO migrate:fresh - database already exists with shared data
-				{Name: "node.npm", Args: []string{"run", "build"}, Condition: map[string]interface{}{"file_exists": "package-lock.json"}},
+				{Name: "node.npm", Args: []string{"run", "build"}, Condition: map[string]any{"file_exists": "package-lock.json"}},
 				{Name: "php.laravel.artisan", Args: []string{"storage:link", "--no-interaction"}},
 				{Name: "herd", Args: []string{"link", "--secure", "{{ .SiteName }}"}},
 			},
