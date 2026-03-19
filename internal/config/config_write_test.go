@@ -121,6 +121,50 @@ custom_field: custom_value
 	})
 }
 
+func TestGlobalConfigNewFields(t *testing.T) {
+	t.Run("round-trip SetupComplete and DefaultProjectsRoot", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+		cfg := &GlobalConfig{
+			DefaultBranch:       "main",
+			DetectedTools:       map[string]bool{},
+			SetupComplete:       true,
+			DefaultProjectsRoot: "~/Projects",
+		}
+
+		if err := SaveGlobalConfig(cfg); err != nil {
+			t.Fatalf("SaveGlobalConfig failed: %v", err)
+		}
+
+		loaded, err := LoadOrCreateGlobalConfig()
+		if err != nil {
+			t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+		}
+
+		if !loaded.SetupComplete {
+			t.Error("expected SetupComplete to be true after round-trip")
+		}
+		if loaded.DefaultProjectsRoot != "~/Projects" {
+			t.Errorf("expected DefaultProjectsRoot '~/Projects', got '%s'", loaded.DefaultProjectsRoot)
+		}
+	})
+
+	t.Run("SetupComplete defaults to false when not set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+		cfg, err := LoadOrCreateGlobalConfig()
+		if err != nil {
+			t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+		}
+
+		if cfg.SetupComplete {
+			t.Error("expected SetupComplete to default to false")
+		}
+	})
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))

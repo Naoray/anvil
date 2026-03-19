@@ -2,12 +2,37 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/ui"
 )
+
+// skipFirstRunCommands lists command names that should never trigger the first-run wizard.
+var skipFirstRunCommands = map[string]bool{
+	"install":          true,
+	"completion":       true,
+	"__complete":       true,
+	"__completeNoDesc": true,
+	"version":          true,
+	"help":             true,
+}
+
+// shouldRunSetupWizard returns true when the setup wizard should be triggered.
+// It checks SetupComplete and CI environment; interactivity is checked separately by the caller.
+func shouldRunSetupWizard(cfg *config.GlobalConfig) bool {
+	if cfg.SetupComplete {
+		return false
+	}
+	if os.Getenv("CI") != "" {
+		return false
+	}
+	return true
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "anvil",
@@ -15,6 +40,51 @@ var rootCmd = &cobra.Command{
 	Long: `Anvil is a self-contained binary for managing git worktrees
 to assist with agentic development of applications.
 It is cross-project, cross-language, and cross-environment compatible.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Skip wizard for certain commands
+		if skipFirstRunCommands[cmd.Name()] {
+			return nil
+		}
+		// Skip if parent is completion
+		if cmd.Parent() != nil && cmd.Parent().Name() == "completion" {
+			return nil
+		}
+
+		globalCfg, err := config.LoadOrCreateGlobalConfig()
+		if err != nil {
+			return nil // Non-fatal: don't block if config fails to load
+		}
+
+		if !shouldRunSetupWizard(globalCfg) {
+			return nil
+		}
+
+		if !ui.IsInteractive() {
+			return nil
+		}
+
+		var runWizard bool
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Welcome to Anvil!").
+					Description("Run the setup wizard now?").
+					Value(&runWizard),
+			),
+		).WithTheme(huh.ThemeCatppuccin())
+
+		if err := form.Run(); err != nil {
+			return nil // Non-fatal: user dismissed
+		}
+
+		if runWizard {
+			if err := runInstallWizard(cmd); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if noColor || !ui.IsInteractive() {
 			return cmd.Help()
@@ -136,6 +206,7 @@ Run 'anvil <command> --help' for more information.`
 
 func Execute() error {
 	rootCmd.SilenceUsage = true
+	overrideCompletionSubcommands(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		if ui.IsAbort(err) {
 			return nil
