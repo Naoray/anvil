@@ -58,14 +58,26 @@ func runInstallWizard(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)
 	}
-	herdPath := filepath.Join(home, ".config", "herd")
+	herdPaths := []struct{ path, label string }{
+		{filepath.Join(home, "Library", "Application Support", "Herd"), "~/Library/Application Support/Herd"},
+		{filepath.Join(home, ".config", "herd"), "~/.config/herd"},
+	}
 	valetPath := filepath.Join(home, ".valet")
-	if _, err := os.Stat(herdPath); err == nil {
-		ui.PrintSuccess("Herd detected at ~/.config/herd")
-	} else if _, err := os.Stat(valetPath); err == nil {
-		ui.PrintSuccess("Valet detected at ~/.valet")
-	} else {
-		ui.PrintWarning("Herd or Valet not detected — worktree features require one of these")
+
+	herdFound := false
+	for _, h := range herdPaths {
+		if _, err := os.Stat(h.path); err == nil {
+			ui.PrintSuccess(fmt.Sprintf("Herd detected at %s", h.label))
+			herdFound = true
+			break
+		}
+	}
+	if !herdFound {
+		if _, err := os.Stat(valetPath); err == nil {
+			ui.PrintSuccess("Valet detected at ~/.valet")
+		} else {
+			ui.PrintWarning("Herd or Valet not detected — worktree features require one of these")
+		}
 	}
 	fmt.Println()
 
@@ -262,12 +274,19 @@ func runAISkillSetup(_ *cobra.Command) error {
 
 		// Check if file already exists
 		if _, err := os.Stat(destPath); err == nil {
+			if diffOut := skillDiff(destPath, tool.content); diffOut != "" {
+				fmt.Println(diffOut)
+			} else {
+				ui.PrintInfo(fmt.Sprintf("Skill at %s is already up to date", destPath))
+				continue
+			}
+
 			var overwrite bool
 			confirmForm := huh.NewForm(
 				huh.NewGroup(
 					huh.NewConfirm().
-						Title("Skill already installed").
-						Description(fmt.Sprintf("Update skill at %s?", destPath)).
+						Title("Skill already installed — overwrite?").
+						Description(fmt.Sprintf("Diff shown above. Overwrite %s?", destPath)).
 						Value(&overwrite),
 				),
 			).WithTheme(huh.ThemeCatppuccin())
@@ -384,6 +403,27 @@ func extractVersion(output, tool string) string {
 	}
 
 	return ""
+}
+
+// skillDiff returns a unified diff between the on-disk skill file and the new
+// content. Returns an empty string when the files are identical or when diff
+// is unavailable, so callers can treat "" as "no change needed".
+func skillDiff(existingPath string, newContent []byte) string {
+	tmp, err := os.CreateTemp("", "anvil-skill-new-*")
+	if err != nil {
+		return ""
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(newContent); err != nil {
+		return ""
+	}
+	if err := tmp.Close(); err != nil {
+		return ""
+	}
+
+	out, _ := exec.Command("diff", "-u", existingPath, tmp.Name()).Output()
+	return strings.TrimRight(string(out), "\n")
 }
 
 func init() {
