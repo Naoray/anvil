@@ -7,6 +7,8 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 // DatabaseClient abstracts database operations for testability
@@ -31,10 +33,10 @@ type DatabaseOptions struct {
 
 // DefaultDatabaseClientFactory creates real database clients
 func DefaultDatabaseClientFactory(engine string, opts DatabaseOptions) (DatabaseClient, error) {
-	switch engine {
-	case "mysql":
+	switch config.DatabaseEngine(engine) {
+	case config.DBEngineMySQL:
 		return NewMySQLClient(opts)
-	case "pgsql":
+	case config.DBEnginePgSQL:
 		return NewPostgreSQLClient(opts)
 	default:
 		return nil, fmt.Errorf("unsupported database engine: %s", engine)

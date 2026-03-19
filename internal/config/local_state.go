@@ -15,7 +15,7 @@ type LocalState struct {
 
 // ReadLocalState reads worktree-local state from .anvil.local
 func ReadLocalState(worktreePath string) (*LocalState, error) {
-	configPath := filepath.Join(worktreePath, ".anvil.local")
+	configPath := filepath.Join(worktreePath, LocalStateFile)
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &LocalState{}, nil
@@ -36,7 +36,7 @@ func ReadLocalState(worktreePath string) (*LocalState, error) {
 
 // WriteLocalState writes worktree-local state to .anvil.local
 func WriteLocalState(worktreePath string, data LocalState) error {
-	configPath := filepath.Join(worktreePath, ".anvil.local")
+	configPath := filepath.Join(worktreePath, LocalStateFile)
 
 	// Read existing state if it exists
 	var existing map[string]any

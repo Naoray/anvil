@@ -123,7 +123,7 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 			strategy = pc.Config.Sync.Strategy
 		}
 		if strategy == "" {
-			strategy = "rebase"
+			strategy = string(config.SyncStrategyRebase)
 		}
 
 		// Resolve remote: CLI flag -> config -> default (origin)
@@ -132,11 +132,11 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 			remote = pc.Config.Sync.Remote
 		}
 		if remote == "" {
-			remote = "origin"
+			remote = config.DefaultRemote
 		}
 
 		// Validate strategy
-		if strategy != "rebase" && strategy != "merge" {
+		if !config.SyncStrategy(strategy).IsValid() {
 			return fmt.Errorf("invalid strategy %q: must be 'rebase' or 'merge'", strategy)
 		}
 
@@ -240,7 +240,7 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 		}
 
 		var syncErr error
-		if strategy == "rebase" {
+		if config.SyncStrategy(strategy) == config.SyncStrategyRebase {
 			syncErr = git.RebaseOnto(pc.CWD, remote, upstream)
 		} else {
 			syncErr = git.MergeInto(pc.CWD, remote, upstream)

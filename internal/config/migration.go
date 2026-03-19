@@ -11,7 +11,7 @@ import (
 // MigrateDbSuffixToLocal migrates db_suffix from anvil.yaml to .anvil.local if present.
 // Returns true if migration occurred, false otherwise.
 func MigrateDbSuffixToLocal(worktreePath string) (bool, error) {
-	configPath := filepath.Join(worktreePath, "anvil.yaml")
+	configPath := filepath.Join(worktreePath, ProjectConfigFile)
 
 	// Check if anvil.yaml exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {

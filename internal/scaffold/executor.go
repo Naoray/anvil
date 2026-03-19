@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -189,14 +190,14 @@ func getStepDescription(step types.ScaffoldStep) string {
 		"node.yarn.install":    "Installing yarn packages",
 		"node.pnpm.install":    "Installing pnpm packages",
 		"node.bun":             "Running bun",
-		"file.copy":            "Copying files",
+		config.StepFileCopy:    "Copying files",
 		"file.template":        "Processing template files",
-		"env.read":             "Reading environment variables",
-		"env.write":            "Writing environment variables",
-		"db.create":            "Creating database",
-		"db.destroy":           "Destroying database",
-		"bash.run":             "Running bash command",
-		"command.run":          "Running command",
+		config.StepEnvRead:     "Reading environment variables",
+		config.StepEnvWrite:    "Writing environment variables",
+		config.StepDbCreate:    "Creating database",
+		config.StepDbDestroy:   "Destroying database",
+		config.StepBashRun:     "Running bash command",
+		config.StepCommandRun:  "Running command",
 		"herd":                 "Managing Herd",
 	}
 
