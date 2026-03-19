@@ -181,7 +181,44 @@ func installCompletion(cmd *cobra.Command, shell string) error {
 	}
 
 	ui.PrintSuccess(fmt.Sprintf("Completion installed at %s", targetPath))
+
+	if shell == "zsh" {
+		rebuildZshCompletionCache()
+	}
+
 	return nil
+}
+
+// rebuildZshCompletionCache removes the zsh completion cache so the next shell
+// session picks up the newly installed completion without a manual reset.
+func rebuildZshCompletionCache() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	// Remove both the default dump file and the common .zcompdump-<hostname>-<version> variants.
+	dumps := []string{
+		filepath.Join(home, ".zcompdump"),
+	}
+
+	// Also glob for versioned dump files (e.g. ~/.zcompdump-mymac-5.9)
+	if matches, err := filepath.Glob(filepath.Join(home, ".zcompdump-*")); err == nil {
+		dumps = append(dumps, matches...)
+	}
+
+	removed := false
+	for _, f := range dumps {
+		if err := os.Remove(f); err == nil {
+			removed = true
+		}
+	}
+
+	if removed {
+		ui.PrintInfo("Cleared zsh completion cache — restart your shell or run: exec zsh")
+	} else {
+		ui.PrintInfo("Restart your shell or run: exec zsh")
+	}
 }
 
 // overrideCompletionSubcommands replaces the RunE on each shell's completion subcommand

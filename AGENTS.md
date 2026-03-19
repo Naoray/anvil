@@ -40,9 +40,10 @@ anvil remove feature-my-feature  # When done
 | Scaffold system | `internal/scaffold/` |
 | Presets | `internal/presets/` |
 | Utilities | `internal/utils/` |
+| UI components | `internal/ui/` |
+| Shell completions | `internal/cli/completion.go` |
 | Entry point | `cmd/anvil/main.go` |
 | Tests | Alongside implementation files (`*_test.go`) |
-| Deployment plans | `.ai/plans/` |
 
 ### Config Files
 
@@ -66,6 +67,7 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 - `node.pnpm` - Run pnpm
 - `node.bun` - Run bun
 - `herd` - Run herd (e.g., `link --secure`, `unlink`)
+- `herd.link` - Link worktree to Herd
 
 **Special Steps:** Perform scaffold operations
 - `file.copy` - Copy files
@@ -172,7 +174,8 @@ This approach ensures:
 2. Define cobra.Command struct with Use, Short, Long, RunE
 3. Add command to root in `internal/cli/root.go` init function
 4. Add tests in `internal/cli/commandname_test.go`
-5. Update documentation:
+5. If the command accepts a worktree argument, add `ValidArgsFunction: completeWorktreeNames` for shell completion
+6. Update documentation:
    - Update `README.md` with command reference and examples
    - Update `internal/cli/root.go` `printBanner()` to include the new command in the banner list
    - Update AGENTS.md quick reference section if needed
@@ -194,44 +197,14 @@ This approach ensures:
 
 ## Current Phase
 
-**Phase 5: Distribution** - Complete
+**Post-v1.0 — Active Development**
 
-All phases 1-5 are complete. The project has:
-- Core infrastructure (worktree management, config)
-- Scaffold system with presets (Laravel, PHP)
-- Interactive commands (work, prune)
-- Distribution via GitHub Actions
-
-See `.ai/plans/anvil.md` for the detailed phase history and learnings (gitignored file).
-
-## Refactoring Work
-
-When working on the idiomatic refactor (`.ai/plans/idiomatic-refactor.md`):
-
-1. **Read the plan first** - Always read `.ai/plans/idiomatic-refactor.md` before starting any refactoring work
-2. **Work phase by phase** - Complete one phase before moving to the next
-3. **Document findings** - After completing each phase, update the "Findings" section with:
-   - Decisions made during implementation
-   - Challenges encountered and how they were resolved
-   - Code patterns established for consistency
-   - Notes relevant to subsequent phases
-4. **Mark tasks complete** - Change `- [ ]` to `- [x]` for each completed task
-5. **Run verification** - After each phase:
-   ```bash
-   go test ./... -v
-   go test ./... -race
-   go vet ./...
-   go mod tidy && git diff --exit-code go.mod go.sum
-   golangci-lint run ./...
-   ```
-
-### Refactoring Principles
-
-- **Preserve behavior** - Refactoring should not change external behavior
-- **One concern at a time** - Don't mix refactoring with feature work
-- **Test before and after** - Ensure tests pass before starting, and still pass after
-- **Small commits** - Commit after each logical change for easy rollback
-- **Follow existing patterns** - When in doubt, match the style of surrounding code
+All foundational phases (1-5) are complete. The project is in active feature development:
+- Core: worktree management, config hierarchy, scaffold system
+- Presets: Laravel, PHP, Laravel-Shared-DB
+- Commands: link, unlink, work, list, info, open, sync, remove, prune, scaffold, pull-config, repair, install, completion
+- Distribution: Homebrew, GitHub Releases, Go Install
+- Shell completions for worktree arguments (zsh, bash, fish, powershell)
 
 ### Code Quality Standards
 

@@ -110,6 +110,48 @@ func TestDetectShell(t *testing.T) {
 	})
 }
 
+func TestRebuildZshCompletionCache(t *testing.T) {
+	t.Run("removes .zcompdump when it exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", tmpDir)
+
+		dump := filepath.Join(tmpDir, ".zcompdump")
+		if err := os.WriteFile(dump, []byte("cache"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		rebuildZshCompletionCache()
+
+		if _, err := os.Stat(dump); !os.IsNotExist(err) {
+			t.Error("expected .zcompdump to be removed")
+		}
+	})
+
+	t.Run("removes versioned .zcompdump-* files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", tmpDir)
+
+		versioned := filepath.Join(tmpDir, ".zcompdump-testhost-5.9")
+		if err := os.WriteFile(versioned, []byte("cache"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		rebuildZshCompletionCache()
+
+		if _, err := os.Stat(versioned); !os.IsNotExist(err) {
+			t.Error("expected versioned .zcompdump to be removed")
+		}
+	})
+
+	t.Run("does not error when no dump files exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", tmpDir)
+
+		// Should not panic or error
+		rebuildZshCompletionCache()
+	})
+}
+
 func TestInstallCompletionWritesFile(t *testing.T) {
 	t.Run("writes completion script to target path", func(t *testing.T) {
 		tmpDir := t.TempDir()
