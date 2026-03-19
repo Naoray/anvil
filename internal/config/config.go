@@ -539,7 +539,7 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
 
-	// Try to read existing config first
+	// Best-effort: read existing config to merge with; missing file is expected on first save
 	_ = v.ReadInConfig()
 
 	configMap := map[string]interface{}{

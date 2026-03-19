@@ -68,12 +68,14 @@ func openProject(cwd, projectName string, projectInfo *config.ProjectInfo, globa
 
 	defaultBranch := projectInfo.DefaultBranch
 	if defaultBranch == "" {
+		// Best-effort detection; falls back to config default if git detection fails
 		defaultBranch, _ = git.GetDefaultBranch(gitDir)
 		if defaultBranch == "" {
 			defaultBranch = config.DefaultBranch
 		}
 	}
 
+	// Best-effort expansion; empty worktreeBase is handled downstream
 	worktreeBase, _ := globalCfg.GetWorktreeBaseExpanded()
 
 	cfg := &config.Config{
@@ -147,8 +149,8 @@ func sanitizeBranchName(branch string) string {
 }
 
 func (pc *ProjectContext) IsInWorktree() bool {
-	// Use git to check if we're inside a worktree
-	gitDir, err := git.FindGitDir(pc.CWD)
+	// Check if a .git exists in CWD (indicates we're in a git-managed directory)
+	_, err := git.FindGitDir(pc.CWD)
 	if err != nil {
 		// No .git found - check if CWD is under worktree base
 		if pc.WorktreeBase != "" {
@@ -160,10 +162,14 @@ func (pc *ProjectContext) IsInWorktree() bool {
 		return false
 	}
 
-	// If the gitDir is a file-based reference (worktree), we're in a worktree
-	_ = gitDir
-	cwdAbs, _ := filepath.Abs(pc.CWD)
-	projectAbs, _ := filepath.Abs(pc.ProjectPath)
+	cwdAbs, err := filepath.Abs(pc.CWD)
+	if err != nil {
+		return false
+	}
+	projectAbs, err := filepath.Abs(pc.ProjectPath)
+	if err != nil {
+		return false
+	}
 
 	// If we're in the project root itself, we're not in a worktree
 	if cwdAbs == projectAbs {

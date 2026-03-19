@@ -74,8 +74,14 @@ Examples:
 			}
 		} else if pc.IsInWorktree() {
 			for _, wt := range worktrees {
-				wtAbsPath, _ := filepath.Abs(wt.Path)
-				projectRootAbsPath, _ := filepath.Abs(pc.ProjectPath)
+				wtAbsPath, err := filepath.Abs(wt.Path)
+				if err != nil {
+					continue
+				}
+				projectRootAbsPath, err := filepath.Abs(pc.ProjectPath)
+				if err != nil {
+					continue
+				}
 
 				if filepath.Dir(wtAbsPath) == projectRootAbsPath {
 					if wt.IsCurrent {

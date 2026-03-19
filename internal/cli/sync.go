@@ -150,6 +150,7 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 					return fmt.Errorf("listing local branches: %w", err)
 				}
 
+				// Best-effort: remote branches enhance UI selection but are not required
 				remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 				selected, err := ui.SelectUpstreamBranch(localBranches, remoteBranches, pc.DefaultBranch)
