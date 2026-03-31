@@ -147,7 +147,7 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
+		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -229,7 +229,7 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeDbStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .SiteName }}_{{ .DbSuffix }}"})
+		writeDbStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeDbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
