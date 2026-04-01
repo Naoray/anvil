@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.7.0](https://github.com/naoray/anvil/compare/v1.6.0...v1.7.0) - 2026-04-01
+
+### Changed
+
+- **Smart project naming** — `anvil link` now derives the project name from the origin remote URL instead of the directory name, preventing mismatches when a repo is cloned into a differently-named folder. Falls back to directory name when no remote is configured. Shows an info message when the names differ.
+
+### Fixed
+
+- **Integration test templates** — updated tests to use the truncation-safe `{{ .DatabaseName }}` template variable instead of raw `{{ .SiteName }}_{{ .DbSuffix }}`
+
 ## [v1.6.0](https://github.com/naoray/anvil/compare/v1.5.1...v1.6.0) - 2026-03-19
 
 ### Changed
