@@ -11,6 +11,7 @@ import (
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/ui"
+	"github.com/naoray/anvil/internal/utils"
 )
 
 var linkCmd = &cobra.Command{
@@ -81,9 +82,12 @@ Examples:
 		}
 
 		// Determine project name
-		name := mustGetString(cmd, "name")
-		if name == "" {
-			name = filepath.Base(absPath)
+		name := deriveProjectName(absPath, mustGetString(cmd, "name"))
+
+		// Warn if directory name differs from remote-derived name
+		dirName := filepath.Base(absPath)
+		if name != dirName && mustGetString(cmd, "name") == "" {
+			ui.PrintInfo(fmt.Sprintf("Using '%s' from git remote (directory is '%s')", name, dirName))
 		}
 
 		// Check if project is already linked
@@ -170,6 +174,25 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 
 	linkCmd.Flags().String("preset", "", "Project preset (laravel, php)")
-	linkCmd.Flags().String("name", "", "Custom name for the linked project (defaults to directory name)")
+	linkCmd.Flags().String("name", "", "Custom name for the linked project (defaults to git remote repo name, then directory name)")
 	linkCmd.Flags().String("site-name", "", "Site name for scaffold steps (defaults to project name)")
+}
+
+// deriveProjectName determines the project name using the fallback chain:
+// 1. Explicit --name flag (always wins)
+// 2. Repository name from origin remote URL
+// 3. Directory name (final fallback)
+func deriveProjectName(absPath, flagName string) string {
+	if flagName != "" {
+		return flagName
+	}
+
+	url, err := git.GetRemoteURLFromWorktree(absPath)
+	if err == nil && url != "" {
+		if name := utils.ExtractRepoName(url); name != "" {
+			return name
+		}
+	}
+
+	return filepath.Base(absPath)
 }
