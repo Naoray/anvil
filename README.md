@@ -106,7 +106,7 @@ autoload -Uz compinit && compinit
 # Check anvil version
 anvil version
 
-# Link an existing project for worktree management
+# Link an existing project (auto-detects name from git remote)
 anvil link
 
 # Create a feature worktree
@@ -677,7 +677,7 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 ```yaml
 - name: env.write
   key: DB_DATABASE
-  value: "{{ .SiteName }}_{{ .DbSuffix }}"
+  value: "{{ .DatabaseName }}"
   file: .env  # optional, defaults to .env
 ```
 
@@ -878,7 +878,7 @@ scaffold:
     # Write database name to .env
     - name: env.write
       key: DB_DATABASE
-      value: "{{ .SiteName }}_{{ .DbSuffix }}"
+      value: "{{ .DatabaseName }}"
 
     # Install dependencies
     - name: php.composer
