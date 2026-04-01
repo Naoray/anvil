@@ -11,7 +11,7 @@ The project documentation is split between user-facing and development documenta
 
 **Development Documentation:**
 - This file (AGENTS.md) - Development workflow, architecture, and contribution guidelines
-- `.ai/plans/anvil.md` - Historical development plan (phases 1-5, complete). Note: This file is gitignored and contains the original implementation plan.
+- `.ai/plans/enhanced-scaffold-steps.md` - Historical development plan (phases 1-9, complete). Note: This file is gitignored and contains the original implementation plan.
 
 ## Development Location
 
@@ -254,37 +254,22 @@ for _, preset := range m.presets {  // Order varies between runs
 
 ## Release Management
 
-When preparing a new release, follow the release skill:
+When preparing a new release:
 
-**Trigger:** `/release`
-
-**Skill Location:** `.opencode/skills/release/SKILL.md`
-
-**What it does:**
-1. Analyzes commits to recommend version bump (MAJOR/MINOR/PATCH)
-2. Runs all tests and quality checks
-3. Updates CHANGELOG.md with proper formatting
-4. Updates README.md to reflect current features
-5. Creates commit and tag
-6. Monitors CI/CD and verifies release
+1. Update CHANGELOG.md with changes since the last release
+2. Commit: `release: prepare vX.Y.Z`
+3. Tag: `git tag vX.Y.Z`
+4. Push: `git push && git push origin vX.Y.Z`
+5. Create GitHub release: `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`
+6. CI builds and uploads binaries automatically
+7. Homebrew tap updates via the "Update Changelog" workflow
 
 **Requirements:**
-- All changes committed
-- Working directory clean
+- All changes committed, working directory clean
 - `gh` CLI tool installed
-- Tests must pass
+- Tests and lint must pass
 
-**Version Format:** Always use `v` prefix (e.g., `v0.4.1`)
-
-**Process:**
-1. User triggers `/release`
-2. Skill analyzes repository and presents version options
-3. User selects version
-4. Skill runs quality gates (tests, build, vet)
-5. Skill updates documentation (CHANGELOG, README)
-6. Skill creates draft or final release based on user choice
-7. Skill commits, tags, and pushes
-8. Skill monitors CI/CD and verifies release success
+**Version Format:** Always use `v` prefix (e.g., `v1.7.0`)
 
 ## Notes
 

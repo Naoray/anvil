@@ -13,7 +13,7 @@ See [AGENTS.md](./AGENTS.md) for full architecture, workflows, and conventions.
 
 ## Release
 
-Use the `/release` skill (`.opencode/skills/release/SKILL.md`).
+Update CHANGELOG.md, commit, tag with `vX.Y.Z`, push, and create a GitHub release via `gh release create`.
 
 ## Framework-Specific Rules
 
