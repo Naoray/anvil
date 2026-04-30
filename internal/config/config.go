@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -272,7 +273,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 		return nil, err
 	}
 
-	v := viper.New()
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
 
 	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
@@ -290,6 +291,8 @@ func LoadGlobal() (*GlobalConfig, error) {
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("parsing global config: %w", err)
 	}
+
+	recoverNestedDottedProjects(filepath.Join(configDir, ProjectConfigFile), &config)
 
 	return &config, nil
 }
@@ -546,7 +549,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	v := viper.New()
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
 	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
@@ -578,13 +581,10 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	v := viper.New()
+	v := viper.NewWithOptions(viper.KeyDelimiter("::"))
 	v.SetConfigName("anvil")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(configDir)
-
-	// Best-effort: read existing config to merge with; missing file is expected on first save
-	_ = v.ReadInConfig()
 
 	configMap := map[string]any{
 		"default_branch": config.DefaultBranch,
@@ -658,15 +658,14 @@ func (gc *GlobalConfig) GetLinkedProject(path string) *ProjectInfo {
 		return nil
 	}
 
-	// Normalize the path
-	absPath, err := filepath.Abs(path)
+	absPath, err := normalizeProjectPath(path)
 	if err != nil {
 		return nil
 	}
 
 	// Check if the exact path matches a project
 	for _, project := range gc.Projects {
-		projectAbs, err := filepath.Abs(project.Path)
+		projectAbs, err := normalizeProjectPath(project.Path)
 		if err != nil {
 			continue
 		}
@@ -692,24 +691,133 @@ func (gc *GlobalConfig) FindLinkedProjectFromPath(path string) (string, *Project
 		return "", nil
 	}
 
-	absPath, err := filepath.Abs(path)
+	absPath, err := normalizeProjectPath(path)
 	if err != nil {
 		return "", nil
 	}
 
+	var bestName string
+	var bestProject *ProjectInfo
+	bestPathLength := -1
+
 	for name, project := range gc.Projects {
-		projectAbs, err := filepath.Abs(project.Path)
+		projectAbs, err := normalizeProjectPath(project.Path)
 		if err != nil {
 			continue
 		}
 
 		// Check if path is the project root or inside it
 		if absPath == projectAbs || isSubPath(projectAbs, absPath) {
-			return name, project
+			if len(projectAbs) > bestPathLength {
+				bestName = name
+				bestProject = project
+				bestPathLength = len(projectAbs)
+			}
 		}
 	}
 
-	return "", nil
+	return bestName, bestProject
+}
+
+func normalizeProjectPath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("project path is empty")
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	evalPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return evalPath, nil
+	}
+
+	return absPath, nil
+}
+
+func recoverNestedDottedProjects(configPath string, config *GlobalConfig) {
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(content, &raw); err != nil {
+		return
+	}
+
+	rawProjects, ok := raw["projects"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	recovered := make(map[string]*ProjectInfo)
+	for name, rawProject := range rawProjects {
+		projectMap, ok := rawProject.(map[string]any)
+		if !ok {
+			continue
+		}
+		recoverNestedDottedProject(name, projectMap, recovered)
+	}
+
+	if len(recovered) == 0 {
+		return
+	}
+
+	if config.Projects == nil {
+		config.Projects = make(map[string]*ProjectInfo)
+	}
+
+	for name, project := range recovered {
+		if existing := config.Projects[name]; existing != nil && existing.Path != "" {
+			continue
+		}
+		config.Projects[name] = project
+	}
+
+	for name, project := range config.Projects {
+		if project.Path != "" {
+			continue
+		}
+		for recoveredName := range recovered {
+			if strings.HasPrefix(recoveredName, name+".") {
+				delete(config.Projects, name)
+				break
+			}
+		}
+	}
+}
+
+func recoverNestedDottedProject(name string, data map[string]any, recovered map[string]*ProjectInfo) {
+	if path := getString(data, "path"); path != "" {
+		if recovered[name] == nil {
+			recovered[name] = &ProjectInfo{
+				Path:          path,
+				DefaultBranch: getString(data, "default_branch"),
+				Preset:        getString(data, "preset"),
+				SiteName:      getString(data, "site_name"),
+				EditorCmd:     getString(data, "editor_cmd"),
+			}
+		}
+	}
+
+	for key, value := range data {
+		child, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		recoverNestedDottedProject(name+"."+key, child, recovered)
+	}
+}
+
+func getString(data map[string]any, key string) string {
+	value, ok := data[key].(string)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 // isSubPath checks if child is a subdirectory of parent

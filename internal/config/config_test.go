@@ -329,6 +329,77 @@ func TestGlobalConfig_FindLinkedProjectFromPath(t *testing.T) {
 	assert.Nil(t, project)
 }
 
+func TestGlobalConfig_FindLinkedProjectFromPath_IgnoresEmptyProjectPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectPath := filepath.Join(tmpDir, "gaze")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+	originalCWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(originalCWD) }()
+	require.NoError(t, os.Chdir(projectPath))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"virovet-diagnostik": {
+				Path: "",
+			},
+			"gaze": {
+				Path:          projectPath,
+				DefaultBranch: "main",
+			},
+		},
+	}
+
+	name, project := cfg.FindLinkedProjectFromPath(projectPath)
+	assert.Equal(t, "gaze", name)
+	assert.NotNil(t, project)
+	assert.Equal(t, projectPath, project.Path)
+}
+
+func TestGlobalConfig_FindLinkedProjectFromPath_EmptyProjectPathDoesNotMatchCWD(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalCWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(originalCWD) }()
+	require.NoError(t, os.Chdir(tmpDir))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"empty": {
+				Path: "",
+			},
+		},
+	}
+
+	name, project := cfg.FindLinkedProjectFromPath(tmpDir)
+	assert.Empty(t, name)
+	assert.Nil(t, project)
+}
+
+func TestGlobalConfig_FindLinkedProjectFromPath_ChoosesMostSpecificProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentPath := filepath.Join(tmpDir, "bets")
+	projectPath := filepath.Join(parentPath, "Gaze")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"bets": {
+				Path: parentPath,
+			},
+			"gaze": {
+				Path:          projectPath,
+				DefaultBranch: "main",
+			},
+		},
+	}
+
+	name, project := cfg.FindLinkedProjectFromPath(projectPath)
+	assert.Equal(t, "gaze", name)
+	assert.NotNil(t, project)
+	assert.Equal(t, projectPath, project.Path)
+}
+
 func TestGlobalConfig_GetWorktreeBaseExpanded(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)

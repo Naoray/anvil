@@ -165,6 +165,216 @@ func TestGlobalConfigNewFields(t *testing.T) {
 	})
 }
 
+func TestSaveGlobalConfig_PreservesProjectNamesWithDots(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &GlobalConfig{
+		DefaultBranch: "main",
+		DetectedTools: map[string]bool{},
+		Projects: map[string]*ProjectInfo{
+			"virovet-diagnostik.de": {
+				Path:          "/Users/test/Workspace/virovet-diagnostik.de",
+				DefaultBranch: "main",
+				Preset:        "laravel",
+				SiteName:      "virovet-diagnostik.de",
+			},
+		},
+	}
+
+	if err := SaveGlobalConfig(cfg); err != nil {
+		t.Fatalf("SaveGlobalConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "anvil", ProjectConfigFile))
+	if err != nil {
+		t.Fatalf("reading saved config: %v", err)
+	}
+
+	contentStr := string(content)
+	if !contains(contentStr, "virovet-diagnostik.de:") {
+		t.Fatalf("expected dotted project name to be preserved as a literal key, got:\n%s", contentStr)
+	}
+	if contains(contentStr, "virovet-diagnostik:\n") {
+		t.Fatalf("expected dotted project name not to be split into nested keys, got:\n%s", contentStr)
+	}
+
+	loaded, err := LoadOrCreateGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+	}
+
+	project := loaded.GetLinkedProjectByName("virovet-diagnostik.de")
+	if project == nil {
+		t.Fatalf("expected dotted project to load by full name")
+	}
+	if project.Path != "/Users/test/Workspace/virovet-diagnostik.de" {
+		t.Errorf("expected project path to round-trip, got %q", project.Path)
+	}
+}
+
+func TestLoadGlobalConfig_RecoversNestedDottedProjectNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+
+	content := []byte(`default_branch: main
+projects:
+    gaze:
+        default_branch: main
+        editor_cmd: ""
+        path: /Users/test/Workspace/Gaze
+        preset: rust
+        site_name: gaze
+    virovet-diagnostik:
+        de:
+            default_branch: main
+            editor_cmd: ""
+            path: /Users/test/Workspace/virovet-diagnostik.de
+            preset: laravel
+            site_name: virovet-diagnostik.de
+        default_branch: ""
+        editor_cmd: ""
+        path: ""
+        preset: ""
+        site_name: ""
+`)
+	if err := os.WriteFile(filepath.Join(configDir, ProjectConfigFile), content, 0644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	loaded, err := LoadOrCreateGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+	}
+
+	if loaded.GetLinkedProjectByName("virovet-diagnostik") != nil {
+		t.Fatalf("expected malformed empty parent project to be removed")
+	}
+
+	project := loaded.GetLinkedProjectByName("virovet-diagnostik.de")
+	if project == nil {
+		t.Fatalf("expected nested dotted project to be recovered")
+	}
+	if project.Path != "/Users/test/Workspace/virovet-diagnostik.de" {
+		t.Errorf("expected recovered project path, got %q", project.Path)
+	}
+}
+
+func TestLoadGlobalConfig_PrefersLiteralDottedProjectOverNestedStaleCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+
+	content := []byte(`default_branch: main
+projects:
+    virovet-diagnostik.de:
+        default_branch: main
+        editor_cmd: ""
+        path: /Users/test/Workspace/current-virovet
+        preset: laravel
+        site_name: current-virovet
+    virovet-diagnostik:
+        de:
+            default_branch: main
+            editor_cmd: ""
+            path: /Users/test/Workspace/stale-virovet
+            preset: php
+            site_name: stale-virovet
+        default_branch: ""
+        editor_cmd: ""
+        path: ""
+        preset: ""
+        site_name: ""
+`)
+	if err := os.WriteFile(filepath.Join(configDir, ProjectConfigFile), content, 0644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	loaded, err := LoadOrCreateGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+	}
+
+	project := loaded.GetLinkedProjectByName("virovet-diagnostik.de")
+	if project == nil {
+		t.Fatalf("expected literal dotted project")
+	}
+	if project.Path != "/Users/test/Workspace/current-virovet" {
+		t.Errorf("expected literal project to win, got %q", project.Path)
+	}
+}
+
+func TestSaveGlobalConfig_CleansNestedDottedProjectNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+
+	configPath := filepath.Join(configDir, ProjectConfigFile)
+	content := []byte(`default_branch: main
+projects:
+    virovet-diagnostik:
+        de:
+            default_branch: main
+            editor_cmd: ""
+            path: /Users/test/Workspace/stale-virovet
+            preset: laravel
+            site_name: stale-virovet
+        default_branch: ""
+        editor_cmd: ""
+        path: ""
+        preset: ""
+        site_name: ""
+`)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	loaded, err := LoadOrCreateGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadOrCreateGlobalConfig failed: %v", err)
+	}
+	if err := SaveGlobalConfig(loaded); err != nil {
+		t.Fatalf("SaveGlobalConfig failed: %v", err)
+	}
+
+	saved, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading saved config: %v", err)
+	}
+	savedStr := string(saved)
+	if contains(savedStr, "virovet-diagnostik:\n") {
+		t.Fatalf("expected stale nested project to be removed, got:\n%s", savedStr)
+	}
+	if !contains(savedStr, "virovet-diagnostik.de:") {
+		t.Fatalf("expected literal dotted project to be saved, got:\n%s", savedStr)
+	}
+
+	reloaded, err := LoadOrCreateGlobalConfig()
+	if err != nil {
+		t.Fatalf("reloading config: %v", err)
+	}
+	project := reloaded.GetLinkedProjectByName("virovet-diagnostik.de")
+	if project == nil {
+		t.Fatalf("expected recovered project after reload")
+	}
+	if project.Path != "/Users/test/Workspace/stale-virovet" {
+		t.Errorf("expected recovered project path, got %q", project.Path)
+	}
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))

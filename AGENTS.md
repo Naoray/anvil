@@ -11,7 +11,6 @@ The project documentation is split between user-facing and development documenta
 
 **Development Documentation:**
 - This file (AGENTS.md) - Development workflow, architecture, and contribution guidelines
-- `.ai/plans/enhanced-scaffold-steps.md` - Historical development plan (phases 1-9, complete). Note: This file is gitignored and contains the original implementation plan.
 
 ## Development Location
 

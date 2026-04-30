@@ -1,7 +1,3 @@
-# Ignore AI/planning directory contents
-.ai/plans/
-.ai/*.md
-
 # Ignore built binary
 /anvil
 /anvil.exe

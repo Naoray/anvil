@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Agent skill** — moved the bundled Anvil agent instructions to `anvil-agent/SKILL.md` and installs them for Codex CLI as well as Claude Code.
+
+### Fixed
+
+- **Project resolution** — fixed dotted project names (for example `virovet-diagnostik.de`) being saved as nested YAML, recovered previously corrupted global config entries on load, and made linked-project matching deterministic so `anvil work` creates worktrees under the correct project slug.
+
+### Removed
+
+- Removed the obsolete `.ai` planning directory from the repository.
+
 ## [v1.7.0](https://github.com/naoray/anvil/compare/v1.6.0...v1.7.0) - 2026-04-01
 
 ### Changed
