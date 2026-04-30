@@ -76,7 +76,7 @@ The wizard will:
 2. Detect Herd/Valet
 3. Install shell completions
 4. Set a default projects root
-5. Optionally install AI CLI skills (Claude Code, etc.)
+5. Optionally install AI CLI skills (Codex CLI, Claude Code, etc.)
 
 ### Shell Completions
 

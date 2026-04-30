@@ -1,7 +1,6 @@
 package cli
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,12 +11,10 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	anvilagent "github.com/naoray/anvil/anvil-agent"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/ui"
 )
-
-//go:embed skills/claude.md
-var claudeSkillContent []byte
 
 var installCmd = &cobra.Command{
 	Use:   "install",
@@ -203,9 +200,20 @@ func runAISkillSetup(_ *cobra.Command) error {
 				return err == nil
 			},
 			dest: func() (string, error) {
-				return filepath.Join(home, ".claude", "skills", "anvil.md"), nil
+				return filepath.Join(home, ".claude", "skills", "anvil-agent", "SKILL.md"), nil
 			},
-			content: claudeSkillContent,
+			content: anvilagent.Content,
+		},
+		{
+			name: "Codex CLI (codex)",
+			check: func() bool {
+				_, err := exec.LookPath("codex")
+				return err == nil
+			},
+			dest: func() (string, error) {
+				return filepath.Join(home, ".codex", "skills", "anvil-agent", "SKILL.md"), nil
+			},
+			content: anvilagent.Content,
 		},
 	}
 
