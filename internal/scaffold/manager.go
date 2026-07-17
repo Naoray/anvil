@@ -21,6 +21,13 @@ type ScaffoldManager struct {
 	registry    StepRegistry
 }
 
+type CleanupOptions struct {
+	DryRun              bool
+	Verbose             bool
+	Quiet               bool
+	SkipDatabaseCleanup bool
+}
+
 // StepRegistry defines the interface for step creation.
 // This abstraction allows for dependency injection and testing.
 type StepRegistry interface {
@@ -154,9 +161,9 @@ func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, bran
 func (m *ScaffoldManager) cleanupConfigToStepConfig(cleanupConfig config.CleanupStep) config.StepConfig {
 	stepConfig := config.StepConfig{
 		Name: cleanupConfig.Name,
-		Args: nil,
+		Args: append([]string(nil), cleanupConfig.Args...),
 	}
-	if cleanupConfig.Name == "herd" {
+	if cleanupConfig.Name == "herd" && len(stepConfig.Args) == 0 {
 		stepConfig.Args = []string{"unlink"}
 	}
 	for k, v := range cleanupConfig.Condition {
@@ -198,29 +205,8 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 		}
 	}
 
-	// Migrate db_suffix from anvil.yaml to .anvil.local if present
-	if !dryRun {
-		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
-			return fmt.Errorf("migrating db_suffix: %w", err)
-		}
-	}
-
-	// Load local state instead of worktree config
-	localState, err := config.ReadLocalState(worktreePath)
-	if err != nil {
-		return fmt.Errorf("reading local state: %w", err)
-	}
-
-	if localState.DbSuffix == "" {
-		newSuffix := words.GenerateSuffix()
-		ctx.SetDbSuffix(newSuffix)
-		if !dryRun {
-			if err := config.WriteLocalState(worktreePath, config.LocalState{DbSuffix: newSuffix}); err != nil {
-				return fmt.Errorf("writing db_suffix to local state: %w", err)
-			}
-		}
-	} else {
-		ctx.SetDbSuffix(localState.DbSuffix)
+	if err := prepareDbSuffix(&ctx, worktreePath, dryRun); err != nil {
+		return err
 	}
 
 	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch)
@@ -238,17 +224,75 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 	return nil
 }
 
+func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {
+	if !dryRun {
+		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
+			return fmt.Errorf("migrating db_suffix: %w", err)
+		}
+	}
+
+	localState, err := config.ReadLocalState(worktreePath)
+	if err != nil {
+		return fmt.Errorf("reading local state: %w", err)
+	}
+	if localState.DbSuffix != "" {
+		ctx.SetDbSuffix(localState.DbSuffix)
+		ctx.SetDbSuffixLoadedFromState()
+		return nil
+	}
+
+	newSuffix := words.GenerateSuffix()
+	ctx.SetDbSuffix(newSuffix)
+	if dryRun {
+		return nil
+	}
+	if err := config.WriteLocalState(worktreePath, config.LocalState{DbSuffix: newSuffix}); err != nil {
+		return fmt.Errorf("writing db_suffix to local state: %w", err)
+	}
+	return nil
+}
+
 func (m *ScaffoldManager) RunCleanup(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
+	return m.RunCleanupWithOptions(
+		worktreePath,
+		branch,
+		repoName,
+		siteName,
+		preset,
+		cfg,
+		CleanupOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
+	)
+}
+
+func (m *ScaffoldManager) RunCleanupWithOptions(
+	worktreePath, branch, repoName, siteName, preset string,
+	cfg *config.Config,
+	cleanupOpts CleanupOptions,
+) error {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
 
 	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch)
 	if err != nil {
 		return fmt.Errorf("getting cleanup steps: %w", err)
 	}
+	if cleanupOpts.SkipDatabaseCleanup {
+		filtered := make([]types.ScaffoldStep, 0, len(stepsList))
+		for _, step := range stepsList {
+			if step.Name() != config.StepDbDestroy {
+				filtered = append(filtered, step)
+			}
+		}
+		stepsList = filtered
+	}
 
-	opts := m.stepOptionsFromFlags(dryRun, verbose, quiet)
+	opts := m.stepOptionsFromFlags(cleanupOpts.DryRun, cleanupOpts.Verbose, cleanupOpts.Quiet)
 
-	executor := NewStepExecutor(stepsList, &ctx, opts)
+	executor := NewStepExecutorWithOptions(
+		stepsList,
+		&ctx,
+		opts,
+		ExecutorOptions{DelegateDryRunToSteps: true},
+	)
 	if err := executor.Execute(); err != nil {
 		return err
 	}

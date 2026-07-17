@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -12,9 +13,9 @@ import (
 func getAnvilBinary(t *testing.T) string {
 	t.Helper()
 
-	binary := "/tmp/anvil"
-	if _, err := exec.LookPath(binary); err != nil {
-		t.Skip("anvil binary not found at /tmp/anvil - build with: go build -o /tmp/anvil ./cmd/anvil")
+	binary := os.Getenv("ANVIL_TEST_BIN")
+	if binary == "" {
+		t.Fatal("ANVIL_TEST_BIN is not set; TestMain must build the anvil test binary before tests run")
 	}
 	return binary
 }
@@ -37,7 +38,7 @@ func TestScaffoldHelp(t *testing.T) {
 	output, err := anvilCmd.CombinedOutput()
 	assert.NoError(t, err)
 	assert.Contains(t, string(output), "Run scaffold steps for an existing worktree")
-	assert.Contains(t, string(output), "[PATH]")
+	assert.Contains(t, string(output), "[WORKTREE]")
 }
 
 func TestScaffoldInvalidWorktree(t *testing.T) {

@@ -68,7 +68,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	preset := NewLaravel()
 	steps := preset.DefaultSteps()
 
-	require.Len(t, steps, 13)
+	require.Len(t, steps, 14)
 
 	assert.Equal(t, "php.composer", steps[0].Name)
 	assert.Equal(t, []string{"install"}, steps[0].Args)
@@ -100,24 +100,28 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, []string{"vendor/bin/phpstan", "clear-result-cache"}, steps[7].Args)
 	assert.Equal(t, "vendor/bin/phpstan", steps[7].Condition["file_exists"])
 
-	assert.Equal(t, "node.npm", steps[8].Name)
-	assert.Equal(t, []string{"ci"}, steps[8].Args)
-	assert.NotNil(t, steps[8].Condition, "npm ci should have a condition")
-	assert.Equal(t, "package-lock.json", steps[8].Condition["file_exists"])
+	assert.Equal(t, "db.create", steps[8].Name)
+	assert.Equal(t, config.DbRoleTesting, steps[8].Role)
+	assert.NotNil(t, steps[8].Condition)
 
-	assert.Equal(t, "php.laravel", steps[9].Name)
-	assert.Equal(t, []string{"migrate:fresh", "--seed", "--no-interaction"}, steps[9].Args)
+	assert.Equal(t, "node.npm", steps[9].Name)
+	assert.Equal(t, []string{"ci"}, steps[9].Args)
+	assert.NotNil(t, steps[9].Condition, "npm ci should have a condition")
+	assert.Equal(t, "package-lock.json", steps[9].Condition["file_exists"])
 
-	assert.Equal(t, "node.npm", steps[10].Name)
-	assert.Equal(t, []string{"run", "build"}, steps[10].Args)
-	assert.NotNil(t, steps[10].Condition, "npm run build should have a condition")
-	assert.Equal(t, "package-lock.json", steps[10].Condition["file_exists"])
+	assert.Equal(t, "php.laravel", steps[10].Name)
+	assert.Equal(t, []string{"migrate:fresh", "--seed", "--no-interaction"}, steps[10].Args)
 
-	assert.Equal(t, "php.laravel", steps[11].Name)
-	assert.Equal(t, []string{"storage:link", "--no-interaction"}, steps[11].Args)
+	assert.Equal(t, "node.npm", steps[11].Name)
+	assert.Equal(t, []string{"run", "build"}, steps[11].Args)
+	assert.NotNil(t, steps[11].Condition, "npm run build should have a condition")
+	assert.Equal(t, "package-lock.json", steps[11].Condition["file_exists"])
 
-	assert.Equal(t, "herd", steps[12].Name)
-	assert.Equal(t, []string{"link", "--secure", "{{ .SiteName }}"}, steps[12].Args)
+	assert.Equal(t, "php.laravel", steps[12].Name)
+	assert.Equal(t, []string{"storage:link", "--no-interaction"}, steps[12].Args)
+
+	assert.Equal(t, "herd", steps[13].Name)
+	assert.Equal(t, []string{"link", "--secure", "{{ .SiteName }}"}, steps[13].Args)
 }
 
 func TestLaravelPreset_PHPStanCacheStepIsNoOpWithoutBinary(t *testing.T) {
@@ -229,6 +233,18 @@ func TestLaravelPreset_CleanupSteps(t *testing.T) {
 	assert.Len(t, steps, 2)
 	assert.Equal(t, "herd", steps[0].Name)
 	assert.Equal(t, "db.destroy", steps[1].Name)
+}
+
+func TestLaravelSharedDBPreset_HasNoDatabaseSteps(t *testing.T) {
+	preset := NewLaravelSharedDB()
+	for _, step := range preset.DefaultSteps() {
+		assert.NotEqual(t, config.StepDbCreate, step.Name)
+		assert.NotEqual(t, config.StepDbDestroy, step.Name)
+	}
+	for _, step := range preset.CleanupSteps() {
+		assert.NotEqual(t, config.StepDbCreate, step.Name)
+		assert.NotEqual(t, config.StepDbDestroy, step.Name)
+	}
 }
 
 func TestPHPPreset_Detect(t *testing.T) {

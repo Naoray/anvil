@@ -378,6 +378,132 @@ anvil completion fish > ~/.config/fish/completions/anvil.fish
 anvil completion powershell > anvil.ps1
 ```
 
+## Test Database Isolation
+
+Parallel worktrees used to share one test database: Laravel's `phpunit.xml`
+commonly pins `DB_DATABASE`, and phpunit.xml values beat `.env`, so test runs
+from two worktrees wiped each other's data. Anvil scaffolds a dedicated test
+database per worktree and provides `anvil exec` to run commands with it
+exported.
+
+### How it works
+
+Scaffolding a worktree (Laravel preset) creates two databases and records
+them in `.anvil.local` (generated, git-ignored, no credentials; unknown
+fields are preserved on rewrite):
+
+```yaml
+db_suffix: swift_runner
+databases:
+  - name: myapp_swift_runner
+    engine: mysql
+    role: application
+  - name: myapp_swift_runner_test
+    engine: mysql
+    role: testing
+```
+
+- `role: application` (the default) is the regular app database step; its
+  create persists an ownership record.
+- `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
+  Laravel's parallel-worker suffixes still fit MySQL's 64 and PostgreSQL's 63
+  identifier limits), creates it empty — no migrations; your test runner
+  handles schema per run — and re-scaffolds idempotently.
+- Custom scaffold steps can reference the name via `{{ .TestDatabaseName }}`.
+
+### `anvil exec`
+
+Runs a command with the worktree's test database exported. Strictly
+read-only: it never creates or modifies databases or `.anvil.local`.
+
+```bash
+# Run the test suite against the worktree's test database
+anvil exec -- ./scripts/git/run-tests.sh --parallel
+
+# Works without -- too; child flags pass through
+anvil exec php artisan test
+
+# Inspect what the child sees
+anvil exec -- php -r 'echo getenv("DB_DATABASE");'
+```
+
+Environment exported to the child (inherited values are replaced,
+case-insensitively on Windows):
+
+```
+DB_DATABASE=<test database>                # e.g. myapp_swift_runner_test
+ANVIL_TEST_DB_DATABASE=<test database>
+ANVIL_DB_DATABASE=<application database>   # omitted if unknown
+```
+
+Exit codes: the child's exit code is passed through (on Unix via `execve`,
+on Windows via typed propagation). `127` means the command was not found,
+`126` means it was found but could not be executed, and `1` is anvil's own
+resolution failure. Windows note: anvil remains the parent process; Ctrl+C
+reaches the child via the shared console, but there is no Unix-style signal
+forwarding or job-object management.
+
+### Pre-push and CI recipes
+
+Anvil never installs or owns git hooks and never patches tracked
+`phpunit.xml`. Wrap the outer script instead:
+
+```bash
+# Run the whole pre-push script with the test database exported
+anvil exec -- ./scripts/git/pre-push.sh
+```
+
+Local, untracked pre-push shim (`.git/hooks/pre-push`):
+
+```sh
+#!/bin/sh
+exec anvil exec -- ./scripts/git/pre-push.sh "$@"
+```
+
+`exec` replaces the shim process, so git's ref-list stdin reaches the script
+unchanged.
+
+### Cleaning up
+
+`anvil remove` drops the exact owned databases recorded in `.anvil.local`
+plus Laravel parallel-worker databases for both families
+(`<app>_test_<n>` and `<test>_test_<n>`):
+
+```bash
+# Preview the exact drop set (live enumeration, zero mutation)
+anvil remove feature-x --dry-run
+
+# Remove the worktree but keep every database
+anvil remove feature-x --keep-db
+```
+
+`--dry-run` prints one `Would drop database: <name>` line per database and
+never drops databases or removes the worktree. `--keep-db` prints the
+preserved names (parallel-worker databases are kept too; drop them manually
+when done). If `.anvil.local` is unreadable or contains records anvil does
+not understand, `remove` stops before deleting the worktree unless `--force`
+is given — databases are then left untouched and unrecorded.
+
+### Limitations (v1.8)
+
+- `force="true"` or `<server>` entries in `phpunit.xml` beat the exported
+  environment and are not detected (a config scanner is deferred).
+- A cached Laravel config (`bootstrap/cache/config.php`) beats the
+  environment and is not detected.
+- Bare invocations that bypass `anvil exec` keep today's shared behavior.
+- `env -i`, containers without environment forwarding, and `DB_URL`-only
+  connections are out of scope.
+- Laravel caches parallel-worker databases between runs; run
+  `php artisan test --recreate-databases` after schema-heavy branch
+  switches.
+- Pre-1.8 worktrees have no recorded testing database: create a new
+  worktree, or configure a scaffold override containing ONLY a `db.create`
+  step with `role: testing` and run that. `anvil exec` never creates or
+  modifies databases or `.anvil.local`.
+- One database server connection per worktree (MySQL or PostgreSQL).
+  SQLite worktrees are per-worktree files and already isolated, so
+  `anvil exec` is not needed there.
+
 ## Configuration
 
 Anvil uses a three-tier configuration system to separate team configuration from local state.
@@ -613,6 +739,7 @@ All steps support template variables that are replaced at runtime:
 | `{{ .Branch }}` | Git branch name | `feature-auth` |
 | `{{ .DbSuffix }}` | Database suffix (from db.create) | `swift_runner` |
 | `{{ .DatabaseName }}` | Full database name (truncated to 63 chars) | `myapp_swift_runner` |
+| `{{ .TestDatabaseName }}` | Test database name (capped at 54 chars) | `myapp_swift_runner_test` |
 | `{{ .VarName }}` | Custom variable from env.read or captured output | Custom values |
 
 ### Built-in Steps

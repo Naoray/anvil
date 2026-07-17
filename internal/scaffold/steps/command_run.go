@@ -38,6 +38,9 @@ func (s *CommandRunStep) Name() string {
 }
 
 func (s *CommandRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	if opts.DryRun {
+		return nil
+	}
 	// Use the command executor for testability
 	output, err := s.executor.RunShell(context.Background(), ctx.WorktreePath, s.command)
 	if err != nil {

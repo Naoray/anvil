@@ -190,12 +190,14 @@ type StepConfig struct {
 	Source          string   `mapstructure:"source"`
 	SourceFile      string   `mapstructure:"source_file"`
 	Type            string   `mapstructure:"type"`
+	Role            string   `mapstructure:"role"`
 }
 
 // CleanupStep represents a cleanup step configuration
 type CleanupStep struct {
 	ConditionHolder `mapstructure:",squash"`
-	Name            string `mapstructure:"name"`
+	Name            string   `mapstructure:"name"`
+	Args            []string `mapstructure:"args"`
 }
 
 // CleanupConfig represents cleanup configuration
@@ -223,11 +225,12 @@ type GlobalConfig struct {
 
 // ProjectInfo represents a linked project's configuration
 type ProjectInfo struct {
-	Path          string `mapstructure:"path"`
-	DefaultBranch string `mapstructure:"default_branch"`
-	Preset        string `mapstructure:"preset"`
-	SiteName      string `mapstructure:"site_name"`
-	EditorCmd     string `mapstructure:"editor_cmd"`
+	Path          string        `mapstructure:"path"`
+	DefaultBranch string        `mapstructure:"default_branch"`
+	Preset        string        `mapstructure:"preset"`
+	SiteName      string        `mapstructure:"site_name"`
+	EditorCmd     string        `mapstructure:"editor_cmd"`
+	Cleanup       CleanupConfig `mapstructure:"cleanup"`
 }
 
 // ToolInfo represents detected tool information

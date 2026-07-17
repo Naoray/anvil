@@ -39,6 +39,9 @@ func (s *BashRunStep) Name() string {
 }
 
 func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	if opts.DryRun {
+		return nil
+	}
 	command, err := template.ReplaceTemplateVars(s.command, ctx)
 	if err != nil {
 		return fmt.Errorf("template replacement failed: %w", err)

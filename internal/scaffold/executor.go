@@ -16,10 +16,15 @@ type ExecutionResult struct {
 	Skipped bool
 }
 
+type ExecutorOptions struct {
+	DelegateDryRunToSteps bool
+}
+
 type StepExecutor struct {
 	steps        []types.ScaffoldStep
 	ctx          *types.ScaffoldContext
 	opts         types.StepOptions
+	executorOpts ExecutorOptions
 	results      []ExecutionResult
 	mu           sync.Mutex
 	completedCnt int
@@ -27,10 +32,20 @@ type StepExecutor struct {
 }
 
 func NewStepExecutor(steps []types.ScaffoldStep, ctx *types.ScaffoldContext, opts types.StepOptions) *StepExecutor {
+	return NewStepExecutorWithOptions(steps, ctx, opts, ExecutorOptions{})
+}
+
+func NewStepExecutorWithOptions(
+	steps []types.ScaffoldStep,
+	ctx *types.ScaffoldContext,
+	opts types.StepOptions,
+	executorOpts ExecutorOptions,
+) *StepExecutor {
 	return &StepExecutor{
-		steps: steps,
-		ctx:   ctx,
-		opts:  opts,
+		steps:        steps,
+		ctx:          ctx,
+		opts:         opts,
+		executorOpts: executorOpts,
 	}
 }
 
@@ -89,7 +104,7 @@ func (e *StepExecutor) Execute() error {
 			// Verbose mode: print detailed output
 			fmt.Printf("[%d/%d] Executing step: %s\n", currentStep, activeSteps, step.Name())
 
-			if e.opts.DryRun {
+			if e.opts.DryRun && !e.executorOpts.DelegateDryRunToSteps {
 				fmt.Printf("[DRY-RUN] Would execute: %s\n", step.Name())
 				e.mu.Lock()
 				e.results = append(e.results, ExecutionResult{
@@ -113,13 +128,27 @@ func (e *StepExecutor) Execute() error {
 				})
 				e.completedCnt++
 				e.mu.Unlock()
-				fmt.Printf("✓ [%d/%d] %s completed\n", currentStep, activeSteps, step.Name())
+				if !e.opts.DryRun {
+					fmt.Printf("✓ [%d/%d] %s completed\n", currentStep, activeSteps, step.Name())
+				}
 			}
 		} else if !e.opts.Quiet {
 			// Normal mode: use spinner
 			if e.opts.DryRun {
-				desc := getStepDescription(step)
-				fmt.Printf("[DRY-RUN] [%d/%d] Would execute: %s\n", currentStep, activeSteps, desc)
+				if e.executorOpts.DelegateDryRunToSteps {
+					if err := step.Run(e.ctx, e.opts); err != nil {
+						e.mu.Lock()
+						e.results = append(e.results, ExecutionResult{
+							Step:  step,
+							Error: err,
+						})
+						e.mu.Unlock()
+						return fmt.Errorf("step %s failed: %w", step.Name(), err)
+					}
+				} else {
+					desc := getStepDescription(step)
+					fmt.Printf("[DRY-RUN] [%d/%d] Would execute: %s\n", currentStep, activeSteps, desc)
+				}
 				e.mu.Lock()
 				e.results = append(e.results, ExecutionResult{
 					Step: step,
@@ -145,7 +174,7 @@ func (e *StepExecutor) Execute() error {
 			}
 		} else {
 			// Quiet mode: silent execution
-			if !e.opts.DryRun {
+			if !e.opts.DryRun || e.executorOpts.DelegateDryRunToSteps {
 				if err := step.Run(e.ctx, e.opts); err != nil {
 					e.mu.Lock()
 					e.results = append(e.results, ExecutionResult{

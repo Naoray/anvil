@@ -3,17 +3,195 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/scaffold"
+	"github.com/naoray/anvil/internal/scaffold/steps"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
+
+type removeTestRegistry struct {
+	client *steps.MockDatabaseClient
+	output *bytes.Buffer
+}
+
+func (r *removeTestRegistry) Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
+	if name != config.StepDbDestroy {
+		return nil, errors.New("unexpected cleanup step: " + name)
+	}
+	return steps.NewDbDestroyStepWithFactoryAndWriter(cfg, steps.MockClientFactory(r.client), r.output), nil
+}
+
+func (r *removeTestRegistry) ListRegistered() []string {
+	return []string{config.StepDbDestroy}
+}
+
+type removeTestPreset struct{}
+
+func (removeTestPreset) Name() string                      { return "remove-test" }
+func (removeTestPreset) Detect(string) bool                { return false }
+func (removeTestPreset) DefaultSteps() []config.StepConfig { return nil }
+func (removeTestPreset) CleanupSteps() []config.CleanupStep {
+	return []config.CleanupStep{{Name: config.StepDbDestroy}}
+}
+
+func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
+	worktreePath := t.TempDir()
+	state := config.LocalState{Databases: []config.OwnedDatabase{
+		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+	}}
+	require.NoError(t, config.WriteLocalState(worktreePath, state))
+	statePath := filepath.Join(worktreePath, ".anvil.local")
+	stateBefore, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+
+	client := steps.NewMockDatabaseClient()
+	for _, name := range []string{
+		"app_top_provider",
+		"app_top_provider_test",
+		"app_top_provider_test_1",
+		"app_top_provider_test_2",
+		"app_top_provider_test_test_1",
+		"unrelated_test_1",
+	} {
+		client.AddDatabase(name)
+	}
+	var cleanupOutput bytes.Buffer
+	manager := scaffold.NewScaffoldManagerWithRegistry(&removeTestRegistry{client: client, output: &cleanupOutput})
+	manager.RegisterPreset(removeTestPreset{})
+	pc := &ProjectContext{GitDir: "git-dir", Config: &config.Config{Preset: "remove-test"}}
+	removeCalls := 0
+	deps := removeCommandDependencies{
+		openProject:      func() (*ProjectContext, error) { return pc, nil },
+		getwd:            func() (string, error) { return "/main", nil },
+		getDefaultBranch: func(string) (string, error) { return "main", nil },
+		listWorktrees: func(string, string, string) ([]git.Worktree, error) {
+			return []git.Worktree{{Path: worktreePath, Branch: "agent/test"}}, nil
+		},
+		branchExists: func(string, string) bool { return false },
+		removeWorktree: func(string, string, bool) error {
+			removeCalls++
+			return nil
+		},
+		deleteBranch:    func(string, string, bool) error { return nil },
+		readLocalState:  config.ReadLocalState,
+		scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
+		detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+	}
+
+	root := &cobra.Command{Use: "anvil"}
+	root.PersistentFlags().Bool("dry-run", false, "")
+	root.PersistentFlags().Bool("verbose", false, "")
+	root.PersistentFlags().Bool("quiet", false, "")
+	root.AddCommand(newRemoveCommand(deps))
+	root.SetArgs([]string{"remove", filepath.Base(worktreePath), "--dry-run", "--force", "--quiet"})
+
+	require.NoError(t, root.Execute())
+	assert.Equal(t, "Would drop database: app_top_provider\n"+
+		"Would drop database: app_top_provider_test\n"+
+		"Would drop database: app_top_provider_test_1\n"+
+		"Would drop database: app_top_provider_test_2\n"+
+		"Would drop database: app_top_provider_test_test_1\n", cleanupOutput.String())
+	assert.Equal(t, []string{`app\_top\_provider\_test\_%`, `app\_top\_provider\_test\_test\_%`}, client.GetListCalls())
+	assert.Empty(t, client.GetDropCalls())
+	assert.Zero(t, removeCalls)
+	_, err = os.Stat(worktreePath)
+	require.NoError(t, err)
+	stateAfter, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Equal(t, stateBefore, stateAfter)
+}
+
+func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
+	state := &config.LocalState{Databases: []config.OwnedDatabase{
+		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+	}}
+
+	opts, messages, err := planRemoveCleanup(state, nil, true, false, false)
+
+	require.NoError(t, err)
+	assert.True(t, opts.SkipDatabaseCleanup)
+	assert.Equal(t, []string{
+		"Preserving databases: app_top_provider, app_top_provider_test (parallel worker databases are kept too; drop manually when done)",
+	}, messages)
+}
+
+func TestPlanRemoveCleanup_KeepDbLegacySuffixPattern(t *testing.T) {
+	opts, messages, err := planRemoveCleanup(&config.LocalState{DbSuffix: "top_provider"}, nil, true, false, false)
+
+	require.NoError(t, err)
+	assert.True(t, opts.SkipDatabaseCleanup)
+	assert.Equal(t, []string{
+		"Preserving databases matching suffix 'top_provider' (legacy worktree — exact names unknown)",
+	}, messages)
+}
+
+func TestPlanRemoveCleanup_KeepDbUnreadableStateHardStopsUnlessForce(t *testing.T) {
+	stateErr := errors.New("permission denied")
+
+	_, _, err := planRemoveCleanup(nil, stateErr, true, false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot read .anvil.local")
+	assert.Contains(t, err.Error(), "--force")
+
+	opts, messages, err := planRemoveCleanup(nil, stateErr, true, false, true)
+	require.NoError(t, err)
+	assert.True(t, opts.SkipDatabaseCleanup)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0], "WARNING")
+	assert.Contains(t, messages[0], "databases will be left untouched and unrecorded")
+}
+
+func TestPlanRemoveCleanup_InvalidOwnedStateHardStopsUnlessForce(t *testing.T) {
+	state := &config.LocalState{Databases: []config.OwnedDatabase{
+		{Name: "app_top_provider", Engine: "mysql", Role: "unknown"},
+		{Name: "app_top_provider_test", Engine: "pgsql", Role: config.DbRoleTesting},
+	}}
+
+	_, _, err := planRemoveCleanup(state, nil, false, false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid database records in .anvil.local")
+	assert.Contains(t, err.Error(), "--force")
+
+	opts, messages, err := planRemoveCleanup(state, nil, false, false, true)
+	require.NoError(t, err)
+	assert.True(t, opts.SkipDatabaseCleanup)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0], "WARNING")
+	assert.Contains(t, messages[0], "databases will be left untouched and unrecorded")
+}
+
+func TestPlanRemoveCleanup_DryRunPropagatesDryRunTrue(t *testing.T) {
+	opts, messages, err := planRemoveCleanup(&config.LocalState{}, nil, false, true, false)
+
+	require.NoError(t, err)
+	assert.True(t, opts.DryRun)
+	assert.False(t, opts.SkipDatabaseCleanup)
+	assert.Empty(t, messages)
+}
+
+func TestPlanRemoveCleanup_DryRunKeepDbMessage(t *testing.T) {
+	opts, messages, err := planRemoveCleanup(&config.LocalState{DbSuffix: "top_provider"}, nil, true, true, false)
+
+	require.NoError(t, err)
+	assert.True(t, opts.DryRun)
+	assert.True(t, opts.SkipDatabaseCleanup)
+	assert.Equal(t, "[DRY RUN] database cleanup would be skipped (--keep-db)", messages[len(messages)-1])
+}
 
 func TestRemoveCmd_PreventsMainWorktreeDeletion(t *testing.T) {
 	repoDir := t.TempDir()

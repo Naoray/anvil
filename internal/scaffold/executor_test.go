@@ -13,6 +13,7 @@ type mockStep struct {
 	conditionResult bool
 	runError        error
 	runCalled       bool
+	runOptions      []types.StepOptions
 }
 
 func (s *mockStep) Name() string {
@@ -21,6 +22,7 @@ func (s *mockStep) Name() string {
 
 func (s *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
 	s.runCalled = true
+	s.runOptions = append(s.runOptions, opts)
 	return s.runError
 }
 
@@ -90,7 +92,7 @@ func TestStepExecutor_Execute_StepFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "step2 failed")
 }
 
-func TestStepExecutor_Execute_DryRun(t *testing.T) {
+func TestStepExecutor_DryRunDefault_DoesNotInvokeStepRun(t *testing.T) {
 	ctx := &types.ScaffoldContext{
 		WorktreePath: "/tmp",
 		Branch:       "test",
@@ -107,6 +109,30 @@ func TestStepExecutor_Execute_DryRun(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.False(t, step1.runCalled)
+	assert.Empty(t, step1.runOptions)
+}
+
+func TestStepExecutor_DelegateDryRun_InvokesRunWithDryRunTrue(t *testing.T) {
+	ctx := &types.ScaffoldContext{
+		WorktreePath: "/tmp",
+		Branch:       "test",
+	}
+	step := &mockStep{name: "step1", conditionResult: true}
+
+	executor := NewStepExecutorWithOptions(
+		[]types.ScaffoldStep{step},
+		ctx,
+		types.StepOptions{DryRun: true, Quiet: true},
+		ExecutorOptions{DelegateDryRunToSteps: true},
+	)
+
+	err := executor.Execute()
+
+	assert.NoError(t, err)
+	assert.True(t, step.runCalled)
+	if assert.Len(t, step.runOptions, 1) {
+		assert.True(t, step.runOptions[0].DryRun)
+	}
 }
 
 func TestStepExecutor_Results(t *testing.T) {

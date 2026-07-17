@@ -83,6 +83,7 @@ func openProject(cwd, projectName string, projectInfo *config.ProjectInfo, globa
 		Preset:        projectInfo.Preset,
 		DefaultBranch: defaultBranch,
 		EditorCmd:     projectInfo.EditorCmd,
+		Cleanup:       projectInfo.Cleanup,
 	}
 
 	return &ProjectContext{

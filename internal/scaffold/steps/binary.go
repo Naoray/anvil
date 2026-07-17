@@ -95,6 +95,9 @@ func (s *BinaryStep) Condition(ctx *types.ScaffoldContext) bool {
 }
 
 func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	if opts.DryRun {
+		return nil
+	}
 	allArgs := append(s.args, opts.Args...)
 	allArgs = s.replaceTemplate(allArgs, ctx)
 	if opts.Verbose {

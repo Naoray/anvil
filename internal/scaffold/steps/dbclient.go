@@ -2,7 +2,9 @@ package steps
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -29,6 +31,33 @@ type DatabaseOptions struct {
 	Port     string
 	Username string
 	Password string
+}
+
+const (
+	mysqlListDatabasesQuery    = "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE ?"
+	postgresListDatabasesQuery = "SELECT datname FROM pg_database WHERE datname LIKE $1 AND datistemplate = false"
+)
+
+type databaseRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+	Close() error
+}
+
+type databaseQueryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+// EscapeLikePattern escapes literal characters that SQL LIKE treats as
+// metacharacters. Callers add only the wildcards they intentionally need.
+func EscapeLikePattern(pattern string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		"%", `\%`,
+		"_", `\_`,
+	)
+	return replacer.Replace(pattern)
 }
 
 // DefaultDatabaseClientFactory creates real database clients
@@ -97,22 +126,7 @@ func (c *MySQLClient) DropDatabase(name string) error {
 }
 
 func (c *MySQLClient) ListDatabases(pattern string) ([]string, error) {
-	query := fmt.Sprintf("SHOW DATABASES LIKE '%s'", pattern)
-	rows, err := c.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("listing databases: %w", err)
-	}
-	defer func() { _ = rows.Close() }() // best-effort cleanup
-
-	var databases []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scanning database name: %w", err)
-		}
-		databases = append(databases, name)
-	}
-	return databases, rows.Err()
+	return queryDatabaseNames(c.db, mysqlListDatabasesQuery, pattern)
 }
 
 // PostgreSQLClient implements DatabaseClient for PostgreSQL
@@ -182,22 +196,36 @@ func (c *PostgreSQLClient) DropDatabase(name string) error {
 }
 
 func (c *PostgreSQLClient) ListDatabases(pattern string) ([]string, error) {
-	query := "SELECT datname FROM pg_database WHERE datname LIKE $1 AND datistemplate = false"
-	rows, err := c.db.Query(query, pattern)
+	return queryDatabaseNames(c.db, postgresListDatabasesQuery, pattern)
+}
+
+func queryDatabaseNames(queryer databaseQueryer, query, pattern string) ([]string, error) {
+	rows, err := queryer.Query(query, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("listing databases: %w", err)
 	}
-	defer func() { _ = rows.Close() }() // best-effort cleanup
+	return collectDatabaseNames(rows)
+}
 
-	var databases []string
+func collectDatabaseNames(rows databaseRows) (databases []string, err error) {
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("closing database rows: %w", closeErr))
+		}
+	}()
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scanning database name: %w", err)
+		if scanErr := rows.Scan(&name); scanErr != nil {
+			err = errors.Join(err, fmt.Errorf("scanning database name: %w", scanErr))
+			break
 		}
 		databases = append(databases, name)
 	}
-	return databases, rows.Err()
+	if rowsErr := rows.Err(); rowsErr != nil {
+		err = errors.Join(err, fmt.Errorf("iterating database names: %w", rowsErr))
+	}
+	sort.Strings(databases)
+	return databases, err
 }
 
 // DatabaseExistsError indicates a database already exists

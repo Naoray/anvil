@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/naoray/anvil/internal/cli"
@@ -18,6 +20,13 @@ func main() {
 	cli.Commit = Commit
 	cli.BuildDate = BuildDate
 	if err := cli.Execute(); err != nil {
+		var childErr *cli.ChildExitError
+		if errors.As(err, &childErr) {
+			if childErr.Message != "" {
+				fmt.Fprintln(os.Stderr, childErr.Message)
+			}
+			os.Exit(childErr.Code)
+		}
 		os.Exit(1)
 	}
 }

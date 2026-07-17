@@ -11,21 +11,23 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
+	"github.com/naoray/anvil/internal/scaffold/words"
 	"github.com/naoray/anvil/internal/utils"
 )
 
 type ScaffoldContext struct {
-	WorktreePath string
-	Branch       string
-	RepoName     string
-	SiteName     string
-	Preset       string
-	Env          map[string]string
-	Path         string
-	RepoPath     string
-	DbSuffix     string
-	Vars         map[string]string
-	mu           sync.RWMutex
+	WorktreePath      string
+	Branch            string
+	RepoName          string
+	SiteName          string
+	Preset            string
+	Env               map[string]string
+	Path              string
+	RepoPath          string
+	DbSuffix          string
+	Vars              map[string]string
+	dbSuffixFromState bool
+	mu                sync.RWMutex
 }
 
 type StepOptions struct {
@@ -353,6 +355,18 @@ func (ctx *ScaffoldContext) GetDbSuffix() string {
 	return ctx.DbSuffix
 }
 
+func (ctx *ScaffoldContext) SetDbSuffixLoadedFromState() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.dbSuffixFromState = true
+}
+
+func (ctx *ScaffoldContext) DbSuffixFromState() bool {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.dbSuffixFromState
+}
+
 func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
@@ -361,8 +375,10 @@ func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {
 
 	// Build a truncated database name that respects identifier limits.
 	var dbName string
+	var testDbName string
 	if ctx.DbSuffix != "" {
 		dbName = buildDatabaseName(sanitized, ctx.DbSuffix, maxDbNameLength)
+		testDbName = words.BuildTestDatabaseName(sanitized, ctx.DbSuffix)
 	}
 
 	snapshot := map[string]string{
@@ -374,6 +390,7 @@ func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {
 		"Branch":            ctx.Branch,
 		"DbSuffix":          ctx.DbSuffix,
 		"DatabaseName":      dbName,
+		"TestDatabaseName":  testDbName,
 	}
 	for k, v := range ctx.Vars {
 		snapshot[k] = v
