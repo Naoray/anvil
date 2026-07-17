@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.8.0](https://github.com/naoray/anvil/compare/v1.7.1...v1.8.0) - 2026-07-17
+
+### Added
+
+- **Per-worktree test database** — the Laravel preset now scaffolds an isolated `role: testing` database (`<site>_<suffix>_test`, capped at 54 chars for parallel-worker headroom) alongside the application database.
+- **`anvil exec`** — run any command with the worktree's test database exported (`DB_DATABASE`, `ANVIL_TEST_DB_DATABASE`, `ANVIL_DB_DATABASE`); strictly read-only, cross-platform, child exit codes passed through (`127` not found, `126` not executable).
+- **`anvil remove --keep-db`** — remove a worktree while preserving its databases (parallel-worker databases included).
+- **Real `anvil remove --dry-run` enumeration** — dry-run now executes the cleanup selector live and prints the exact `Would drop database:` set, including parallel-worker databases.
+- **`{{ .TestDatabaseName }}`** template variable for custom scaffold steps.
+- **`databases` ownership records in `.anvil.local`** — every Anvil-created server database is recorded as `{name, engine, role}`; unknown YAML fields and unknown-role records are preserved on rewrite.
+
+### Changed
+
+- Cleanup drops the exact owned databases plus Laravel parallel-worker families for both the application and testing databases, instead of relying on suffix patterns alone.
+- Cleanup fails closed on unrecognized ownership records: unknown roles/engines, invalid names, or mixed engines abort database cleanup with zero SQL executed.
+- Cleanup, listing, and client errors are aggregated deterministically (`errors.Join`), including row-iteration and close errors.
+- The "Update Changelog" workflow skips releases whose CHANGELOG section is already curated (deterministic single-writer guard).
+
+### Fixed
+
+- PostgreSQL re-scaffold no longer rotates the database suffix or accumulates ownership records; persisted-suffix collisions are treated as idempotent success.
+- `_` in cleanup `LIKE` patterns no longer acts as a wildcard — patterns are escaped and returned names revalidated before any drop.
+- Database listings use parameterized queries instead of string-interpolated SQL.
+- Laravel scaffold conditionally clears the PHPStan/Larastan result cache after `.env` updates when `vendor/bin/phpstan` exists.
+
 ## [v1.7.1](https://github.com/naoray/anvil/compare/v1.7.0...v1.7.1) - 2026-04-30
 
 ### Added
