@@ -179,13 +179,35 @@ APP_NAME=myapp
 			WorktreePath: tmpDir,
 		}
 
-		destroyStep, err := steps.Create("db.destroy", config.StepConfig{})
-		require.NoError(t, err)
+		mockClient := steps.NewMockDatabaseClient()
+		mockClient.AddDatabase("myapp_swift_runner")
+		mockClient.AddDatabase("myapp_swiftXrunner")
+		var factoryEngines []string
+		var factoryOptions []steps.DatabaseOptions
+
+		destroyStep := steps.NewDbDestroyStepWithFactory(config.StepConfig{
+			Type: "mysql",
+			Args: []string{"--host", "hermetic.invalid", "--port", "invalid"},
+		}, func(engine string, options steps.DatabaseOptions) (steps.DatabaseClient, error) {
+			factoryEngines = append(factoryEngines, engine)
+			factoryOptions = append(factoryOptions, options)
+			return mockClient, nil
+		})
 		err = destroyStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
 		suffix := ctx.GetDbSuffix()
 		assert.Equal(t, "swift_runner", suffix, "DbSuffix should be read from local state")
+		assert.Equal(t, []string{"mysql"}, factoryEngines)
+		assert.Equal(t, []steps.DatabaseOptions{{
+			Host:     "hermetic.invalid",
+			Port:     "invalid",
+			Username: "root",
+		}}, factoryOptions)
+		assert.Equal(t, []string{`%\_swift\_runner`}, mockClient.GetListCalls())
+		assert.Equal(t, []string{"myapp_swift_runner"}, mockClient.GetDropCalls())
+		assert.False(t, mockClient.HasDatabase("myapp_swift_runner"))
+		assert.True(t, mockClient.HasDatabase("myapp_swiftXrunner"))
 	})
 }
 

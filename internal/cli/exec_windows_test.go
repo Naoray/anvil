@@ -53,7 +53,7 @@ func TestExecCommand_ExistingNonLaunchableFile126(t *testing.T) {
 	var exitErr *exec.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 126, exitErr.ExitCode())
-	assert.Contains(t, stderr.String(), "cannot execute")
+	assert.Contains(t, stderr.String(), "executing "+target)
 	assert.Contains(t, stderr.String(), target)
 	assert.NotContains(t, stderr.String(), "command not found")
 }
