@@ -24,6 +24,8 @@ func NewLaravel() *Laravel {
 				{Name: config.StepEnvWrite, Key: "APP_KEY", Value: "{{ .AppKey }}", ConditionHolder: config.ConditionHolder{Condition: map[string]any{"env_file_missing": "APP_KEY"}}},
 				{Name: config.StepDbCreate, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"env_file_contains": map[string]any{"file": ".env", "key": "DB_CONNECTION"}}}},
 				{Name: config.StepEnvWrite, Key: "DB_DATABASE", Value: "{{ .DatabaseName }}", ConditionHolder: config.ConditionHolder{Condition: map[string]any{"env_file_contains": map[string]any{"file": ".env", "key": "DB_CONNECTION"}}}},
+				{Name: "php", Args: []string{"vendor/bin/phpstan", "clear-result-cache"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "vendor/bin/phpstan"}}},
+				{Name: config.StepDbCreate, Role: config.DbRoleTesting, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"env_file_contains": map[string]any{"file": ".env", "key": "DB_CONNECTION"}}}},
 				{Name: "node.npm", Args: []string{"ci"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "package-lock.json"}}},
 				{Name: "php.laravel", Args: []string{"migrate:fresh", "--seed", "--no-interaction"}},
 				{Name: "node.npm", Args: []string{"run", "build"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "package-lock.json"}}},

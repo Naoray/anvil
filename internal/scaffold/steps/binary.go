@@ -49,13 +49,23 @@ func NewBinaryStepWithExecutor(name, binary string, args []string, storeAs strin
 // NewBinaryStepWithCondition creates a binary step with condition evaluation.
 // This is the factory function used by the registry.
 func NewBinaryStepWithCondition(name string, cfg config.StepConfig, binary string) *BinaryStep {
+	return NewBinaryStepWithConditionAndExecutor(name, cfg, binary, nil)
+}
+
+// NewBinaryStepWithConditionAndExecutor creates a conditional binary step with a custom command executor.
+// This is useful for testing conditional command execution without launching an operating-system process.
+func NewBinaryStepWithConditionAndExecutor(name string, cfg config.StepConfig, binary string, executor *anvil_exec.CommandExecutor) *BinaryStep {
+	if executor == nil {
+		executor = anvil_exec.NewCommandExecutor(nil)
+	}
+
 	return &BinaryStep{
 		name:      name,
 		binary:    binary,
 		args:      cfg.Args,
 		condition: cfg.Condition,
 		storeAs:   cfg.StoreAs,
-		executor:  anvil_exec.NewCommandExecutor(nil),
+		executor:  executor,
 	}
 }
 
@@ -85,6 +95,9 @@ func (s *BinaryStep) Condition(ctx *types.ScaffoldContext) bool {
 }
 
 func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	if opts.DryRun {
+		return nil
+	}
 	allArgs := append(s.args, opts.Args...)
 	allArgs = s.replaceTemplate(allArgs, ctx)
 	if opts.Verbose {

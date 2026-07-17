@@ -228,6 +228,28 @@ func TestBuildDatabaseName(t *testing.T) {
 	})
 }
 
+func TestBuildTestDatabaseName(t *testing.T) {
+	t.Run("derives testing database from worktree suffix", func(t *testing.T) {
+		name := BuildTestDatabaseName("dashboard", "top_provider")
+		if name != "dashboard_top_provider_test" {
+			t.Fatalf("expected dashboard_top_provider_test, got %q", name)
+		}
+	})
+
+	t.Run("reserves PostgreSQL worker suffix headroom", func(t *testing.T) {
+		name := BuildTestDatabaseName(strings.Repeat("a", 80), "top_provider")
+		if len(name) > MaxTestDbNameLength {
+			t.Fatalf("testing database name length %d exceeds %d: %s", len(name), MaxTestDbNameLength, name)
+		}
+		if !strings.HasSuffix(name, "_top_provider_test") {
+			t.Fatalf("testing database name lost suffix: %s", name)
+		}
+		if len(name+"_test_999") > MaxDbNameLength {
+			t.Fatalf("parallel worker name exceeds PostgreSQL limit: %s", name+"_test_999")
+		}
+	})
+}
+
 func TestMaxLengthEnforcement(t *testing.T) {
 	t.Run("respects PostgreSQL limit of 63", func(t *testing.T) {
 		name := GenerateDatabaseName("verylongsitenamethatdefinitelyexceedslimitsbyalot", 0)

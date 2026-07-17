@@ -50,7 +50,7 @@ anvil remove feature-my-feature  # When done
 |--------|----------|---------|------------|
 | Project | `<project-root>/anvil.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
 | Repository | `<worktree>/anvil.yaml` | Team defaults | Yes (committed to git) |
-| Local State | `<worktree>/.anvil.local` | Runtime state (db_suffix) | No (gitignored) |
+| Local State | `<worktree>/.anvil.local` | Runtime state (`db_suffix` and database ownership records) | No (gitignored) |
 | Global | `~/.config/anvil/anvil.yaml` | User defaults | No (local machine) |
 
 ### Step Naming
@@ -89,6 +89,8 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 | 4 | Git operation failed |
 | 5 | Configuration error |
 | 6 | Scaffold step failed |
+
+**`anvil exec` exception:** `anvil exec` passes the child process's exit code through verbatim; `127` means the command was not found and `126` means it was found but could not be executed. Anvil's own resolution failures exit `1`. See README "Test Database Isolation" for the `anvil exec` and `anvil remove --keep-db` command reference.
 
 ## Testing
 
@@ -201,7 +203,7 @@ This approach ensures:
 All foundational phases (1-5) are complete. The project is in active feature development:
 - Core: worktree management, config hierarchy, scaffold system
 - Presets: Laravel, PHP, Laravel-Shared-DB
-- Commands: link, unlink, work, list, info, open, sync, remove, prune, scaffold, pull-config, repair, install, completion
+- Commands: link, unlink, work, list, info, open, sync, remove, prune, scaffold, exec, pull-config, repair, install, completion
 - Distribution: Homebrew, GitHub Releases, Go Install
 - Shell completions for worktree arguments (zsh, bash, fish, powershell)
 
@@ -257,15 +259,14 @@ When preparing a new release:
 
 1. Update CHANGELOG.md with changes since the last release
 2. Commit: `release: prepare vX.Y.Z`
-3. Tag: `git tag vX.Y.Z`
+3. Tag (annotated): `git tag -a vX.Y.Z -m "vX.Y.Z"`
 4. Push: `git push && git push origin vX.Y.Z`
-5. Create GitHub release: `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`
-6. CI builds and uploads binaries automatically
-7. Homebrew tap updates via the "Update Changelog" workflow
+5. The tag push triggers `.github/workflows/release.yml`, which builds the binaries and creates the GitHub release automatically — do not run `gh release create`
+6. The "Update Changelog" workflow runs after the release and skips any release whose CHANGELOG section is already curated (single-writer guard)
+7. Homebrew tap updates automatically from the release workflow
 
 **Requirements:**
 - All changes committed, working directory clean
-- `gh` CLI tool installed
 - Tests and lint must pass
 
 **Version Format:** Always use `v` prefix (e.g., `v1.7.0`)

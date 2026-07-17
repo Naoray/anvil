@@ -1,12 +1,19 @@
 package presets
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/naoray/anvil/internal/config"
+	anvil_exec "github.com/naoray/anvil/internal/exec"
+	"github.com/naoray/anvil/internal/scaffold"
+	scaffoldsteps "github.com/naoray/anvil/internal/scaffold/steps"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 func TestLaravelPreset_Detect(t *testing.T) {
@@ -61,7 +68,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	preset := NewLaravel()
 	steps := preset.DefaultSteps()
 
-	assert.Len(t, steps, 12)
+	require.Len(t, steps, 14)
 
 	assert.Equal(t, "php.composer", steps[0].Name)
 	assert.Equal(t, []string{"install"}, steps[0].Args)
@@ -89,18 +96,134 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, "DB_DATABASE", steps[6].Key)
 	assert.Equal(t, "{{ .DatabaseName }}", steps[6].Value)
 
-	assert.Equal(t, "node.npm", steps[7].Name)
-	assert.Equal(t, []string{"ci"}, steps[7].Args)
-	assert.NotNil(t, steps[7].Condition, "npm ci should have a condition")
-	assert.Equal(t, "package-lock.json", steps[7].Condition["file_exists"])
+	assert.Equal(t, "php", steps[7].Name)
+	assert.Equal(t, []string{"vendor/bin/phpstan", "clear-result-cache"}, steps[7].Args)
+	assert.Equal(t, "vendor/bin/phpstan", steps[7].Condition["file_exists"])
 
-	assert.Equal(t, "php.laravel", steps[8].Name)
-	assert.Equal(t, []string{"migrate:fresh", "--seed", "--no-interaction"}, steps[8].Args)
+	assert.Equal(t, "db.create", steps[8].Name)
+	assert.Equal(t, config.DbRoleTesting, steps[8].Role)
+	assert.NotNil(t, steps[8].Condition)
 
 	assert.Equal(t, "node.npm", steps[9].Name)
-	assert.Equal(t, []string{"run", "build"}, steps[9].Args)
-	assert.NotNil(t, steps[9].Condition, "npm run build should have a condition")
+	assert.Equal(t, []string{"ci"}, steps[9].Args)
+	assert.NotNil(t, steps[9].Condition, "npm ci should have a condition")
 	assert.Equal(t, "package-lock.json", steps[9].Condition["file_exists"])
+
+	assert.Equal(t, "php.laravel", steps[10].Name)
+	assert.Equal(t, []string{"migrate:fresh", "--seed", "--no-interaction"}, steps[10].Args)
+
+	assert.Equal(t, "node.npm", steps[11].Name)
+	assert.Equal(t, []string{"run", "build"}, steps[11].Args)
+	assert.NotNil(t, steps[11].Condition, "npm run build should have a condition")
+	assert.Equal(t, "package-lock.json", steps[11].Condition["file_exists"])
+
+	assert.Equal(t, "php.laravel", steps[12].Name)
+	assert.Equal(t, []string{"storage:link", "--no-interaction"}, steps[12].Args)
+
+	assert.Equal(t, "herd", steps[13].Name)
+	assert.Equal(t, []string{"link", "--secure", "{{ .SiteName }}"}, steps[13].Args)
+}
+
+func TestLaravelPreset_PHPStanCacheStepIsNoOpWithoutBinary(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheStepConfig := laravelPHPStanCacheStepConfig(t)
+	cacheStep, err := scaffoldsteps.Create(cacheStepConfig.Name, cacheStepConfig)
+	require.NoError(t, err)
+
+	ctx := &types.ScaffoldContext{WorktreePath: tmpDir}
+	executor := scaffold.NewStepExecutor([]types.ScaffoldStep{cacheStep}, ctx, types.StepOptions{Quiet: true})
+
+	require.NoError(t, executor.Execute())
+	require.Len(t, executor.Results(), 1)
+	assert.True(t, executor.Results()[0].Skipped, "PHPStan cache invalidation should be skipped when vendor/bin/phpstan is absent")
+}
+
+func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env.example"), []byte("APP_KEY=\nDB_CONNECTION=sqlite\nDB_DATABASE=\n"), 0644))
+
+	phpstanPath := filepath.Join(tmpDir, "vendor", "bin", "phpstan")
+	require.NoError(t, os.MkdirAll(filepath.Dir(phpstanPath), 0755))
+	require.NoError(t, os.WriteFile(phpstanPath, nil, 0644))
+
+	ctx := &types.ScaffoldContext{WorktreePath: tmpDir}
+	ctx.SetVar("AppKey", "generated-key")
+	ctx.SetVar("DatabaseName", "feature_test")
+
+	commander := &phpstanInvocationCommander{t: t, worktreePath: tmpDir}
+	commandExecutor := anvil_exec.NewCommandExecutor(commander)
+
+	var relevantSteps []types.ScaffoldStep
+	for _, stepConfig := range NewLaravel().DefaultSteps() {
+		if stepConfig.Name == "php" {
+			relevantSteps = append(relevantSteps, scaffoldsteps.NewBinaryStepWithConditionAndExecutor(stepConfig.Name, stepConfig, "php", commandExecutor))
+			continue
+		}
+
+		if stepConfig.Name != config.StepFileCopy && stepConfig.Name != config.StepEnvWrite {
+			continue
+		}
+
+		step, err := scaffoldsteps.Create(stepConfig.Name, stepConfig)
+		require.NoError(t, err)
+		relevantSteps = append(relevantSteps, step)
+	}
+
+	_, err := os.Stat(filepath.Join(tmpDir, ".env"))
+	require.ErrorIs(t, err, os.ErrNotExist, "the delayed scaffold should start before .env exists")
+
+	executor := scaffold.NewStepExecutor(relevantSteps, ctx, types.StepOptions{Quiet: true})
+	require.NoError(t, executor.Execute())
+	require.Len(t, executor.Results(), 4)
+	assert.Equal(t, config.StepEnvWrite, executor.Results()[2].Step.Name())
+	assert.Equal(t, "php", executor.Results()[3].Step.Name())
+
+	envContent, err := os.ReadFile(filepath.Join(tmpDir, ".env"))
+	require.NoError(t, err)
+	assert.Contains(t, string(envContent), "APP_KEY=generated-key")
+	assert.Contains(t, string(envContent), "DB_DATABASE=feature_test")
+
+	require.NotNil(t, commander.call, "PHPStan cache invalidation should reach the command boundary")
+	assert.Equal(t, tmpDir, commander.call.Dir)
+	assert.Equal(t, "php", commander.call.Command)
+	assert.Equal(t, []string{"vendor/bin/phpstan", "clear-result-cache"}, commander.call.Args)
+}
+
+type phpstanInvocationCommander struct {
+	t            *testing.T
+	worktreePath string
+	call         *anvil_exec.CommandCall
+}
+
+func (c *phpstanInvocationCommander) Run(_ context.Context, dir string, command string, args ...string) ([]byte, error) {
+	c.t.Helper()
+
+	require.Equal(c.t, c.worktreePath, dir)
+	envContent, err := os.ReadFile(filepath.Join(dir, ".env"))
+	require.NoError(c.t, err)
+	require.Contains(c.t, string(envContent), "APP_KEY=generated-key")
+	require.Contains(c.t, string(envContent), "DB_DATABASE=feature_test")
+
+	c.call = &anvil_exec.CommandCall{
+		Dir:     dir,
+		Command: command,
+		Args:    append([]string(nil), args...),
+	}
+
+	return nil, nil
+}
+
+func laravelPHPStanCacheStepConfig(t *testing.T) config.StepConfig {
+	t.Helper()
+
+	for _, step := range NewLaravel().DefaultSteps() {
+		if step.Name == "php" && assert.ObjectsAreEqual([]string{"vendor/bin/phpstan", "clear-result-cache"}, step.Args) {
+			return step
+		}
+	}
+
+	t.Fatal("Laravel preset should include a PHPStan result-cache invalidation step")
+	return config.StepConfig{}
 }
 
 func TestLaravelPreset_CleanupSteps(t *testing.T) {
@@ -110,6 +233,18 @@ func TestLaravelPreset_CleanupSteps(t *testing.T) {
 	assert.Len(t, steps, 2)
 	assert.Equal(t, "herd", steps[0].Name)
 	assert.Equal(t, "db.destroy", steps[1].Name)
+}
+
+func TestLaravelSharedDBPreset_HasNoDatabaseSteps(t *testing.T) {
+	preset := NewLaravelSharedDB()
+	for _, step := range preset.DefaultSteps() {
+		assert.NotEqual(t, config.StepDbCreate, step.Name)
+		assert.NotEqual(t, config.StepDbDestroy, step.Name)
+	}
+	for _, step := range preset.CleanupSteps() {
+		assert.NotEqual(t, config.StepDbCreate, step.Name)
+		assert.NotEqual(t, config.StepDbDestroy, step.Name)
+	}
 }
 
 func TestPHPPreset_Detect(t *testing.T) {

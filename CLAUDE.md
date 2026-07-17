@@ -13,7 +13,7 @@ See [AGENTS.md](./AGENTS.md) for full architecture, workflows, and conventions.
 
 ## Release
 
-Update CHANGELOG.md, commit, tag with `vX.Y.Z`, push, and create a GitHub release via `gh release create`.
+Update CHANGELOG.md, commit, tag with an annotated `vX.Y.Z` tag, and push — the tag push triggers release.yml, which builds binaries and creates the GitHub release automatically.
 
 ## Framework-Specific Rules
 

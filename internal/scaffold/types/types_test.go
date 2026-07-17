@@ -632,6 +632,18 @@ func TestScaffoldContext_EnvExists_Array(t *testing.T) {
 	})
 }
 
+func TestSnapshotForTemplate_TestDatabaseName(t *testing.T) {
+	ctx := &ScaffoldContext{SiteName: "Dashboard", DbSuffix: "top_provider"}
+	if got := ctx.SnapshotForTemplate()["TestDatabaseName"]; got != "dashboard_top_provider_test" {
+		t.Fatalf("expected dashboard_top_provider_test, got %q", got)
+	}
+
+	empty := &ScaffoldContext{SiteName: "Dashboard"}
+	if got := empty.SnapshotForTemplate()["TestDatabaseName"]; got != "" {
+		t.Fatalf("expected empty testing database without suffix, got %q", got)
+	}
+}
+
 func TestScaffoldContext_CommandExists_Array(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := &ScaffoldContext{

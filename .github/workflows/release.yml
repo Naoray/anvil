@@ -60,7 +60,7 @@ jobs:
       - name: Get version
         id: version
         shell: bash
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Build binary
         shell: bash
@@ -68,27 +68,42 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TARGET: ${{ matrix.target }}
+          BINARY_EXT: ${{ matrix.binary_ext }}
         run: |
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -trimpath -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }} -X main.Commit=$COMMIT -X main.BuildDate=$DATE" \
-            -o anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }} ./cmd/anvil
+          go build -trimpath -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.BuildDate=$DATE" \
+            -o "anvil-$VERSION-$TARGET$BINARY_EXT" ./cmd/anvil
 
       - name: Create archive (tar.gz)
         if: matrix.zip_extension == 'tar.gz'
-        run: tar -czf anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}${{ matrix.binary_ext }}
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TARGET: ${{ matrix.target }}
+          ZIP_EXTENSION: ${{ matrix.zip_extension }}
+          BINARY_EXT: ${{ matrix.binary_ext }}
+        run: tar -czf "anvil-$VERSION-$TARGET.$ZIP_EXTENSION" "anvil-$VERSION-$TARGET$BINARY_EXT"
 
       - name: Create archive (zip)
         if: matrix.zip_extension == 'zip'
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TARGET: ${{ matrix.target }}
         run: |
-          $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
-          $target = "${{ matrix.target }}"
+          $version = $env:VERSION
+          $target = $env:TARGET
           7z a "anvil-$version-$target.zip" "anvil-$version-$target.exe"
 
       - name: Generate checksum
         shell: bash
-        run: sha256sum anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.${{ matrix.zip_extension }} > anvil-${{ steps.version.outputs.VERSION }}-${{ matrix.target }}.sha256
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TARGET: ${{ matrix.target }}
+          ZIP_EXTENSION: ${{ matrix.zip_extension }}
+        run: sha256sum "anvil-$VERSION-$TARGET.$ZIP_EXTENSION" > "anvil-$VERSION-$TARGET.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -113,37 +128,31 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Get previous tag
         id: previous_tag
+        env:
+          CURRENT_TAG: v${{ steps.version.outputs.VERSION }}
         run: |
-          PREVIOUS=$(git describe --tags --abbrev=0 "v${{ steps.version.outputs.VERSION }}^" 2>/dev/null || echo "")
-          echo "PREVIOUS=$PREVIOUS" >> $GITHUB_OUTPUT
-
-      - name: Get tag annotation
-        id: tag_annotation
-        run: |
-          ANNOTATION=$(git tag -l --format='%(contents)' "v${{ steps.version.outputs.VERSION }}")
-          echo "ANNOTATION<<EOF" >> $GITHUB_OUTPUT
-          echo "$ANNOTATION" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          PREVIOUS=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)
+          echo "PREVIOUS=$PREVIOUS" >> "$GITHUB_OUTPUT"
 
       - name: Build release body
         id: release_body
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          PREVIOUS: ${{ steps.previous_tag.outputs.PREVIOUS }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          PREVIOUS="${{ steps.previous_tag.outputs.PREVIOUS }}"
-          CURRENT="v${{ steps.version.outputs.VERSION }}"
-          {
-            echo "BODY<<EOF"
-            echo "${{ steps.tag_annotation.outputs.ANNOTATION }}"
-            if [ -n "$PREVIOUS" ]; then
-              echo ""
-              echo ""
-              echo "**Full changelog:** [$PREVIOUS..$CURRENT](https://github.com/${{ github.repository }}/compare/$PREVIOUS..$CURRENT)"
-            fi
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          CURRENT="v$VERSION"
+          BODY_PATH=$(mktemp "$RUNNER_TEMP/anvil-release-body.XXXXXX")
+          git cat-file tag "$CURRENT" | sed '1,/^$/d' > "$BODY_PATH"
+          if [ -n "$PREVIOUS" ]; then
+            printf '\n\n**Full changelog:** [%s..%s](https://github.com/%s/compare/%s..%s)\n' \
+              "$PREVIOUS" "$CURRENT" "$REPOSITORY" "$PREVIOUS" "$CURRENT" >> "$BODY_PATH"
+          fi
+          echo "BODY_PATH=$BODY_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -162,15 +171,17 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: v${{ steps.version.outputs.VERSION }}
-          body: ${{ steps.release_body.outputs.BODY }}
+          body_path: ${{ steps.release_body.outputs.BODY_PATH }}
           files: release-artifacts/*
 
       - name: Trigger Homebrew formula update
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           gh api repos/naoray/homebrew-tap/dispatches \
             --method POST \
             --field event_type=update-formula \
-            --field client_payload[version]="${{ steps.version.outputs.VERSION }}" \
-            --field client_payload[repository]="${{ github.repository }}"
+            --field "client_payload[version]=$VERSION" \
+            --field "client_payload[repository]=$REPOSITORY"

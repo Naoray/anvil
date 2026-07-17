@@ -449,6 +449,147 @@ func TestDbCreateStep(t *testing.T) {
 	})
 }
 
+func TestDbCreateStep_TestingRoleCreatesDerivedDatabaseAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Role: config.DbRoleTesting,
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	if err := step.Run(ctx, types.StepOptions{}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	assert.Equal(t, []string{"dashboard_top_provider_test"}, client.GetCreateCalls())
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 1)
+	assert.Equal(t, config.OwnedDatabase{
+		Name: "dashboard_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting,
+	}, state.Databases[0])
+	assert.Equal(t, "top_provider", state.DbSuffix)
+}
+
+func TestDbCreateStep_TestingRoleExistsIsSuccessNoRotationPGContract(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_top_provider_test")
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "pgsql",
+		Role: config.DbRoleTesting,
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	if err := step.Run(ctx, types.StepOptions{}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	assert.Equal(t, "top_provider", ctx.GetDbSuffix())
+	assert.Equal(t, []string{"dashboard_top_provider_test"}, client.GetCreateCalls())
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 1)
+	assert.Equal(t, "dashboard_top_provider_test", state.Databases[0].Name)
+}
+
+func TestDbCreateStep_TestingRoleNoSuffixOrSQLiteSkips(t *testing.T) {
+	t.Run("no suffix", func(t *testing.T) {
+		client := NewMockDatabaseClient()
+		step := NewDbCreateStepWithFactory(config.StepConfig{
+			Type: "mysql",
+			Role: config.DbRoleTesting,
+		}, MockClientFactory(client))
+		ctx := &types.ScaffoldContext{WorktreePath: t.TempDir(), SiteName: "Dashboard"}
+		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+		assert.Empty(t, client.GetCreateCalls())
+	})
+
+	t.Run("sqlite", func(t *testing.T) {
+		dir := t.TempDir()
+		client := NewMockDatabaseClient()
+		step := NewDbCreateStepWithFactory(config.StepConfig{
+			Type: "sqlite",
+			Role: config.DbRoleTesting,
+		}, MockClientFactory(client))
+		ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+		ctx.SetDbSuffix("top_provider")
+		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+		assert.Empty(t, client.GetCreateCalls())
+		assert.NoFileExists(t, filepath.Join(dir, "database", "database.sqlite"))
+	})
+}
+
+func TestDbCreateStep_ApplicationRolePersistsOwnedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "mysql"}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 1)
+	assert.Equal(t, config.OwnedDatabase{
+		Name: "dashboard_top_provider", Engine: "mysql", Role: config.DbRoleApplication,
+	}, state.Databases[0])
+}
+
+func TestDbCreateStep_BothRolesPersistenceFailureIsHardError(t *testing.T) {
+	for _, role := range []string{config.DbRoleApplication, config.DbRoleTesting} {
+		t.Run(role, func(t *testing.T) {
+			parent := t.TempDir()
+			worktreePath := filepath.Join(parent, "not-a-directory")
+			require.NoError(t, os.WriteFile(worktreePath, []byte("file"), 0o644))
+			client := NewMockDatabaseClient()
+			step := NewDbCreateStepWithFactory(config.StepConfig{
+				Type: "mysql",
+				Role: role,
+			}, MockClientFactory(client))
+			ctx := &types.ScaffoldContext{WorktreePath: worktreePath, SiteName: "Dashboard"}
+			ctx.SetDbSuffix("top_provider")
+
+			err := step.Run(ctx, types.StepOptions{})
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "recording ownership")
+		})
+	}
+}
+
+func TestCreateWithRetry_ExistsOnPersistedSuffixIdempotentNoRotationPGContract(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_top_provider")
+	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+	ctx.SetDbSuffixLoadedFromState()
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	assert.Equal(t, "top_provider", ctx.GetDbSuffix())
+	assert.Equal(t, []string{"dashboard_top_provider"}, client.GetCreateCalls())
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 1)
+	assert.Equal(t, "dashboard_top_provider", state.Databases[0].Name)
+}
+
+func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_collision")
+	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("collision")
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	assert.NotEqual(t, "collision", ctx.GetDbSuffix())
+	assert.Len(t, client.GetCreateCalls(), 2)
+	assert.Equal(t, "dashboard_collision", client.GetCreateCalls()[0])
+}
+
 func TestDbDestroyStep(t *testing.T) {
 	t.Run("name returns db.destroy", func(t *testing.T) {
 		step := NewDbDestroyStep(config.StepConfig{})
@@ -505,9 +646,9 @@ func TestDbDestroyStep(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "swift_runner", ctx.GetDbSuffix(), "DbSuffix should be read from local state")
 
-		listCalls := mockClient.listCalls
+		listCalls := mockClient.GetListCalls()
 		assert.Len(t, listCalls, 1)
-		assert.Equal(t, "%_swift_runner", listCalls[0])
+		assert.Equal(t, `%\_swift\_runner`, listCalls[0])
 	})
 
 	t.Run("drops databases matching suffix", func(t *testing.T) {
@@ -627,12 +768,12 @@ func TestDbDestroyStep(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "context_suffix", ctx.GetDbSuffix(), "Should use DbSuffix from context, not local state")
 
-		listCalls := mockClient.listCalls
+		listCalls := mockClient.GetListCalls()
 		assert.Len(t, listCalls, 1)
-		assert.Equal(t, "%_context_suffix", listCalls[0], "Should search with context suffix")
+		assert.Equal(t, `%\_context\_suffix`, listCalls[0], "Should search with escaped context suffix")
 	})
 
-	t.Run("skips when database ping fails", func(t *testing.T) {
+	t.Run("returns database ping failure", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envFile := filepath.Join(tmpDir, ".env")
@@ -650,7 +791,7 @@ func TestDbDestroyStep(t *testing.T) {
 		ctx.SetDbSuffix("test_suffix")
 
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
-		assert.NoError(t, err, "Should not error when ping fails, just skip")
+		assert.ErrorContains(t, err, "connection refused")
 	})
 
 	t.Run("skips sqlite engine", func(t *testing.T) {

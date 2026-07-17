@@ -20,6 +20,7 @@ var skipFirstRunCommands = map[string]bool{
 	"__completeNoDesc": true,
 	"version":          true,
 	"help":             true,
+	"exec":             true,
 }
 
 // shouldRunSetupWizard returns true when the setup wizard should be triggered.
@@ -190,6 +191,7 @@ Commands:
   remove       Remove a worktree
   prune        Remove merged worktrees
   scaffold     Run scaffold steps for a worktree
+  exec         Run a command with the worktree test database
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project
   install      Setup global configuration

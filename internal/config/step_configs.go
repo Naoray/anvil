@@ -139,12 +139,18 @@ type DbCreateConfig struct {
 	BaseStepConfig
 	Args []string `mapstructure:"args"`
 	Type string   `mapstructure:"type"`
+	Role string   `mapstructure:"role"`
 }
 
 // Validate checks that the db.create step config is valid.
 // All fields are optional for db.create.
 func (c DbCreateConfig) Validate() error {
-	return nil
+	switch c.Role {
+	case "", DbRoleApplication, DbRoleTesting:
+		return nil
+	default:
+		return fmt.Errorf("db.create: invalid role %q (supported roles: application, testing)", c.Role)
+	}
 }
 
 // DbDestroyConfig represents configuration for db.destroy step
@@ -217,6 +223,7 @@ func ValidateStepConfig(stepName string, cfg StepConfig) error {
 			BaseStepConfig: base,
 			Args:           cfg.Args,
 			Type:           cfg.Type,
+			Role:           cfg.Role,
 		}.Validate()
 	case StepDbDestroy:
 		return DbDestroyConfig{

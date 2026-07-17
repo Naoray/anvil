@@ -33,8 +33,9 @@ var Nouns = []string{
 }
 
 const (
-	MaxDbNameLength = 63
-	SuffixMaxLength = 25
+	MaxDbNameLength     = 63
+	MaxTestDbNameLength = 54
+	SuffixMaxLength     = 25
 )
 
 func GenerateSuffix() string {
@@ -80,6 +81,12 @@ func BuildDatabaseName(siteName string, suffix string, maxLength int) string {
 	}
 
 	return fmt.Sprintf("%s_%s", sanitized, suffix)
+}
+
+// BuildTestDatabaseName reserves enough identifier headroom for Laravel's
+// "_test_<token>" parallel-worker suffix under PostgreSQL's 63-byte limit.
+func BuildTestDatabaseName(siteName string, suffix string) string {
+	return BuildDatabaseName(siteName, suffix+"_test", MaxTestDbNameLength)
 }
 
 func ExtractSuffix(dbName string) string {
