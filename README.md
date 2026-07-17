@@ -966,6 +966,7 @@ This creates: `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 - Preserves file permissions
 - Maintains existing formatting (comments, blank lines, ordering)
 - Creates directories as needed
+- The Laravel preset clears PHPStan/Larastan's result cache after creating or updating `.env` when `vendor/bin/phpstan` is available; projects without PHPStan are skipped
 
 **Error Handling**
 - Graceful degradation where appropriate
