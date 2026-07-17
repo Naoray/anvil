@@ -13,13 +13,26 @@ jobs:
         with:
           ref: main
 
+      - name: Check for existing release heading
+        id: heading
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if grep -Fq -- "## [$RELEASE_TAG]" CHANGELOG.md; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Update Changelog
+        if: steps.heading.outputs.exists == 'false'
         uses: stefanzweifel/changelog-updater-action@v1
         with:
           latest-version: ${{ github.event.release.name }}
           release-notes: ${{ github.event.release.body }}
 
       - name: Commit updated CHANGELOG
+        if: steps.heading.outputs.exists == 'false'
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: main
