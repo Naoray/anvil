@@ -1,6 +1,6 @@
 ---
 name: anvil-agent
-description: Use when working in repositories managed by Anvil, a git worktree manager for agentic development. Covers worktree commands and workflow, scaffold configuration, isolated application and test databases, read-only command execution with anvil exec, safe cleanup, and development conventions for AI coding agents including Codex and Claude Code.
+description: Use when working in repositories managed by Anvil, a git worktree manager for agentic development. Covers worktree commands and workflow, scaffold configuration, Yerd and Herd local site drivers, isolated application and test databases, read-only command execution with anvil exec, safe cleanup, and development conventions for AI coding agents including Codex and Claude Code.
 ---
 
 # Anvil Agent
@@ -39,6 +39,27 @@ anvil prune                # Remove merged worktrees
 - Global config: `~/.config/anvil/anvil.yaml`
 
 Do not rewrite `.anvil.local` casually. Anvil preserves unknown fields and uses its ownership records to decide which databases cleanup may drop.
+
+## Local Site Driver
+
+Set the preferred Laravel site driver globally:
+
+```yaml
+# ~/.config/anvil/anvil.yaml
+site_driver: yerd
+```
+
+Supported values are `yerd` and `herd`. When unset, Anvil prefers Yerd when it is on `PATH`, then Herd, and otherwise defaults to Yerd. Set `site_driver: herd` to preserve the existing Herd workflow explicitly.
+
+For Yerd, the Laravel preset runs separate commands:
+
+```bash
+yerd link <site>
+yerd secure <site>
+yerd unlink <site>  # cleanup
+```
+
+Yerd is not flag-compatible with Herd. Do not translate `herd link --secure` by replacing only the binary name. Anvil uses the same derived site name for scaffold and cleanup, including the default branch.
 
 ## Test Database Isolation
 

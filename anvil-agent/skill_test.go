@@ -18,6 +18,10 @@ func TestSkillContentIsEmbedded(t *testing.T) {
 		[]byte("databases:"),
 		[]byte("--keep-db"),
 		[]byte("PHPStan/Larastan"),
+		[]byte("site_driver"),
+		[]byte("yerd link"),
+		[]byte("yerd secure"),
+		[]byte("yerd unlink"),
 	}
 	for _, fragment := range requiredGuidance {
 		if !bytes.Contains(Content, fragment) {
