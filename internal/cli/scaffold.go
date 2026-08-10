@@ -134,14 +134,7 @@ Examples:
 		}
 
 		repoName := filepath.Base(pc.ProjectPath)
-		worktreeName := filepath.Base(selectedWorktree.Path)
-
-		// For the default branch, use the saved SiteName from project config
-		// For feature branches, use the worktree folder name
-		siteName := worktreeName
-		if selectedWorktree.Branch == pc.DefaultBranch && pc.Config.SiteName != "" {
-			siteName = pc.Config.SiteName
-		}
+		siteName := worktreeSiteName(selectedWorktree.Path, selectedWorktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 
 		if err := pc.ScaffoldManager().RunScaffold(selectedWorktree.Path, selectedWorktree.Branch, repoName, siteName, preset, pc.Config, dryRun, verbose, quiet); err != nil {
 			ui.PrintErrorWithHint("Scaffold steps failed", err.Error())

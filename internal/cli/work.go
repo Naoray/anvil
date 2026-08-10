@@ -132,14 +132,7 @@ available branches or entering a new branch name.`,
 			}
 
 			repoName := filepath.Base(filepath.Dir(absWorktreePath))
-			folderName := filepath.Base(absWorktreePath)
-
-			// For the default branch, use the saved SiteName from project config
-			// For feature branches, use the worktree folder name
-			siteName := folderName
-			if branch == pc.DefaultBranch && pc.Config.SiteName != "" {
-				siteName = pc.Config.SiteName
-			}
+			siteName := worktreeSiteName(absWorktreePath, branch, pc.DefaultBranch, pc.Config.SiteName)
 
 			if err := pc.ScaffoldManager().RunScaffold(absWorktreePath, branch, repoName, siteName, preset, pc.Config, false, verbose, quiet); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())

@@ -73,7 +73,7 @@ anvil install
 
 The wizard will:
 1. Check your PATH
-2. Detect Herd/Valet
+2. Detect Yerd/Herd/Valet and select a site driver
 3. Install shell completions
 4. Set a default projects root
 5. Optionally install AI CLI skills (Codex CLI, Claude Code, etc.)
@@ -267,7 +267,7 @@ anvil scaffold
 
 ### `anvil open <WORKTREE>`
 
-Open a worktree in your IDE and its Herd-linked site in the browser with a single command. Supports fuzzy matching by folder name, branch name, or partial match.
+Open a worktree in your IDE and its locally linked site in the browser with a single command. Supports fuzzy matching by folder name, branch name, or partial match.
 
 ```bash
 # Open in both IDE and browser
@@ -354,7 +354,7 @@ anvil repair --tracking-only
 
 ### `anvil install`
 
-Setup global configuration and detect available tools (gh, herd, php, composer, npm). Creates `~/.config/anvil/anvil.yaml`.
+Setup global configuration and detect available tools (gh, yerd, herd, php, composer, npm). Creates `~/.config/anvil/anvil.yaml`.
 
 ```bash
 anvil install
@@ -508,6 +508,14 @@ is given — databases are then left untouched and unrecorded.
 
 Anvil uses a three-tier configuration system to separate team configuration from local state.
 
+The local PHP site driver is selected globally in `~/.config/anvil/anvil.yaml`:
+
+```yaml
+site_driver: yerd
+```
+
+Supported values are `yerd` and `herd`. When `site_driver` is omitted, Anvil prefers Yerd when it is on `PATH`, falls back to Herd, and otherwise defaults to Yerd. The setup wizard saves the detected selection.
+
 ### Configuration Hierarchy
 
 #### 1. Project Config (`<project-root>/anvil.yaml`)
@@ -619,7 +627,7 @@ scaffold:
       # Check commands/binaries are installed
       command_exists:
         - op        # 1Password CLI
-        - herd      # Laravel Herd
+        - yerd      # Yerd local PHP environment
         - composer
       
       # Check required files exist
@@ -896,11 +904,16 @@ Capture command output:
   value: "{{ .LaravelVersion }}"
 ```
 
-**`herd.link`** - Laravel Herd link
+**`yerd`** - Yerd site management
 
 ```yaml
-- name: herd.link
+- name: yerd
+  args: ["link", "{{ .SiteName }}"]
+- name: yerd
+  args: ["secure", "{{ .SiteName }}"]
 ```
+
+The `herd` binary step remains available when `site_driver: herd` is configured.
 
 #### Utility Steps
 

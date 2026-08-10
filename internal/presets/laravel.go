@@ -12,11 +12,12 @@ type Laravel struct {
 	basePreset
 }
 
-func NewLaravel() *Laravel {
+func NewLaravel(siteDrivers ...config.SiteDriver) *Laravel {
+	siteDriver := resolveSiteDriver(siteDrivers)
 	return &Laravel{
 		basePreset: basePreset{
 			name: "laravel",
-			defaultSteps: []config.StepConfig{
+			defaultSteps: append([]config.StepConfig{
 				{Name: "php.composer", Args: []string{"install"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "composer.lock"}}},
 				{Name: "php.composer", Args: []string{"update"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"not": map[string]any{"file_exists": "composer.lock"}}}},
 				{Name: config.StepFileCopy, From: ".env.example", To: ".env"},
@@ -30,12 +31,8 @@ func NewLaravel() *Laravel {
 				{Name: "php.laravel", Args: []string{"migrate:fresh", "--seed", "--no-interaction"}},
 				{Name: "node.npm", Args: []string{"run", "build"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "package-lock.json"}}},
 				{Name: "php.laravel", Args: []string{"storage:link", "--no-interaction"}},
-				{Name: "herd", Args: []string{"link", "--secure", "{{ .SiteName }}"}},
-			},
-			cleanupSteps: []config.CleanupStep{
-				{Name: "herd"},
-				{Name: config.StepDbDestroy},
-			},
+			}, siteScaffoldSteps(siteDriver)...),
+			cleanupSteps: append(siteCleanupSteps(siteDriver), config.CleanupStep{Name: config.StepDbDestroy}),
 		},
 	}
 }

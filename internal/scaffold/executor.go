@@ -228,6 +228,7 @@ func getStepDescription(step types.ScaffoldStep) string {
 		config.StepBashRun:     "Running bash command",
 		config.StepCommandRun:  "Running command",
 		"herd":                 "Managing Herd",
+		"yerd":                 "Managing Yerd",
 	}
 
 	baseDesc := descriptions[stepName]
@@ -258,12 +259,12 @@ func getStepDescription(step types.ScaffoldStep) string {
 		}
 	}
 
-	// For herd commands, try to extract the subcommand
-	if stepName == "herd" {
+	// For local site driver commands, try to extract the subcommand.
+	if stepName == "herd" || stepName == "yerd" {
 		if argGetter, ok := step.(interface{ GetArgs() []string }); ok {
 			args := argGetter.GetArgs()
 			if len(args) > 0 {
-				baseDesc = fmt.Sprintf("Running herd %s", args[0])
+				baseDesc = fmt.Sprintf("Running %s %s", stepName, args[0])
 			}
 		}
 	}

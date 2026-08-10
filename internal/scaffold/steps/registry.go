@@ -161,6 +161,7 @@ var binaries = []binaryDefinition{
 	{"node.pnpm", "pnpm"},
 	{"node.bun", "bun"},
 	{"herd", "herd"},
+	{"yerd", "yerd"},
 }
 
 func init() {

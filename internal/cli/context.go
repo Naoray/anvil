@@ -202,10 +202,11 @@ func (pc *ProjectContext) ScaffoldManager() *scaffold.ScaffoldManager {
 }
 
 func (pc *ProjectContext) initManagers() {
+	siteDriver := pc.GlobalConfig.ResolveSiteDriver(nil)
 	stepRegistry := steps.NewRegistry()
 	stepRegistry.RegisterDefaults()
 
-	pc.presetManager = presets.NewManager()
+	pc.presetManager = presets.NewManager(siteDriver)
 	pc.scaffoldManager = scaffold.NewScaffoldManagerWithRegistry(stepRegistry)
-	presets.RegisterAllWithScaffold(pc.scaffoldManager)
+	presets.RegisterAllWithScaffold(pc.scaffoldManager, siteDriver)
 }

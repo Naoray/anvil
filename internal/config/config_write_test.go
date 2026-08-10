@@ -122,7 +122,7 @@ custom_field: custom_value
 }
 
 func TestGlobalConfigNewFields(t *testing.T) {
-	t.Run("round-trip SetupComplete and DefaultProjectsRoot", func(t *testing.T) {
+	t.Run("round-trip setup fields and site driver", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
@@ -131,6 +131,7 @@ func TestGlobalConfigNewFields(t *testing.T) {
 			DetectedTools:       map[string]bool{},
 			SetupComplete:       true,
 			DefaultProjectsRoot: "~/Projects",
+			SiteDriver:          SiteDriverYerd,
 		}
 
 		if err := SaveGlobalConfig(cfg); err != nil {
@@ -148,6 +149,9 @@ func TestGlobalConfigNewFields(t *testing.T) {
 		if loaded.DefaultProjectsRoot != "~/Projects" {
 			t.Errorf("expected DefaultProjectsRoot '~/Projects', got '%s'", loaded.DefaultProjectsRoot)
 		}
+		if loaded.SiteDriver != SiteDriverYerd {
+			t.Errorf("expected SiteDriver %q, got %q", SiteDriverYerd, loaded.SiteDriver)
+		}
 	})
 
 	t.Run("SetupComplete defaults to false when not set", func(t *testing.T) {
@@ -161,6 +165,38 @@ func TestGlobalConfigNewFields(t *testing.T) {
 
 		if cfg.SetupComplete {
 			t.Error("expected SetupComplete to default to false")
+		}
+	})
+}
+
+func TestGlobalConfigResolveSiteDriver(t *testing.T) {
+	t.Run("honors explicit selection", func(t *testing.T) {
+		cfg := &GlobalConfig{SiteDriver: SiteDriverHerd}
+		if got := cfg.ResolveSiteDriver(func(string) (string, error) {
+			return "/usr/local/bin/yerd", nil
+		}); got != SiteDriverHerd {
+			t.Fatalf("ResolveSiteDriver() = %q, want %q", got, SiteDriverHerd)
+		}
+	})
+
+	t.Run("prefers yerd when no selection is saved", func(t *testing.T) {
+		cfg := &GlobalConfig{}
+		if got := cfg.ResolveSiteDriver(func(name string) (string, error) {
+			return "/usr/local/bin/" + name, nil
+		}); got != SiteDriverYerd {
+			t.Fatalf("ResolveSiteDriver() = %q, want %q", got, SiteDriverYerd)
+		}
+	})
+
+	t.Run("falls back to herd when yerd is unavailable", func(t *testing.T) {
+		cfg := &GlobalConfig{}
+		if got := cfg.ResolveSiteDriver(func(name string) (string, error) {
+			if name == string(SiteDriverHerd) {
+				return "/usr/local/bin/herd", nil
+			}
+			return "", os.ErrNotExist
+		}); got != SiteDriverHerd {
+			t.Fatalf("ResolveSiteDriver() = %q, want %q", got, SiteDriverHerd)
 		}
 	})
 }

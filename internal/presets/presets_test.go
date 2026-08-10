@@ -68,7 +68,7 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	preset := NewLaravel()
 	steps := preset.DefaultSteps()
 
-	require.Len(t, steps, 14)
+	require.Len(t, steps, 15)
 
 	assert.Equal(t, "php.composer", steps[0].Name)
 	assert.Equal(t, []string{"install"}, steps[0].Args)
@@ -120,6 +120,16 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 	assert.Equal(t, "php.laravel", steps[12].Name)
 	assert.Equal(t, []string{"storage:link", "--no-interaction"}, steps[12].Args)
 
+	assert.Equal(t, "yerd", steps[13].Name)
+	assert.Equal(t, []string{"link", "{{ .SiteName }}"}, steps[13].Args)
+	assert.Equal(t, "yerd", steps[14].Name)
+	assert.Equal(t, []string{"secure", "{{ .SiteName }}"}, steps[14].Args)
+}
+
+func TestLaravelPreset_HerdCompatibility(t *testing.T) {
+	steps := NewLaravel(config.SiteDriverHerd).DefaultSteps()
+
+	require.Len(t, steps, 14)
 	assert.Equal(t, "herd", steps[13].Name)
 	assert.Equal(t, []string{"link", "--secure", "{{ .SiteName }}"}, steps[13].Args)
 }
@@ -231,7 +241,8 @@ func TestLaravelPreset_CleanupSteps(t *testing.T) {
 	steps := preset.CleanupSteps()
 
 	assert.Len(t, steps, 2)
-	assert.Equal(t, "herd", steps[0].Name)
+	assert.Equal(t, "yerd", steps[0].Name)
+	assert.Equal(t, []string{"unlink", "{{ .SiteName }}"}, steps[0].Args)
 	assert.Equal(t, "db.destroy", steps[1].Name)
 }
 
@@ -245,6 +256,23 @@ func TestLaravelSharedDBPreset_HasNoDatabaseSteps(t *testing.T) {
 		assert.NotEqual(t, config.StepDbCreate, step.Name)
 		assert.NotEqual(t, config.StepDbDestroy, step.Name)
 	}
+}
+
+func TestLaravelSharedDBPreset_DefaultStepsAreConstructible(t *testing.T) {
+	registry := scaffoldsteps.NewRegistry()
+	registry.RegisterDefaults()
+	manager := scaffold.NewScaffoldManagerWithRegistry(registry)
+	manager.RegisterPreset(NewLaravelSharedDB())
+
+	steps, err := manager.GetStepsForWorktree(
+		&config.Config{Preset: "laravel-shared-db"},
+		t.TempDir(),
+		"feature/yerd",
+	)
+	require.NoError(t, err)
+	require.Len(t, steps, 9)
+	assert.Equal(t, "yerd", steps[7].Name())
+	assert.Equal(t, "yerd", steps[8].Name())
 }
 
 func TestPHPPreset_Detect(t *testing.T) {

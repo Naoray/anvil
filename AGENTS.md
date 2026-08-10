@@ -65,8 +65,8 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 - `node.yarn` - Run yarn
 - `node.pnpm` - Run pnpm
 - `node.bun` - Run bun
-- `herd` - Run herd (e.g., `link --secure`, `unlink`)
-- `herd.link` - Link worktree to Herd
+- `yerd` - Run Yerd (e.g., `link`, `secure`, `unlink`)
+- `herd` - Run Herd for projects using the compatibility `site_driver: herd` setting
 
 **Special Steps:** Perform scaffold operations
 - `file.copy` - Copy files

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +24,14 @@ const (
 )
 
 const DefaultBranch = "main"
+
+// SiteDriver identifies the local PHP development environment used to serve sites.
+type SiteDriver string
+
+const (
+	SiteDriverYerd SiteDriver = "yerd"
+	SiteDriverHerd SiteDriver = "herd"
+)
 
 // DefaultRemote is the default git remote name.
 const DefaultRemote = "origin"
@@ -221,6 +230,29 @@ type GlobalConfig struct {
 	Projects            map[string]*ProjectInfo `mapstructure:"projects"`
 	SetupComplete       bool                    `mapstructure:"setup_complete"`
 	DefaultProjectsRoot string                  `mapstructure:"default_projects_root"`
+	SiteDriver          SiteDriver              `mapstructure:"site_driver"`
+}
+
+// ResolveSiteDriver returns the configured site driver, or detects one from PATH.
+// Yerd is preferred for unset configurations; Herd remains available for compatibility.
+func (gc *GlobalConfig) ResolveSiteDriver(lookPath func(string) (string, error)) SiteDriver {
+	if gc != nil {
+		switch gc.SiteDriver {
+		case SiteDriverYerd, SiteDriverHerd:
+			return gc.SiteDriver
+		}
+	}
+
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if _, err := lookPath(string(SiteDriverYerd)); err == nil {
+		return SiteDriverYerd
+	}
+	if _, err := lookPath(string(SiteDriverHerd)); err == nil {
+		return SiteDriverHerd
+	}
+	return SiteDriverYerd
 }
 
 // ProjectInfo represents a linked project's configuration
@@ -561,6 +593,7 @@ func CreateGlobalConfig(config *GlobalConfig) error {
 		"default_branch": config.DefaultBranch,
 		"detected_tools": config.DetectedTools,
 		"scaffold":       config.Scaffold,
+		"site_driver":    config.SiteDriver,
 	}); err != nil {
 		return fmt.Errorf("merging config: %w", err)
 	}
@@ -606,6 +639,10 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 
 	if config.DefaultProjectsRoot != "" {
 		configMap["default_projects_root"] = config.DefaultProjectsRoot
+	}
+
+	if config.SiteDriver != "" {
+		configMap["site_driver"] = config.SiteDriver
 	}
 
 	if config.Projects != nil {

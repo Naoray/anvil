@@ -122,7 +122,7 @@ Arguments:
   FOLDER  Name of the worktree folder to remove (e.g., feature-test-change)
 
 Cleanup steps may include:
-  - Removing Herd site links
+  - Removing local site links
   - Database cleanup prompts`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeWorktreeNames,
@@ -231,7 +231,7 @@ Cleanup steps may include:
 			}
 
 			if preset != "" {
-				siteName := filepath.Base(targetWorktree.Path)
+				siteName := worktreeSiteName(targetWorktree.Path, targetWorktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 				if err := deps.scaffoldManager(pc).RunCleanupWithOptions(
 					targetWorktree.Path,
 					targetWorktree.Branch,

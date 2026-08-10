@@ -5,19 +5,22 @@ import (
 	"io"
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
 
 type Manager struct {
-	presets map[string]Preset
+	presets     map[string]Preset
+	presetOrder []Preset
 }
 
-func NewManager() *Manager {
+func NewManager(siteDrivers ...config.SiteDriver) *Manager {
 	m := &Manager{
-		presets: make(map[string]Preset),
+		presets:     make(map[string]Preset),
+		presetOrder: make([]Preset, 0),
 	}
-	for _, p := range builtInPresets {
+	for _, p := range builtInPresets(resolveSiteDriver(siteDrivers)) {
 		m.Register(p)
 	}
 	return m
@@ -25,6 +28,7 @@ func NewManager() *Manager {
 
 func (m *Manager) Register(preset Preset) {
 	m.presets[preset.Name()] = preset
+	m.presetOrder = append(m.presetOrder, preset)
 }
 
 func (m *Manager) Get(name string) (Preset, bool) {
@@ -36,15 +40,17 @@ func (m *Manager) Get(name string) (Preset, bool) {
 // IMPORTANT: Order matters! More specific presets (e.g., Laravel) must come before
 // generic ones (e.g., PHP) to ensure correct detection. When adding new presets,
 // place them according to specificity (e.g., Next.js before React before JavaScript).
-var builtInPresets = []Preset{
-	NewLaravelSharedDB(), // shared-database Laravel app (config-only, no auto-detect)
-	NewLaravel(),
-	NewPHP(),
+func builtInPresets(siteDriver config.SiteDriver) []Preset {
+	return []Preset{
+		NewLaravelSharedDB(siteDriver), // shared-database Laravel app (config-only, no auto-detect)
+		NewLaravel(siteDriver),
+		NewPHP(),
+	}
 }
 
 // RegisterAllWithScaffold registers all built-in presets with a scaffold manager
-func RegisterAllWithScaffold(m *scaffold.ScaffoldManager) {
-	for _, p := range builtInPresets {
+func RegisterAllWithScaffold(m *scaffold.ScaffoldManager, siteDrivers ...config.SiteDriver) {
+	for _, p := range builtInPresets(resolveSiteDriver(siteDrivers)) {
 		m.RegisterPreset(p)
 	}
 }
@@ -53,7 +59,7 @@ func (m *Manager) Detect(path string) string {
 	// Iterate in priority order (most specific first) using the ordered slice
 	// instead of the map to ensure deterministic detection.
 	// builtInPresets is ordered from most specific (Laravel) to least specific (PHP).
-	for _, preset := range builtInPresets {
+	for _, preset := range m.presetOrder {
 		if preset.Detect(path) {
 			return preset.Name()
 		}

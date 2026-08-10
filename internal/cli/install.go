@@ -21,7 +21,7 @@ var installCmd = &cobra.Command{
 	Short: "Setup global configuration and run setup wizard",
 	Long: `Runs the interactive setup wizard to configure anvil.
 
-The wizard checks your PATH, detects Herd/Valet, installs shell completions,
+The wizard checks your PATH, detects Yerd/Herd/Valet, installs shell completions,
 sets a default projects root, and optionally installs AI CLI skills.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInstallWizard(cmd)
@@ -49,8 +49,8 @@ func runInstallWizard(cmd *cobra.Command) error {
 	}
 	fmt.Println()
 
-	// Step 2: Herd / Valet check
-	fmt.Println(ui.HeaderStyle.Render("[2/5] Herd / Valet check"))
+	// Step 2: Local site driver check
+	fmt.Println(ui.HeaderStyle.Render("[2/5] Yerd / Herd / Valet check"))
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)
@@ -61,19 +61,25 @@ func runInstallWizard(cmd *cobra.Command) error {
 	}
 	valetPath := filepath.Join(home, ".valet")
 
-	herdFound := false
-	for _, h := range herdPaths {
-		if _, err := os.Stat(h.path); err == nil {
-			ui.PrintSuccess(fmt.Sprintf("Herd detected at %s", h.label))
-			herdFound = true
-			break
+	siteDriverFound := false
+	if path, err := exec.LookPath("yerd"); err == nil {
+		ui.PrintSuccess(fmt.Sprintf("Yerd detected at %s", path))
+		siteDriverFound = true
+	}
+	if !siteDriverFound {
+		for _, h := range herdPaths {
+			if _, err := os.Stat(h.path); err == nil {
+				ui.PrintSuccess(fmt.Sprintf("Herd detected at %s", h.label))
+				siteDriverFound = true
+				break
+			}
 		}
 	}
-	if !herdFound {
+	if !siteDriverFound {
 		if _, err := os.Stat(valetPath); err == nil {
 			ui.PrintSuccess("Valet detected at ~/.valet")
 		} else {
-			ui.PrintWarning("Herd or Valet not detected — worktree features require one of these")
+			ui.PrintWarning("Yerd, Herd, or Valet not detected — site linking requires one of these")
 		}
 	}
 	fmt.Println()
@@ -123,7 +129,7 @@ func runInstallWizard(cmd *cobra.Command) error {
 	// Detect tools and save
 	detectedTools := make(map[string]bool)
 	toolsInfo := make(map[string]config.ToolInfo)
-	tools := []string{"gh", "herd", "php", "composer", "npm"}
+	tools := []string{"gh", "yerd", "herd", "php", "composer", "npm"}
 	var toolRows [][]string
 	for _, tool := range tools {
 		toolPath, version, err := detectTool(tool)
@@ -139,6 +145,16 @@ func runInstallWizard(cmd *cobra.Command) error {
 
 	globalCfg.DetectedTools = detectedTools
 	globalCfg.Tools = toolsInfo
+	if globalCfg.SiteDriver == "" {
+		switch {
+		case detectedTools[string(config.SiteDriverYerd)]:
+			globalCfg.SiteDriver = config.SiteDriverYerd
+		case detectedTools[string(config.SiteDriverHerd)]:
+			globalCfg.SiteDriver = config.SiteDriverHerd
+		default:
+			globalCfg.SiteDriver = config.SiteDriverYerd
+		}
+	}
 	if globalCfg.DefaultBranch == "" {
 		globalCfg.DefaultBranch = config.DefaultBranch
 	}
@@ -349,6 +365,8 @@ func getToolVersion(name, path string) (string, error) {
 		cmd = exec.Command(path, "--version")
 	case "herd":
 		cmd = exec.Command(path, "version")
+	case "yerd":
+		cmd = exec.Command(path, "--version")
 	default:
 		return "", fmt.Errorf("unknown tool")
 	}
@@ -406,6 +424,13 @@ func extractVersion(output, tool string) string {
 						return strings.TrimPrefix(part, "v")
 					}
 				}
+			}
+		}
+	case "yerd":
+		for _, line := range lines {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && strings.EqualFold(parts[0], "yerd") {
+				return strings.TrimPrefix(parts[1], "v")
 			}
 		}
 	}

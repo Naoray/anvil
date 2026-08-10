@@ -16,7 +16,7 @@ const defaultEditorCmd = "cursor"
 var openCmd = &cobra.Command{
 	Use:   "open <WORKTREE>",
 	Short: "Open a worktree in your IDE and browser",
-	Long: `Opens a worktree in your configured IDE and its Herd-linked site in the browser.
+	Long: `Opens a worktree in your configured IDE and its locally linked site in the browser.
 
 Arguments:
   WORKTREE  Name of the worktree (folder name, branch name, or partial match)

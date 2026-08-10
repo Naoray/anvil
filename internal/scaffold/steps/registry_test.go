@@ -78,6 +78,7 @@ func TestRegistry_StepRegistration(t *testing.T) {
 			"node.pnpm",
 			"node.bun",
 			"herd",
+			"yerd",
 		}
 
 		for _, stepName := range binarySteps {
@@ -254,7 +255,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 		registry.RegisterDefaults()
 
 		registered := registry.ListRegistered()
-		assert.Len(t, registered, 16) // 8 binary steps + 8 other steps
+		assert.Len(t, registered, 17) // 9 binary steps + 8 other steps
 
 		// Verify all expected steps are present
 		expectedSteps := []string{
@@ -267,6 +268,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 			"env.write",
 			"file.copy",
 			"herd",
+			"yerd",
 			"node.bun",
 			"node.npm",
 			"node.pnpm",

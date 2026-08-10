@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -132,7 +131,7 @@ func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool) error 
 				preset = pc.PresetManager().Detect(wt.Path)
 			}
 
-			siteName := filepath.Base(wt.Path)
+			siteName := worktreeSiteName(wt.Path, wt.Branch, pc.DefaultBranch, pc.Config.SiteName)
 			if err := pc.ScaffoldManager().RunCleanup(wt.Path, wt.Branch, "", siteName, preset, pc.Config, false, verbose, quiet); err != nil {
 				ui.PrintErrorWithHint("Cleanup failed", err.Error())
 			}
