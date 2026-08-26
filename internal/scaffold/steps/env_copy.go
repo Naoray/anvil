@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/fs"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/utils"
 )
@@ -17,12 +18,20 @@ type EnvCopyStep struct {
 	sourceFile string
 	keys       []string
 	file       string
+	fs         fs.FS
 }
 
 func NewEnvCopyStep(cfg config.StepConfig) *EnvCopyStep {
+	return NewEnvCopyStepWithFS(cfg, nil)
+}
+
+func NewEnvCopyStepWithFS(cfg config.StepConfig, filesystem fs.FS) *EnvCopyStep {
 	keys := cfg.Keys
 	if len(keys) == 0 && cfg.Key != "" {
 		keys = []string{cfg.Key}
+	}
+	if filesystem == nil {
+		filesystem = fs.Default
 	}
 
 	return &EnvCopyStep{
@@ -31,6 +40,7 @@ func NewEnvCopyStep(cfg config.StepConfig) *EnvCopyStep {
 		sourceFile: cfg.SourceFile,
 		keys:       keys,
 		file:       cfg.File,
+		fs:         filesystem,
 	}
 }
 
@@ -86,15 +96,15 @@ func (s *EnvCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	if err := s.fs.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return fmt.Errorf("creating parent directory: %w", err)
 	}
 
 	var content []byte
 	var oldPerms os.FileMode = 0644
-	if info, err := os.Stat(targetPath); err == nil {
+	if info, err := s.fs.Stat(targetPath); err == nil {
 		oldPerms = info.Mode().Perm()
-		content, err = os.ReadFile(targetPath)
+		content, err = s.fs.ReadFile(targetPath)
 		if err != nil {
 			return fmt.Errorf("reading target file: %w", err)
 		}
@@ -104,31 +114,8 @@ func (s *EnvCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 		content = updateEnvContent(content, key, value)
 	}
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), filepath.Base(targetPath)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpFileName := tmpFile.Name()
-
-	if _, err := tmpFile.Write(content); err != nil {
-		_ = tmpFile.Close()        // best-effort cleanup
-		_ = os.Remove(tmpFileName) // best-effort cleanup
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFileName) // best-effort cleanup
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	if err := os.Chmod(tmpFileName, oldPerms); err != nil {
-		_ = os.Remove(tmpFileName) // best-effort cleanup
-		return fmt.Errorf("setting permissions: %w", err)
-	}
-
-	if err := os.Rename(tmpFileName, targetPath); err != nil {
-		_ = os.Remove(tmpFileName) // best-effort cleanup
-		return fmt.Errorf("renaming temp file: %w", err)
+	if err := s.fs.AtomicWriteFile(targetPath, content, oldPerms); err != nil {
+		return fmt.Errorf("writing target file: %w", err)
 	}
 
 	if opts.Verbose {
