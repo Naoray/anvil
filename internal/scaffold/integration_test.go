@@ -187,7 +187,7 @@ APP_NAME=myapp
 
 		destroyStep := steps.NewDbDestroyStepWithFactory(config.StepConfig{
 			Type: "mysql",
-			Args: []string{"--host", "hermetic.invalid", "--port", "invalid"},
+			Args: []string{"--host=hermetic.invalid", "--port=invalid"},
 		}, func(engine string, options steps.DatabaseOptions) (steps.DatabaseClient, error) {
 			factoryEngines = append(factoryEngines, engine)
 			factoryOptions = append(factoryOptions, options)
