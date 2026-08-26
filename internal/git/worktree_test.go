@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -230,6 +231,123 @@ func TestListWorktrees(t *testing.T) {
 
 	assert.True(t, branches["main"], "should have main worktree")
 	assert.True(t, branches["feature"], "should have feature worktree")
+}
+
+func TestListWorktrees_RetainsDetachedAndLockedRecords(t *testing.T) {
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	featurePath := filepath.Join(t.TempDir(), "feature worktree")
+
+	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
+		t.Fatalf("creating feature worktree: %v", err)
+	}
+
+	cmd := exec.Command("git", "-C", featurePath, "checkout", "--detach")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detaching worktree: %v\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "-C", repoDir, "worktree", "lock", "--reason", "keep for review", featurePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("locking worktree: %v\n%s", err, output)
+	}
+	worktrees, err := ListWorktrees(gitDir)
+	if err != nil {
+		t.Fatalf("listing worktrees: %v", err)
+	}
+
+	var feature *Worktree
+	for i := range worktrees {
+		featurePathEval, evalErr := filepath.EvalSymlinks(featurePath)
+		if evalErr != nil {
+			t.Fatalf("resolving feature worktree path: %v", evalErr)
+		}
+		if worktrees[i].Path == featurePathEval {
+			feature = &worktrees[i]
+			break
+		}
+	}
+
+	if feature == nil {
+		t.Fatal("detached and locked worktree should be retained")
+	}
+	if !feature.Detached {
+		t.Error("worktree should be marked detached")
+	}
+	if !feature.Locked {
+		t.Error("worktree should be marked locked")
+	}
+	if feature.LockReason != "keep for review" {
+		t.Errorf("expected lock reason %q, got %q", "keep for review", feature.LockReason)
+	}
+}
+
+func TestParseWorktreePorcelain_RetainsStatesAndUnknownFields(t *testing.T) {
+	fixture := []byte(
+		"worktree /repo/main\x00HEAD abc\x00branch refs/heads/main\x00unknown ignored\x00locked\x00\x00" +
+			"worktree /repo/detached worktree\x00HEAD def\x00detached\x00locked keep this\x00\x00" +
+			"worktree /repo/bare worktree\x00HEAD ghi\x00bare\x00unknown value\x00\x00",
+	)
+
+	worktrees, err := parseWorktreePorcelain(fixture)
+	if err != nil {
+		t.Fatalf("parsing fixture: %v", err)
+	}
+
+	if len(worktrees) != 3 {
+		t.Fatalf("expected 3 worktrees, got %d", len(worktrees))
+	}
+
+	if worktrees[0].Path != "/repo/main" || worktrees[0].Branch != "main" || !worktrees[0].Locked || worktrees[0].LockReason != "" {
+		t.Errorf("unexpected attached record: %+v", worktrees[0])
+	}
+	if worktrees[1].Path != "/repo/detached worktree" || !worktrees[1].Detached || !worktrees[1].Locked || worktrees[1].LockReason != "keep this" {
+		t.Errorf("unexpected detached record: %+v", worktrees[1])
+	}
+	if worktrees[2].Path != "/repo/bare worktree" || !worktrees[2].Bare || worktrees[2].Branch != "" {
+		t.Errorf("unexpected bare record: %+v", worktrees[2])
+	}
+}
+
+func TestParseWorktreePorcelain_RejectsMalformedRecords(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture string
+		want    string
+	}{
+		{
+			name:    "missing path",
+			fixture: "HEAD abc\x00branch refs/heads/main\x00\x00",
+			want:    "missing worktree path",
+		},
+		{
+			name:    "malformed branch",
+			fixture: "worktree /repo\x00branch main\x00\x00",
+			want:    "malformed branch attribute",
+		},
+		{
+			name:    "conflicting detached branch",
+			fixture: "worktree /repo\x00branch refs/heads/main\x00detached\x00\x00",
+			want:    "conflicts with detached or bare state",
+		},
+		{
+			name:    "malformed detached",
+			fixture: "worktree /repo\x00detached unexpected\x00\x00",
+			want:    "malformed detached attribute",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseWorktreePorcelain([]byte(tt.fixture))
+			if err == nil {
+				t.Fatal("expected malformed fixture to fail")
+			}
+			if !strings.Contains(err.Error(), "record 0") || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected record context containing %q, got %v", tt.want, err)
+			}
+		})
+	}
 }
 
 func TestRemoveWorktree(t *testing.T) {

@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -14,11 +15,15 @@ import (
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Path      string
-	Branch    string
-	IsMain    bool
-	IsCurrent bool
-	IsMerged  bool
+	Path       string
+	Branch     string
+	Bare       bool
+	Detached   bool
+	Locked     bool
+	LockReason string
+	IsMain     bool
+	IsCurrent  bool
+	IsMerged   bool
 }
 
 // CreateWorktree creates a new worktree from a git directory
@@ -81,40 +86,128 @@ func RemoveWorktree(gitDir, worktreePath string, force bool) error {
 func ListWorktrees(gitDir string) ([]Worktree, error) {
 	repoPath := GetRepoPath(gitDir)
 
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain", "-z")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
-	var worktrees []Worktree
-	var currentPath string
-	var currentBranch string
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			currentPath = strings.TrimPrefix(line, "worktree ")
-			currentPath = strings.TrimSpace(currentPath)
-		} else if strings.HasPrefix(line, "branch refs/heads/") {
-			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
-			currentBranch = strings.TrimSpace(currentBranch)
-			if currentPath != "" && currentBranch != "" {
-				worktrees = append(worktrees, Worktree{
-					Path:   currentPath,
-					Branch: currentBranch,
-				})
-				currentPath = ""
-				currentBranch = "" //nolint:ineffassign // reset for clarity
-			}
-		}
+	worktrees, err := parseWorktreePorcelain(output)
+	if err != nil {
+		return nil, fmt.Errorf("parsing worktree records: %w", err)
 	}
 
 	return worktrees, nil
+}
+
+func parseWorktreePorcelain(output []byte) ([]Worktree, error) {
+	var records [][]string
+	var fields []string
+	for _, rawField := range bytes.Split(output, []byte{0}) {
+		if len(rawField) == 0 {
+			if len(fields) > 0 {
+				records = append(records, fields)
+				fields = nil
+			}
+			continue
+		}
+		fields = append(fields, string(rawField))
+	}
+	if len(fields) > 0 {
+		records = append(records, fields)
+	}
+
+	worktrees := make([]Worktree, 0, len(records))
+	for recordIndex, record := range records {
+		worktree, err := parseWorktreeRecord(recordIndex, record)
+		if err != nil {
+			return nil, err
+		}
+		worktrees = append(worktrees, worktree)
+	}
+
+	return worktrees, nil
+}
+
+func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
+	var worktree Worktree
+	var hasPath bool
+	var hasBranch bool
+	var hasDetached bool
+	var hasBare bool
+	var hasLocked bool
+
+	for _, field := range fields {
+		switch {
+		case strings.HasPrefix(field, "worktree "):
+			if hasPath {
+				return Worktree{}, fmt.Errorf("record %d: duplicate worktree path", recordIndex)
+			}
+			path := strings.TrimPrefix(field, "worktree ")
+			if strings.TrimSpace(path) == "" {
+				return Worktree{}, fmt.Errorf("record %d: worktree path is empty", recordIndex)
+			}
+			worktree.Path = path
+			hasPath = true
+		case strings.HasPrefix(field, "worktree"):
+			return Worktree{}, fmt.Errorf("record %d: malformed worktree attribute %q", recordIndex, field)
+		case strings.HasPrefix(field, "HEAD "):
+			if strings.TrimPrefix(field, "HEAD ") == "" {
+				return Worktree{}, fmt.Errorf("record %d: HEAD value is empty", recordIndex)
+			}
+		case field == "HEAD":
+			return Worktree{}, fmt.Errorf("record %d: malformed HEAD attribute", recordIndex)
+		case strings.HasPrefix(field, "branch "):
+			if hasBranch {
+				return Worktree{}, fmt.Errorf("record %d: duplicate branch attribute", recordIndex)
+			}
+			branchRef := strings.TrimPrefix(field, "branch ")
+			if !strings.HasPrefix(branchRef, "refs/heads/") || strings.TrimPrefix(branchRef, "refs/heads/") == "" {
+				return Worktree{}, fmt.Errorf("record %d: malformed branch attribute %q", recordIndex, field)
+			}
+			worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
+			hasBranch = true
+		case strings.HasPrefix(field, "branch"):
+			return Worktree{}, fmt.Errorf("record %d: malformed branch attribute %q", recordIndex, field)
+		case field == "detached":
+			if hasDetached {
+				return Worktree{}, fmt.Errorf("record %d: duplicate detached attribute", recordIndex)
+			}
+			worktree.Detached = true
+			hasDetached = true
+		case strings.HasPrefix(field, "detached"):
+			return Worktree{}, fmt.Errorf("record %d: malformed detached attribute %q", recordIndex, field)
+		case field == "bare":
+			if hasBare {
+				return Worktree{}, fmt.Errorf("record %d: duplicate bare attribute", recordIndex)
+			}
+			worktree.Bare = true
+			hasBare = true
+		case strings.HasPrefix(field, "bare"):
+			return Worktree{}, fmt.Errorf("record %d: malformed bare attribute %q", recordIndex, field)
+		case field == "locked", strings.HasPrefix(field, "locked "):
+			if hasLocked {
+				return Worktree{}, fmt.Errorf("record %d: duplicate locked attribute", recordIndex)
+			}
+			worktree.Locked = true
+			if field != "locked" {
+				worktree.LockReason = strings.TrimPrefix(field, "locked ")
+			}
+			hasLocked = true
+		}
+	}
+
+	if !hasPath {
+		return Worktree{}, fmt.Errorf("record %d: missing worktree path", recordIndex)
+	}
+	if hasBranch && (worktree.Detached || worktree.Bare) {
+		return Worktree{}, fmt.Errorf("record %d: branch conflicts with detached or bare state", recordIndex)
+	}
+	if worktree.Detached && worktree.Bare {
+		return Worktree{}, fmt.Errorf("record %d: detached state conflicts with bare state", recordIndex)
+	}
+
+	return worktree, nil
 }
 
 // ListWorktreesDetailed lists all worktrees with additional metadata
@@ -135,6 +228,9 @@ func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([
 		// Best-effort symlink resolution; falls back to raw path comparison
 		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
 		wt.IsCurrent = wtPathEval == currentWorktreePathEval
+		if wt.Branch == "" || wt.Bare || wt.Detached {
+			continue
+		}
 		if wt.Branch != defaultBranch {
 			cacheKey1 := wt.Branch + "->" + defaultBranch
 			featureInDefault, ok := mergeStatusCache[cacheKey1]
