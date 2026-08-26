@@ -179,7 +179,7 @@ func TestSelectWorktreeByContainment_RespectsSymlinkSemantics(t *testing.T) {
 }
 
 func TestScaffoldCommand_RejectsVerboseAndQuietBeforeOutput(t *testing.T) {
-	err := executeCommandForFlagValidation(t, scaffoldCmd, []string{"scaffold", "--verbose", "--quiet"}, "verbose", "quiet")
+	err := executeRootCommandForFlagValidation(t, scaffoldCmd, []string{"scaffold", "--verbose", "--quiet"}, "verbose", "quiet")
 
 	assert.EqualError(t, err, "if any flags in the group [verbose quiet] are set none of the others can be; [quiet verbose] were all set")
 }

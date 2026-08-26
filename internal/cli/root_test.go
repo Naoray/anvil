@@ -16,7 +16,7 @@ import (
 
 var errRootCommandRun = errors.New("root command run")
 
-func executeCommandForFlagValidation(t *testing.T, command *cobra.Command, args []string, flags ...string) error {
+func executeRootCommandForFlagValidation(t *testing.T, command *cobra.Command, args []string, flags ...string) error {
 	t.Helper()
 	lookupFlag := func(name string) *pflag.Flag {
 		if flag := rootCmd.PersistentFlags().Lookup(name); flag != nil {
@@ -64,7 +64,7 @@ func executeCommandForFlagValidation(t *testing.T, command *cobra.Command, args 
 }
 
 func TestRootCommand_RejectsVerboseAndQuietTogether(t *testing.T) {
-	err := executeCommandForFlagValidation(t, rootCmd, []string{"--verbose", "--quiet"}, "verbose", "quiet")
+	err := executeRootCommandForFlagValidation(t, rootCmd, []string{"--verbose", "--quiet"}, "verbose", "quiet")
 
 	assert.EqualError(t, err, "if any flags in the group [verbose quiet] are set none of the others can be; [quiet verbose] were all set")
 }
@@ -84,7 +84,7 @@ func TestRootCommand_AcceptsLegalOutputAndDryRunCombinations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := executeCommandForFlagValidation(t, rootCmd, tt.args, "dry-run", "verbose", "quiet")
+			err := executeRootCommandForFlagValidation(t, rootCmd, tt.args, "dry-run", "verbose", "quiet")
 
 			assert.ErrorIs(t, err, errRootCommandRun)
 		})
