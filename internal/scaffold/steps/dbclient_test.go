@@ -1,11 +1,58 @@
 package steps
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/go-sql-driver/mysql"
 )
+
+func TestMySQLClient_CreateDatabaseExistingReturnsDatabaseExistsError(t *testing.T) {
+	connector := &execErrorConnector{
+		err: &mysql.MySQLError{Number: 1007, Message: "create rejected"},
+	}
+	db := sql.OpenDB(connector)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	client := &MySQLClient{db: db}
+
+	err := client.CreateDatabase("dashboard_collision")
+	var existsErr *DatabaseExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("CreateDatabase() error = %T %v, want DatabaseExistsError", err, err)
+	}
+	if existsErr.Name != "dashboard_collision" {
+		t.Fatalf("DatabaseExistsError.Name = %q, want %q", existsErr.Name, "dashboard_collision")
+	}
+	if got, want := connector.query, "CREATE DATABASE `dashboard_collision`"; got != want {
+		t.Fatalf("CreateDatabase() query = %q, want %q", got, want)
+	}
+}
+
+func TestMySQLClient_CreateDatabaseSuccess(t *testing.T) {
+	connector := &execErrorConnector{}
+	db := sql.OpenDB(connector)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	client := &MySQLClient{db: db}
+
+	if err := client.CreateDatabase("dashboard_created"); err != nil {
+		t.Fatalf("CreateDatabase() error = %v", err)
+	}
+	if got, want := connector.query, "CREATE DATABASE `dashboard_created`"; got != want {
+		t.Fatalf("CreateDatabase() query = %q, want %q", got, want)
+	}
+}
 
 func TestEscapeLikePattern(t *testing.T) {
 	if got, want := EscapeLikePattern("dashboard_top_provider_test"), `dashboard\_top\_provider\_test`; got != want {
@@ -106,4 +153,52 @@ func (q *recordingDatabaseQueryer) Query(query string, args ...any) (*sql.Rows, 
 	q.query = query
 	q.args = append([]any(nil), args...)
 	return nil, q.err
+}
+
+type execErrorConnector struct {
+	err     error
+	errors  []error
+	query   string
+	queries []string
+}
+
+func (c *execErrorConnector) Connect(context.Context) (driver.Conn, error) {
+	return &execErrorConn{connector: c}, nil
+}
+
+func (c *execErrorConnector) Driver() driver.Driver {
+	return execErrorDriver{}
+}
+
+type execErrorDriver struct{}
+
+func (execErrorDriver) Open(string) (driver.Conn, error) {
+	return nil, errors.New("use connector")
+}
+
+type execErrorConn struct {
+	connector *execErrorConnector
+}
+
+func (c *execErrorConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare not supported")
+}
+
+func (c *execErrorConn) Close() error {
+	return nil
+}
+
+func (c *execErrorConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions not supported")
+}
+
+func (c *execErrorConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	c.connector.query = query
+	c.connector.queries = append(c.connector.queries, query)
+	if len(c.connector.errors) == 0 {
+		return nil, c.connector.err
+	}
+	err := c.connector.errors[0]
+	c.connector.errors = c.connector.errors[1:]
+	return nil, err
 }

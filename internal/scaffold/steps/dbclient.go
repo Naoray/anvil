@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/naoray/anvil/internal/config"
@@ -108,9 +108,13 @@ func (c *MySQLClient) Close() error {
 }
 
 func (c *MySQLClient) CreateDatabase(name string) error {
-	query := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name)
+	query := fmt.Sprintf("CREATE DATABASE `%s`", name)
 	_, err := c.db.Exec(query)
 	if err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1007 {
+			return &DatabaseExistsError{Name: name}
+		}
 		return fmt.Errorf("creating database %s: %w", name, err)
 	}
 	return nil

@@ -1,12 +1,14 @@
 package steps
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -588,6 +590,42 @@ func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {
 	assert.NotEqual(t, "collision", ctx.GetDbSuffix())
 	assert.Len(t, client.GetCreateCalls(), 2)
 	assert.Equal(t, "dashboard_collision", client.GetCreateCalls()[0])
+}
+
+func TestDbCreateStep_MySQLFreshCollisionRetriesWithoutPersistingCollidingDatabase(t *testing.T) {
+	dir := t.TempDir()
+	connector := &execErrorConnector{
+		errors: []error{
+			&mysql.MySQLError{Number: 1007, Message: "create rejected"},
+			nil,
+		},
+	}
+	db := sql.OpenDB(connector)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	factory := func(engine string, _ DatabaseOptions) (DatabaseClient, error) {
+		if engine != "mysql" {
+			t.Fatalf("client factory engine = %q, want mysql", engine)
+		}
+		return &MySQLClient{db: db}, nil
+	}
+	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "mysql"}, factory)
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("collision")
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	require.Len(t, connector.queries, 2)
+	assert.Equal(t, "CREATE DATABASE `dashboard_collision`", connector.queries[0])
+	assert.NotEqual(t, "collision", ctx.GetDbSuffix())
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 1)
+	assert.Equal(t, "dashboard_"+ctx.GetDbSuffix(), state.Databases[0].Name)
+	assert.NotEqual(t, "dashboard_collision", state.Databases[0].Name)
 }
 
 func TestDbDestroyStep(t *testing.T) {
