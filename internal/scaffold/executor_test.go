@@ -65,6 +65,21 @@ func TestStepExecutor_Execute_EvaluatesConditionOnceAtExecutionTime(t *testing.T
 	assert.Equal(t, 1, step.conditionCalls)
 }
 
+func TestStepExecutor_Execute_DisabledStepSkipsConditionLookup(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	step := &enabledMockStep{
+		mockStep: &mockStep{name: "disabled", conditionResult: true},
+		enabled:  false,
+	}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.Equal(t, 1, step.enabledCalls)
+	assert.Zero(t, step.conditionCalls)
+	assert.True(t, executor.Results()[0].Skipped)
+}
+
 func TestStepExecutor_Execute_EarlierStepCanEnableLaterCondition(t *testing.T) {
 	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
 	first := &mockStep{
