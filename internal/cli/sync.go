@@ -321,9 +321,9 @@ func finalizeAutoStash(worktreePath string, stashOID string, quiet bool) error {
 
 	if err := git.DropStash(worktreePath, stashOID); err != nil {
 		ui.PrintWarning(fmt.Sprintf("\nWarning: Changes were restored, but auto-stash %s could not be dropped: %v", stashOID, err))
-		guidance := fmt.Sprintf("Files are already restored, and the stash remains as auto-stash %s. Verify the restored files, locate the matching reflog selector with `%s`, then drop only that entry with `git stash drop <matching-selector>`.", stashOID, matchingStashSelectorCommand(stashOID))
+		guidance := fmt.Sprintf("Files are already restored. Check the exact auto-stash OID %s with `%s`. If it prints a selector, verify the restored files, then drop only that selector with `git stash drop <matching-selector>`. If it prints nothing, the reflog entry is already absent and no drop is needed. Keep OID %s as recovery evidence until you are satisfied.", stashOID, matchingStashSelectorCommand(stashOID), stashOID)
 		ui.PrintInfo(guidance)
-		return fmt.Errorf("auto-stash %s was applied but could not be dropped; files are already restored and the stash remains: %w; %s", stashOID, err, guidance)
+		return fmt.Errorf("auto-stash %s was applied but could not be dropped; files are already restored: %w; %s", stashOID, err, guidance)
 	}
 
 	if !quiet {
