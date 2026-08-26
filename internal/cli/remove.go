@@ -58,12 +58,7 @@ func planRemoveCleanup(
 	messages := make([]string, 0, 2)
 	if len(state.Databases) > 0 {
 		names := make([]string, 0, len(state.Databases))
-		seen := make(map[string]struct{}, len(state.Databases))
 		for _, database := range state.Databases {
-			if _, exists := seen[database.Name]; exists {
-				continue
-			}
-			seen[database.Name] = struct{}{}
 			names = append(names, database.Name)
 		}
 		messages = append(messages, fmt.Sprintf(

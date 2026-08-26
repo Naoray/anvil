@@ -439,12 +439,7 @@ func selectOwnedTargets(databases []config.OwnedDatabase) (ownedTargetSelection,
 		exact:    make([]string, 0, len(databases)),
 		families: append([]config.OwnedDatabase(nil), databases...),
 	}
-	seen := make(map[string]struct{}, len(databases))
 	for _, database := range databases {
-		if _, exists := seen[database.Name]; exists {
-			continue
-		}
-		seen[database.Name] = struct{}{}
 		selection.exact = append(selection.exact, database.Name)
 	}
 	return selection, nil

@@ -2,6 +2,8 @@ package steps
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,6 +69,33 @@ func TestDbDestroyStep_InvalidOwnedStateAggregatesEveryViolation(t *testing.T) {
 		assert.ErrorContains(t, err, want)
 	}
 	assert.Equal(t, 0, factory.CallCount())
+}
+
+func TestDbDestroyStep_DuplicateOwnedStateFailsBeforeClient(t *testing.T) {
+	dir := t.TempDir()
+	writeRawOwnedState(t, dir, `db_suffix: top_provider
+databases:
+  - name: app_top_provider
+    engine: mysql
+    role: application
+  - name: app_top_provider
+    engine: mysql
+    role: testing
+  - name: worker_top_provider_test
+    engine: mysql
+    role: testing
+`)
+	client := NewMockDatabaseClient()
+	factory := NewMockClientFactoryRecorder(client)
+	step := NewDbDestroyStepWithFactory(config.StepConfig{}, factory.Factory)
+
+	err := step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `duplicate database name "app_top_provider" in record 1; first seen in record 0`)
+	assert.ErrorContains(t, err, `duplicate database role "testing" in record 2; first seen in record 1`)
+	assert.Equal(t, 0, factory.CallCount())
+	assert.Empty(t, client.GetListCalls())
+	assert.Empty(t, client.GetDropCalls())
 }
 
 func TestDbDestroyStep_OwnedStateDropsExactAndBothWorkerFamilies(t *testing.T) {
@@ -193,4 +222,9 @@ func writeOwnedState(t *testing.T, dir string, databases []config.OwnedDatabase)
 	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
 		DbSuffix: "top_provider", Databases: databases,
 	}))
+}
+
+func writeRawOwnedState(t *testing.T, dir, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, config.LocalStateFile), []byte(content), 0o644))
 }

@@ -43,15 +43,28 @@ func ValidateOwnedDatabases(databases []OwnedDatabase) error {
 	var validationErrors []error
 	seenEngines := make(map[string]struct{})
 	engineOrder := make([]string, 0, 2)
+	seenNames := make(map[string]int, len(databases))
+	seenRoles := make(map[string]int, 2)
 
 	for index, database := range databases {
 		if !IsValidDatabaseIdentifier(database.Name) {
 			validationErrors = append(validationErrors,
 				fmt.Errorf("invalid database name %q in record %d", database.Name, index))
 		}
-
+		if firstIndex, exists := seenNames[database.Name]; exists {
+			validationErrors = append(validationErrors,
+				fmt.Errorf("duplicate database name %q in record %d; first seen in record %d", database.Name, index, firstIndex))
+		} else {
+			seenNames[database.Name] = index
+		}
 		switch database.Role {
 		case DbRoleApplication, DbRoleTesting:
+			if firstIndex, exists := seenRoles[database.Role]; exists {
+				validationErrors = append(validationErrors,
+					fmt.Errorf("duplicate database role %q in record %d; first seen in record %d", database.Role, index, firstIndex))
+			} else {
+				seenRoles[database.Role] = index
+			}
 		default:
 			validationErrors = append(validationErrors,
 				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing", database.Role, database.Name))

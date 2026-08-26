@@ -171,6 +171,30 @@ func TestValidateOwnedDatabases_ValidSingleEngine(t *testing.T) {
 	}
 }
 
+func TestValidateOwnedDatabases_RejectsDuplicateCardinalityInStateOrder(t *testing.T) {
+	err := ValidateOwnedDatabases([]OwnedDatabase{
+		{Name: "bad;first", Engine: "mysql", Role: DbRoleApplication},
+		{Name: "app_second", Engine: "mysql", Role: DbRoleApplication},
+		{Name: "bad;first", Engine: "oracle", Role: DbRoleTesting},
+		{Name: "test_second", Engine: "pgsql", Role: DbRoleTesting},
+	})
+	if err == nil {
+		t.Fatal("ValidateOwnedDatabases() error = nil")
+	}
+	want := strings.Join([]string{
+		`invalid database name "bad;first" in record 0`,
+		`duplicate database role "application" in record 1; first seen in record 0`,
+		`invalid database name "bad;first" in record 2`,
+		`duplicate database name "bad;first" in record 2; first seen in record 0`,
+		`unsupported database engine "oracle" in record "bad;first"; supported engines: mysql, pgsql`,
+		`duplicate database role "testing" in record 3; first seen in record 2`,
+		`database records must use exactly one supported engine; found mysql, pgsql`,
+	}, "\n")
+	if got := err.Error(); got != want {
+		t.Fatalf("ValidateOwnedDatabases() error:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestValidateOwnedDatabases_RejectsUnsafeRecords(t *testing.T) {
 	tests := []struct {
 		name string

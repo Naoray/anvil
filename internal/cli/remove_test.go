@@ -118,7 +118,6 @@ func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
 	state := &config.LocalState{Databases: []config.OwnedDatabase{
 		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
 		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
-		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
 	}}
 
 	opts, messages, err := planRemoveCleanup(state, nil, true, false, false)
@@ -128,6 +127,48 @@ func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
 	assert.Equal(t, []string{
 		"Preserving databases: app_top_provider, app_top_provider_test (parallel worker databases are kept too; drop manually when done)",
 	}, messages)
+}
+
+func TestPlanRemoveCleanup_DuplicateOwnedStateHardStopsUnlessForce(t *testing.T) {
+	tests := []struct {
+		name  string
+		state *config.LocalState
+		want  string
+	}{
+		{
+			name: "duplicate role",
+			state: &config.LocalState{Databases: []config.OwnedDatabase{
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+				{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+				{Name: "worker_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+			}},
+			want: `duplicate database role "testing" in record 2; first seen in record 1`,
+		},
+		{
+			name: "duplicate name",
+			state: &config.LocalState{Databases: []config.OwnedDatabase{
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleTesting},
+			}},
+			want: `duplicate database name "app_top_provider" in record 1; first seen in record 0`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := planRemoveCleanup(tt.state, nil, false, false, false)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Contains(t, err.Error(), "--force")
+
+			opts, messages, err := planRemoveCleanup(tt.state, nil, false, false, true)
+			require.NoError(t, err)
+			assert.True(t, opts.SkipDatabaseCleanup)
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0], "WARNING")
+			assert.Contains(t, messages[0], "databases will be left untouched and unrecorded")
+		})
+	}
 }
 
 func TestPlanRemoveCleanup_KeepDbLegacySuffixPattern(t *testing.T) {
