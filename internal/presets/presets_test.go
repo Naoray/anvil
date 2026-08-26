@@ -202,7 +202,13 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 type phpstanInvocationCommander struct {
 	t            *testing.T
 	worktreePath string
-	call         *anvil_exec.CommandCall
+	call         *commandCall
+}
+
+type commandCall struct {
+	Dir     string
+	Command string
+	Args    []string
 }
 
 func (c *phpstanInvocationCommander) Run(_ context.Context, dir string, command string, args ...string) ([]byte, error) {
@@ -214,7 +220,7 @@ func (c *phpstanInvocationCommander) Run(_ context.Context, dir string, command 
 	require.Contains(c.t, string(envContent), "APP_KEY=generated-key")
 	require.Contains(c.t, string(envContent), "DB_DATABASE=feature_test")
 
-	c.call = &anvil_exec.CommandCall{
+	c.call = &commandCall{
 		Dir:     dir,
 		Command: command,
 		Args:    append([]string(nil), args...),
