@@ -901,3 +901,80 @@ func TestIsDatabaseExistsError(t *testing.T) {
 		assert.False(t, IsDatabaseExistsError(err))
 	})
 }
+
+func TestDatabaseSteps_CharacterizeClientFactoryDefaults(t *testing.T) {
+	tests := []struct {
+		name        string
+		create      bool
+		engine      config.DatabaseEngine
+		wantOptions DatabaseOptions
+	}{
+		{
+			name:   "create mysql",
+			create: true,
+			engine: config.DBEngineMySQL,
+			wantOptions: DatabaseOptions{
+				Host:     "127.0.0.1",
+				Username: "root",
+			},
+		},
+		{
+			name:   "create pgsql",
+			create: true,
+			engine: config.DBEnginePgSQL,
+			wantOptions: DatabaseOptions{
+				Host:     "127.0.0.1",
+				Username: "root",
+			},
+		},
+		{
+			name:   "destroy mysql",
+			create: false,
+			engine: config.DBEngineMySQL,
+			wantOptions: DatabaseOptions{
+				Host:     "127.0.0.1",
+				Port:     "3306",
+				Username: "root",
+			},
+		},
+		{
+			name:   "destroy pgsql",
+			create: false,
+			engine: config.DBEnginePgSQL,
+			wantOptions: DatabaseOptions{
+				Host:     "127.0.0.1",
+				Port:     "5432",
+				Username: "postgres",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if !tt.create {
+				require.NoError(t, config.WriteLocalState(dir, config.LocalState{DbSuffix: "test_suffix"}))
+			}
+
+			client := NewMockDatabaseClient()
+			var gotOptions DatabaseOptions
+			factory := func(_ string, options DatabaseOptions) (DatabaseClient, error) {
+				gotOptions = options
+				return client, nil
+			}
+
+			var err error
+			ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "testapp"}
+			if tt.create {
+				step := NewDbCreateStepWithFactory(config.StepConfig{Type: string(tt.engine)}, factory)
+				err = step.Run(ctx, types.StepOptions{})
+			} else {
+				step := NewDbDestroyStepWithFactory(config.StepConfig{Type: string(tt.engine)}, factory)
+				err = step.Run(ctx, types.StepOptions{})
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOptions, gotOptions)
+		})
+	}
+}
