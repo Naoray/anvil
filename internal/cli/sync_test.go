@@ -535,7 +535,6 @@ func TestSyncCommand_DoesNotStashWhenRemoteMissing(t *testing.T) {
 	assert.False(t, hasStash)
 }
 
-<<<<<<< HEAD
 func TestSyncCommand_RestoresAutoStashAfterFetchFailure(t *testing.T) {
 	ensureSyncTestFlags(t)
 
