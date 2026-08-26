@@ -11,9 +11,12 @@ import (
 type mockStep struct {
 	name            string
 	conditionResult bool
+	conditionCalls  int
 	runError        error
 	runCalled       bool
 	runOptions      []types.StepOptions
+	conditionFunc   func(*types.ScaffoldContext) bool
+	runFunc         func(*types.ScaffoldContext, types.StepOptions) error
 }
 
 func (s *mockStep) Name() string {
@@ -23,11 +26,28 @@ func (s *mockStep) Name() string {
 func (s *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
 	s.runCalled = true
 	s.runOptions = append(s.runOptions, opts)
+	if s.runFunc != nil {
+		return s.runFunc(ctx, opts)
+	}
 	return s.runError
 }
 
 func (s *mockStep) Condition(ctx *types.ScaffoldContext) bool {
+	s.conditionCalls++
+	if s.conditionFunc != nil {
+		return s.conditionFunc(ctx)
+	}
 	return s.conditionResult
+}
+
+func TestStepExecutor_Execute_EvaluatesConditionOnceAtExecutionTime(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	step := &mockStep{name: "step1", conditionResult: true}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.Equal(t, 1, step.conditionCalls)
 }
 
 func TestStepExecutor_Execute_AllStepsPass(t *testing.T) {

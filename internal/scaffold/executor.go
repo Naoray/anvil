@@ -54,8 +54,9 @@ func (e *StepExecutor) Execute() error {
 	e.completedCnt = 0
 	e.skippedCnt = 0
 
-	// Count active steps for progress tracking
-	activeSteps := e.countActiveSteps()
+	// Progress uses the configured step count because eligibility is evaluated
+	// only when each step reaches its turn.
+	activeSteps := len(e.steps)
 	currentStep := 0
 
 	// Execute steps sequentially in the order they were provided
@@ -275,22 +276,6 @@ func getStepDescription(step types.ScaffoldStep) string {
 	}
 
 	return fmt.Sprintf("%s (%s)", baseDesc, stepName)
-}
-
-// countActiveSteps counts steps that will actually run (not skipped)
-func (e *StepExecutor) countActiveSteps() int {
-	count := 0
-	for _, step := range e.steps {
-		enabled := true
-		if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok {
-			enabled = stepConfig.IsEnabled()
-		}
-
-		if enabled && step.Condition(e.ctx) {
-			count++
-		}
-	}
-	return count
 }
 
 // executeWithSpinner runs a step with a spinner showing progress
