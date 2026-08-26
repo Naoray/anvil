@@ -16,7 +16,7 @@ import (
 )
 
 type atomicWriteFailureFS struct {
-	*fs.MockFS
+	fs.FS
 	err error
 }
 
@@ -305,18 +305,18 @@ APP_NAME=myapp
 }
 
 func TestEnvWriteStep_PreservesDestinationWhenAtomicWriteFails(t *testing.T) {
-	mockFS := fs.NewMockFS()
-	filePath := filepath.Join("/worktree", ".env")
+	filesystem := &fs.RealFS{}
+	filePath := filepath.Join(t.TempDir(), ".env")
 	original := []byte("APP_NAME=myapp\n")
-	mockFS.AddFile(filePath, original, 0600)
-	failingFS := &atomicWriteFailureFS{MockFS: mockFS, err: errors.New("injected atomic write failure")}
+	require.NoError(t, os.WriteFile(filePath, original, 0600))
+	failingFS := &atomicWriteFailureFS{FS: filesystem, err: errors.New("injected atomic write failure")}
 
 	step := NewEnvWriteStepWithFS(config.StepConfig{Key: "DB_DATABASE", Value: "test_db"}, failingFS)
-	err := step.Run(&types.ScaffoldContext{WorktreePath: "/worktree"}, types.StepOptions{})
+	err := step.Run(&types.ScaffoldContext{WorktreePath: filepath.Dir(filePath)}, types.StepOptions{})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writing file")
-	content, readErr := mockFS.ReadFile(filePath)
+	content, readErr := filesystem.ReadFile(filePath)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(original), string(content))
 }

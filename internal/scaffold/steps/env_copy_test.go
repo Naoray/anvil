@@ -245,18 +245,19 @@ func TestEnvCopyStep_PreservesDestinationWhenAtomicWriteFails(t *testing.T) {
 	sourceDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".env"), []byte("API_KEY=new_secret\n"), 0644))
 
-	mockFS := fs.NewMockFS()
-	targetPath := filepath.Join("/mock-target", ".env")
+	filesystem := &fs.RealFS{}
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, ".env")
 	original := []byte("API_KEY=old_secret\n")
-	mockFS.AddFile(targetPath, original, 0600)
-	failingFS := &atomicWriteFailureFS{MockFS: mockFS, err: errors.New("injected atomic write failure")}
+	require.NoError(t, os.WriteFile(targetPath, original, 0600))
+	failingFS := &atomicWriteFailureFS{FS: filesystem, err: errors.New("injected atomic write failure")}
 
 	step := NewEnvCopyStepWithFS(config.StepConfig{Source: sourceDir, Key: "API_KEY"}, failingFS)
-	err := step.Run(&types.ScaffoldContext{WorktreePath: "/mock-target"}, types.StepOptions{})
+	err := step.Run(&types.ScaffoldContext{WorktreePath: targetDir}, types.StepOptions{})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writing target file")
-	content, readErr := mockFS.ReadFile(targetPath)
+	content, readErr := filesystem.ReadFile(targetPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(original), string(content))
 }
