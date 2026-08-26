@@ -100,8 +100,7 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	root.AddCommand(newRemoveCommand(deps))
 	root.SetArgs([]string{"remove", filepath.Base(worktreePath), "--dry-run", "--force", "--quiet"})
 
-	var output string
-	output = captureStdout(t, func() {
+	output := captureStdout(t, func() {
 		require.NoError(t, root.Execute())
 	})
 	assert.Contains(t, infoMessages, "[DRY RUN] Would remove agent/test at "+worktreePath)
