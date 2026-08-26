@@ -461,6 +461,86 @@ func TestGlobalConfig_FindLinkedProjectFromPath_ChoosesMostSpecificProject(t *te
 	assert.Equal(t, projectPath, project.Path)
 }
 
+func TestGlobalConfig_FindLinkedProjectFromPath_PathMatrix(t *testing.T) {
+	rootDir := t.TempDir()
+	projectPath := filepath.Join(rootDir, "project")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"project": {Path: projectPath},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		wantName    string
+		wantProject bool
+	}{
+		{
+			name:        "base",
+			path:        projectPath,
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "ordinary descendant",
+			path:        filepath.Join(projectPath, "app"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "nested descendant",
+			path:        filepath.Join(projectPath, "app", "Models"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed project descendant",
+			path:        filepath.Join(projectPath, ".hidden-project"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed nested descendant",
+			path:        filepath.Join(projectPath, "app", ".hidden-feature"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "parent",
+			path:        filepath.Dir(projectPath),
+			wantProject: false,
+		},
+		{
+			name:        "sibling",
+			path:        filepath.Join(filepath.Dir(projectPath), "other"),
+			wantProject: false,
+		},
+		{
+			name:        "sibling-prefix with platform separator",
+			path:        filepath.Join(filepath.Dir(projectPath), filepath.Base(projectPath)+"-archive"),
+			wantProject: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantProject {
+				require.NoError(t, os.MkdirAll(tt.path, 0755))
+			}
+			name, project := cfg.FindLinkedProjectFromPath(tt.path)
+			if (project != nil) != tt.wantProject {
+				t.Fatalf("FindLinkedProjectFromPath() returned project = %v, want project = %v", project != nil, tt.wantProject)
+			}
+			if name != tt.wantName {
+				t.Errorf("FindLinkedProjectFromPath() name = %q, want %q", name, tt.wantName)
+			}
+		})
+	}
+}
+
 func TestGlobalConfig_GetWorktreeBaseExpanded(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)

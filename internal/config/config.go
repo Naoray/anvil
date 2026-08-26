@@ -872,8 +872,8 @@ func isSubPath(parent, child string) bool {
 	if err != nil {
 		return false
 	}
-	// If the relative path doesn't start with "..", it's a subpath
-	return len(rel) > 0 && rel[0] != '.'
+	// Reject only the base path and paths that leave the parent directory.
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // AddProject adds a project to the global config

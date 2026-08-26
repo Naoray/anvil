@@ -199,6 +199,154 @@ func TestProjectContext_IsInWorktree(t *testing.T) {
 	})
 }
 
+func TestOpenProjectFromWorktree_PathMatrix(t *testing.T) {
+	repoDir := createLinkedProject(t)
+	rootDir := t.TempDir()
+	worktreeBase := filepath.Join(rootDir, "worktrees")
+
+	globalCfg := &config.GlobalConfig{
+		WorktreeBase: worktreeBase,
+		Projects: map[string]*config.ProjectInfo{
+			"project": {
+				Path:          repoDir,
+				DefaultBranch: "main",
+			},
+			".hidden-project": {
+				Path:          repoDir,
+				DefaultBranch: "main",
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		cwd         string
+		wantName    string
+		wantProject bool
+	}{
+		{
+			name:        "base",
+			cwd:         worktreeBase,
+			wantProject: false,
+		},
+		{
+			name:        "ordinary descendant",
+			cwd:         filepath.Join(worktreeBase, "project", "feature"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "nested descendant",
+			cwd:         filepath.Join(worktreeBase, "project", "feature", "src"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed project descendant",
+			cwd:         filepath.Join(worktreeBase, ".hidden-project", "feature"),
+			wantName:    ".hidden-project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed nested descendant",
+			cwd:         filepath.Join(worktreeBase, "project", ".hidden-feature"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "parent",
+			cwd:         filepath.Dir(worktreeBase),
+			wantProject: false,
+		},
+		{
+			name:        "sibling",
+			cwd:         filepath.Join(filepath.Dir(worktreeBase), "other"),
+			wantProject: false,
+		},
+		{
+			name:        "sibling-prefix with platform separator",
+			cwd:         filepath.Join(filepath.Dir(worktreeBase), filepath.Base(worktreeBase)+"-archive"),
+			wantProject: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			project, err := openProjectFromWorktree(tt.cwd, worktreeBase, globalCfg)
+			if err != nil {
+				t.Fatalf("openProjectFromWorktree() error = %v", err)
+			}
+			if (project != nil) != tt.wantProject {
+				t.Fatalf("openProjectFromWorktree() returned project = %v, want project = %v", project != nil, tt.wantProject)
+			}
+			if project != nil && project.ProjectName != tt.wantName {
+				t.Errorf("openProjectFromWorktree() project name = %q, want %q", project.ProjectName, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestProjectContext_IsInWorktree_PathMatrix(t *testing.T) {
+	rootDir := t.TempDir()
+	worktreeBase := filepath.Join(rootDir, "worktrees")
+
+	tests := []struct {
+		name string
+		cwd  string
+		want bool
+	}{
+		{
+			name: "base",
+			cwd:  worktreeBase,
+			want: false,
+		},
+		{
+			name: "ordinary descendant",
+			cwd:  filepath.Join(worktreeBase, "project", "feature"),
+			want: true,
+		},
+		{
+			name: "nested descendant",
+			cwd:  filepath.Join(worktreeBase, "project", "feature", "src"),
+			want: true,
+		},
+		{
+			name: "dot-prefixed project descendant",
+			cwd:  filepath.Join(worktreeBase, ".hidden-project", "feature"),
+			want: true,
+		},
+		{
+			name: "dot-prefixed nested descendant",
+			cwd:  filepath.Join(worktreeBase, "project", ".hidden-feature"),
+			want: true,
+		},
+		{
+			name: "parent",
+			cwd:  filepath.Dir(worktreeBase),
+			want: false,
+		},
+		{
+			name: "sibling",
+			cwd:  filepath.Join(filepath.Dir(worktreeBase), "other"),
+			want: false,
+		},
+		{
+			name: "sibling-prefix with platform separator",
+			cwd:  filepath.Join(filepath.Dir(worktreeBase), filepath.Base(worktreeBase)+"-archive"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := &ProjectContext{CWD: tt.cwd, WorktreeBase: worktreeBase}
+			if got := pc.IsInWorktree(); got != tt.want {
+				t.Errorf("IsInWorktree() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProjectContext_MustBeInWorktree(t *testing.T) {
 	tmpDir := t.TempDir()
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/naoray/anvil/internal/config"
@@ -102,7 +103,7 @@ func openProject(cwd, projectName string, projectInfo *config.ProjectInfo, globa
 func openProjectFromWorktree(cwd, worktreeBase string, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
 	// Check if cwd is under worktreeBase
 	rel, err := filepath.Rel(worktreeBase, cwd)
-	if err != nil || len(rel) == 0 || rel[0] == '.' {
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, nil // Not under worktree base
 	}
 
@@ -156,7 +157,7 @@ func (pc *ProjectContext) IsInWorktree() bool {
 		// No .git found - check if CWD is under worktree base
 		if pc.WorktreeBase != "" {
 			rel, err := filepath.Rel(pc.WorktreeBase, pc.CWD)
-			if err == nil && len(rel) > 0 && rel[0] != '.' {
+			if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				return true
 			}
 		}
