@@ -1,29 +1,43 @@
 package steps
 
 import (
+	"context"
 	"testing"
 
 	anvilexec "github.com/naoray/anvil/internal/exec"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
+type dryRunCommander struct {
+	calls int
+}
+
+func (c *dryRunCommander) Run(context.Context, string, string, ...string) ([]byte, error) {
+	c.calls++
+	return nil, nil
+}
+
+func (c *dryRunCommander) CallCount() int {
+	return c.calls
+}
+
 func TestCleanupCapableCommandSteps_DryRunDoesNotExecuteCommands(t *testing.T) {
 	tests := []struct {
 		name string
 		step types.ScaffoldStep
-		mock *anvilexec.MockCommander
+		mock *dryRunCommander
 	}{
 		{
 			name: "binary",
-			mock: anvilexec.NewMockCommander(),
+			mock: &dryRunCommander{},
 		},
 		{
 			name: "bash",
-			mock: anvilexec.NewMockCommander(),
+			mock: &dryRunCommander{},
 		},
 		{
 			name: "command",
-			mock: anvilexec.NewMockCommander(),
+			mock: &dryRunCommander{},
 		},
 	}
 	tests[0].step = NewBinaryStepWithExecutor("herd", "herd", []string{"unlink"}, "", anvilexec.NewCommandExecutor(tests[0].mock))
