@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/naoray/anvil/internal/config"
@@ -44,6 +45,108 @@ func TestRepairBranchTracking_ReturnsInspectionErrorAndContinues(t *testing.T) {
 	assert.Contains(t, err.Error(), "first")
 	assert.Equal(t, []string{"first", "second"}, inspected)
 	assert.Equal(t, []string{"second"}, configured)
+}
+
+func TestRepairBranchTracking_ReturnsUpstreamErrorAndContinues(t *testing.T) {
+	upstreamErr := errors.New("upstream setup failed")
+	var configured []string
+
+	err := repairBranchTrackingWithDependencies(
+		&ProjectContext{GitDir: "git-dir"},
+		false,
+		false,
+		repairBranchTrackingDependencies{
+			getBranchRefs: func(string) ([]string, []string, error) {
+				return []string{"first", "second"}, []string{"origin/first", "origin/second"}, nil
+			},
+			hasBranchTracking: func(string, string) (bool, error) {
+				return false, nil
+			},
+			setBranchUpstream: func(_ string, branch, _ string) error {
+				configured = append(configured, branch)
+				if branch == "first" {
+					return upstreamErr
+				}
+				return nil
+			},
+		},
+	)
+
+	assert.ErrorIs(t, err, upstreamErr)
+	assert.Contains(t, err.Error(), "first")
+	assert.Equal(t, []string{"first", "second"}, configured)
+}
+
+func TestRepairBranchTracking_JoinsMultipleBranchFailuresWithContext(t *testing.T) {
+	inspectionErr := errors.New("tracking inspection failed")
+	upstreamErr := errors.New("upstream setup failed")
+	var inspected []string
+	var configured []string
+
+	err := repairBranchTrackingWithDependencies(
+		&ProjectContext{GitDir: "git-dir"},
+		false,
+		false,
+		repairBranchTrackingDependencies{
+			getBranchRefs: func(string) ([]string, []string, error) {
+				return []string{"inspect-failure", "setup-failure", "success"}, []string{
+					"origin/inspect-failure",
+					"origin/setup-failure",
+					"origin/success",
+				}, nil
+			},
+			hasBranchTracking: func(_ string, branch string) (bool, error) {
+				inspected = append(inspected, branch)
+				if branch == "inspect-failure" {
+					return false, inspectionErr
+				}
+				return false, nil
+			},
+			setBranchUpstream: func(_ string, branch, _ string) error {
+				configured = append(configured, branch)
+				if branch == "setup-failure" {
+					return upstreamErr
+				}
+				return nil
+			},
+		},
+	)
+
+	assert.ErrorIs(t, err, inspectionErr)
+	assert.ErrorIs(t, err, upstreamErr)
+	assert.Contains(t, err.Error(), `branch "inspect-failure": checking tracking`)
+	assert.Contains(t, err.Error(), `branch "setup-failure": setting upstream`)
+	assert.Equal(t, []string{"inspect-failure", "setup-failure", "success"}, inspected)
+	assert.Equal(t, []string{"setup-failure", "success"}, configured)
+}
+
+func TestRepairCommand_DoesNotPrintCompletionOnAggregateError(t *testing.T) {
+	aggregateErr := errors.New(`branch "first": setting upstream: upstream setup failed`)
+	command := newRepairCommand(repairCommandDependencies{
+		openProject: func() (*ProjectContext, error) {
+			return &ProjectContext{GitDir: "git-dir"}, nil
+		},
+		repairFetchRefspec: func(*ProjectContext, bool, bool) error {
+			return nil
+		},
+		repairBranchTracking: func(*ProjectContext, bool, bool) error {
+			return aggregateErr
+		},
+	})
+	root := &cobra.Command{Use: "test"}
+	root.PersistentFlags().Bool("dry-run", false, "")
+	root.PersistentFlags().Bool("verbose", false, "")
+	root.PersistentFlags().Bool("quiet", false, "")
+	root.AddCommand(command)
+	root.SetArgs([]string{"repair"})
+
+	var err error
+	output := captureStdout(t, func() {
+		err = root.Execute()
+	})
+
+	assert.ErrorIs(t, err, aggregateErr)
+	assert.NotContains(t, output, "Repair complete")
 }
 
 // createRepoWithRemote creates a source repo and a clone with remote configured.
