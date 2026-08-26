@@ -78,7 +78,6 @@ func TestScaffoldNoWorktreesInProject(t *testing.T) {
 	assert.True(t, len(output) > 0)
 }
 
-<<<<<<< HEAD
 func TestSelectWorktreeByContainment_NestedDirectory(t *testing.T) {
 	root := t.TempDir()
 	worktreePath := filepath.Join(root, "worktrees", "feature-auth")
