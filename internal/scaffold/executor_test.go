@@ -19,6 +19,17 @@ type mockStep struct {
 	runFunc         func(*types.ScaffoldContext, types.StepOptions) error
 }
 
+type enabledMockStep struct {
+	*mockStep
+	enabled      bool
+	enabledCalls int
+}
+
+func (s *enabledMockStep) IsEnabled() bool {
+	s.enabledCalls++
+	return s.enabled
+}
+
 func (s *mockStep) Name() string {
 	return s.name
 }
@@ -42,12 +53,40 @@ func (s *mockStep) Condition(ctx *types.ScaffoldContext) bool {
 
 func TestStepExecutor_Execute_EvaluatesConditionOnceAtExecutionTime(t *testing.T) {
 	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
-	step := &mockStep{name: "step1", conditionResult: true}
+	step := &enabledMockStep{
+		mockStep: &mockStep{name: "step1", conditionResult: true},
+		enabled:  true,
+	}
 
 	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
 
 	assert.NoError(t, executor.Execute())
+	assert.Equal(t, 1, step.enabledCalls)
 	assert.Equal(t, 1, step.conditionCalls)
+}
+
+func TestStepExecutor_Execute_EarlierStepCanEnableLaterCondition(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	first := &mockStep{
+		name:            "first",
+		conditionResult: true,
+		runFunc: func(ctx *types.ScaffoldContext, _ types.StepOptions) error {
+			ctx.SetVar("enabled", "true")
+			return nil
+		},
+	}
+	later := &mockStep{
+		name: "later",
+		conditionFunc: func(ctx *types.ScaffoldContext) bool {
+			return ctx.GetVar("enabled") == "true"
+		},
+	}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{first, later}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.True(t, later.runCalled)
+	assert.Equal(t, 1, later.conditionCalls)
 }
 
 func TestStepExecutor_Execute_AllStepsPass(t *testing.T) {
