@@ -1,595 +1,228 @@
 package config
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestValidateStepConfig(t *testing.T) {
 	tests := []struct {
 		name     string
 		stepName string
 		cfg      StepConfig
-		wantErr  bool
-		errMsg   string
+		wantErr  string
 	}{
 		{
-			name:     "file.copy with all required fields",
-			stepName: "file.copy",
+			name:     "file.copy accepts required fields",
+			stepName: StepFileCopy,
 			cfg: StepConfig{
 				From: "source.txt",
 				To:   "dest.txt",
 			},
-			wantErr: false,
 		},
 		{
-			name:     "file.copy missing from",
-			stepName: "file.copy",
+			name:     "file.copy reports missing from",
+			stepName: StepFileCopy,
+			cfg:      StepConfig{To: "dest.txt"},
+			wantErr:  "file.copy: 'from' is required",
+		},
+		{
+			name:     "file.copy reports missing to",
+			stepName: StepFileCopy,
+			cfg:      StepConfig{From: "source.txt"},
+			wantErr:  "file.copy: 'to' is required",
+		},
+		{
+			name:     "file.copy reports from before to when both are missing",
+			stepName: StepFileCopy,
+			wantErr:  "file.copy: 'from' is required",
+		},
+		{
+			name:     "bash.run accepts a command",
+			stepName: StepBashRun,
+			cfg:      StepConfig{Command: "echo hello"},
+		},
+		{
+			name:     "bash.run reports missing command",
+			stepName: StepBashRun,
+			wantErr:  "bash.run: 'command' is required",
+		},
+		{
+			name:     "command.run accepts a command",
+			stepName: StepCommandRun,
+			cfg:      StepConfig{Command: "ls -la"},
+		},
+		{
+			name:     "command.run reports missing command",
+			stepName: StepCommandRun,
+			wantErr:  "command.run: 'command' is required",
+		},
+		{
+			name:     "env.read accepts a key",
+			stepName: StepEnvRead,
+			cfg:      StepConfig{Key: "DB_DATABASE", StoreAs: "Database", File: ".env.local"},
+		},
+		{
+			name:     "env.read reports missing key",
+			stepName: StepEnvRead,
+			cfg:      StepConfig{StoreAs: "Database"},
+			wantErr:  "env.read: 'key' is required",
+		},
+		{
+			name:     "env.write accepts a key and value",
+			stepName: StepEnvWrite,
+			cfg:      StepConfig{Key: "DB_DATABASE", Value: "test_db", File: ".env.local"},
+		},
+		{
+			name:     "env.write accepts an empty value",
+			stepName: StepEnvWrite,
+			cfg:      StepConfig{Key: "DB_DATABASE"},
+		},
+		{
+			name:     "env.write reports missing key",
+			stepName: StepEnvWrite,
+			cfg:      StepConfig{Value: "test_db"},
+			wantErr:  "env.write: 'key' is required",
+		},
+		{
+			name:     "env.copy accepts one key",
+			stepName: StepEnvCopy,
+			cfg:      StepConfig{Source: "../main", Key: "API_KEY"},
+		},
+		{
+			name:     "env.copy accepts multiple keys",
+			stepName: StepEnvCopy,
+			cfg:      StepConfig{Source: "../main", Keys: []string{"API_KEY", "API_SECRET"}},
+		},
+		{
+			name:     "env.copy reports missing source before keys",
+			stepName: StepEnvCopy,
+			cfg:      StepConfig{Key: "API_KEY"},
+			wantErr:  "env.copy: 'source' is required",
+		},
+		{
+			name:     "env.copy reports missing key and keys",
+			stepName: StepEnvCopy,
+			cfg:      StepConfig{Source: "../main"},
+			wantErr:  "env.copy: either 'key' or 'keys' must be specified",
+		},
+		{
+			name:     "env.copy accepts source file with one key",
+			stepName: StepEnvCopy,
 			cfg: StepConfig{
-				To: "dest.txt",
+				Source:     "../main",
+				SourceFile: ".env.testing",
+				Key:        "API_KEY",
+				File:       ".env.local",
 			},
-			wantErr: true,
-			errMsg:  "file.copy: 'from' is required",
 		},
 		{
-			name:     "file.copy missing to",
-			stepName: "file.copy",
-			cfg: StepConfig{
-				From: "source.txt",
-			},
-			wantErr: true,
-			errMsg:  "file.copy: 'to' is required",
+			name:     "db.create accepts no fields",
+			stepName: StepDbCreate,
 		},
 		{
-			name:     "bash.run with command",
-			stepName: "bash.run",
-			cfg: StepConfig{
-				Command: "echo hello",
-			},
-			wantErr: false,
+			name:     "db.create accepts optional type and args",
+			stepName: StepDbCreate,
+			cfg:      StepConfig{Type: "mysql", Args: []string{"--charset=utf8mb4"}},
 		},
 		{
-			name:     "bash.run missing command",
-			stepName: "bash.run",
-			cfg:      StepConfig{},
-			wantErr:  true,
-			errMsg:   "bash.run: 'command' is required",
+			name:     "db.create accepts an empty role",
+			stepName: StepDbCreate,
+			cfg:      StepConfig{Role: ""},
 		},
 		{
-			name:     "command.run with command",
-			stepName: "command.run",
-			cfg: StepConfig{
-				Command: "ls -la",
-			},
-			wantErr: false,
+			name:     "db.create accepts the application role",
+			stepName: StepDbCreate,
+			cfg:      StepConfig{Role: DbRoleApplication},
 		},
 		{
-			name:     "command.run missing command",
-			stepName: "command.run",
-			cfg:      StepConfig{},
-			wantErr:  true,
-			errMsg:   "command.run: 'command' is required",
+			name:     "db.create accepts the testing role",
+			stepName: StepDbCreate,
+			cfg:      StepConfig{Role: DbRoleTesting},
 		},
 		{
-			name:     "env.read with key",
-			stepName: "env.read",
-			cfg: StepConfig{
-				Key:     "DB_DATABASE",
-				StoreAs: "Database",
-			},
-			wantErr: false,
+			name:     "db.create reports an unsupported role",
+			stepName: StepDbCreate,
+			cfg:      StepConfig{Role: "staging"},
+			wantErr:  `db.create: invalid role "staging" (supported roles: application, testing)`,
 		},
 		{
-			name:     "env.read missing key",
-			stepName: "env.read",
-			cfg: StepConfig{
-				StoreAs: "Database",
-			},
-			wantErr: true,
-			errMsg:  "env.read: 'key' is required",
+			name:     "db.destroy accepts optional type args and role",
+			stepName: StepDbDestroy,
+			cfg:      StepConfig{Type: "sqlite", Args: []string{"--force"}, Role: "staging"},
 		},
 		{
-			name:     "env.write with key",
-			stepName: "env.write",
-			cfg: StepConfig{
-				Key:   "DB_DATABASE",
-				Value: "test_db",
-			},
-			wantErr: false,
+			name:     "db.destroy accepts no fields",
+			stepName: StepDbDestroy,
 		},
 		{
-			name:     "env.write missing key",
-			stepName: "env.write",
-			cfg: StepConfig{
-				Value: "test_db",
-			},
-			wantErr: true,
-			errMsg:  "env.write: 'key' is required",
-		},
-		{
-			name:     "env.copy with source and key",
-			stepName: "env.copy",
-			cfg: StepConfig{
-				Source: "../main",
-				Key:    "API_KEY",
-			},
-			wantErr: false,
-		},
-		{
-			name:     "env.copy with source and keys",
-			stepName: "env.copy",
-			cfg: StepConfig{
-				Source: "../main",
-				Keys:   []string{"API_KEY", "API_SECRET"},
-			},
-			wantErr: false,
-		},
-		{
-			name:     "env.copy missing source",
-			stepName: "env.copy",
-			cfg: StepConfig{
-				Key: "API_KEY",
-			},
-			wantErr: true,
-			errMsg:  "env.copy: 'source' is required",
-		},
-		{
-			name:     "env.copy missing key and keys",
-			stepName: "env.copy",
-			cfg: StepConfig{
-				Source: "../main",
-			},
-			wantErr: true,
-			errMsg:  "env.copy: either 'key' or 'keys' must be specified",
-		},
-		{
-			name:     "db.create with optional fields",
-			stepName: "db.create",
-			cfg: StepConfig{
-				Type: "mysql",
-				Args: []string{"--charset=utf8mb4"},
-			},
-			wantErr: false,
-		},
-		{
-			name:     "db.create with no fields",
-			stepName: "db.create",
-			cfg:      StepConfig{},
-			wantErr:  false,
-		},
-		{
-			name:     "db.destroy with optional fields",
-			stepName: "db.destroy",
-			cfg: StepConfig{
-				Type: "mysql",
-			},
-			wantErr: false,
-		},
-		{
-			name:     "php binary step with name only",
+			name:     "php is a binary fallback",
 			stepName: "php",
-			cfg: StepConfig{
-				Args: []string{"-v"},
-			},
-			wantErr: false,
+			cfg:      StepConfig{Args: []string{"-v"}},
 		},
 		{
-			name:     "npm binary step with args",
+			name:     "php.composer is a binary fallback",
+			stepName: "php.composer",
+			cfg:      StepConfig{Args: []string{"install"}},
+		},
+		{
+			name:     "php.laravel is a binary fallback",
+			stepName: "php.laravel",
+			cfg:      StepConfig{Args: []string{"migrate"}},
+		},
+		{
+			name:     "node.npm is a binary fallback",
 			stepName: "node.npm",
-			cfg: StepConfig{
-				Args: []string{"install"},
-			},
-			wantErr: false,
+			cfg:      StepConfig{Args: []string{"install"}},
 		},
 		{
-			name:     "binary step missing name",
-			stepName: "",
-			cfg: StepConfig{
-				Args: []string{"install"},
-			},
-			wantErr: true,
-			errMsg:  "binary step: 'name' is required",
+			name:     "node.yarn is a binary fallback",
+			stepName: "node.yarn",
+			cfg:      StepConfig{Args: []string{"install"}},
 		},
 		{
-			name:     "unknown step treated as binary",
+			name:     "node.pnpm is a binary fallback",
+			stepName: "node.pnpm",
+			cfg:      StepConfig{Args: []string{"install"}},
+		},
+		{
+			name:     "node.bun is a binary fallback",
+			stepName: "node.bun",
+			cfg:      StepConfig{Args: []string{"install"}},
+		},
+		{
+			name:     "herd is a binary fallback",
+			stepName: "herd",
+			cfg:      StepConfig{Args: []string{"link"}},
+		},
+		{
+			name:     "yerd is a binary fallback",
+			stepName: "yerd",
+			cfg:      StepConfig{Args: []string{"link"}},
+		},
+		{
+			name:     "custom names use the binary fallback",
 			stepName: "custom.step",
-			cfg:      StepConfig{},
-			wantErr:  false,
+			cfg:      StepConfig{Name: "custom.step", StoreAs: "result"},
+		},
+		{
+			name:    "an empty name reports the binary error",
+			cfg:     StepConfig{Args: []string{"install"}},
+			wantErr: "binary step: 'name' is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateStepConfig(tt.stepName, tt.cfg)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ValidateStepConfig() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("ValidateStepConfig() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
+			if tt.wantErr == "" {
 				if err != nil {
-					t.Errorf("ValidateStepConfig() unexpected error = %v", err)
+					t.Fatalf("ValidateStepConfig() unexpected error = %v", err)
 				}
+				return
 			}
-		})
-	}
-}
-
-func TestFileCopyConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  FileCopyConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config",
-			config: FileCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "file.copy"},
-				From:           "source.txt",
-				To:             "dest.txt",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing from",
-			config: FileCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "file.copy"},
-				To:             "dest.txt",
-			},
-			wantErr: true,
-			errMsg:  "file.copy: 'from' is required",
-		},
-		{
-			name: "missing to",
-			config: FileCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "file.copy"},
-				From:           "source.txt",
-			},
-			wantErr: true,
-			errMsg:  "file.copy: 'to' is required",
-		},
-		{
-			name: "missing both",
-			config: FileCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "file.copy"},
-			},
-			wantErr: true,
-			errMsg:  "file.copy: 'from' is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
+			if err == nil {
+				t.Fatalf("ValidateStepConfig() expected error %q but got nil", tt.wantErr)
 			}
-		})
-	}
-}
-
-func TestBashRunConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  BashRunConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config with command",
-			config: BashRunConfig{
-				BaseStepConfig: BaseStepConfig{Name: "bash.run"},
-				Command:        "echo hello",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing command",
-			config: BashRunConfig{
-				BaseStepConfig: BaseStepConfig{Name: "bash.run"},
-			},
-			wantErr: true,
-			errMsg:  "bash.run: 'command' is required",
-		},
-		{
-			name: "empty command",
-			config: BashRunConfig{
-				BaseStepConfig: BaseStepConfig{Name: "bash.run"},
-				Command:        "",
-			},
-			wantErr: true,
-			errMsg:  "bash.run: 'command' is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestEnvReadConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  EnvReadConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config with key",
-			config: EnvReadConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.read"},
-				Key:            "DB_DATABASE",
-				StoreAs:        "Database",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid config with key only",
-			config: EnvReadConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.read"},
-				Key:            "DB_DATABASE",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing key",
-			config: EnvReadConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.read"},
-				StoreAs:        "Database",
-			},
-			wantErr: true,
-			errMsg:  "env.read: 'key' is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestEnvWriteConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  EnvWriteConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config with key and value",
-			config: EnvWriteConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.write"},
-				Key:            "DB_DATABASE",
-				Value:          "test_db",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid config with key only (value can be empty)",
-			config: EnvWriteConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.write"},
-				Key:            "DB_DATABASE",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing key",
-			config: EnvWriteConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.write"},
-				Value:          "test_db",
-			},
-			wantErr: true,
-			errMsg:  "env.write: 'key' is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestEnvCopyConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  EnvCopyConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config with source and key",
-			config: EnvCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
-				Source:         "../main",
-				Key:            "API_KEY",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid config with source and keys",
-			config: EnvCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
-				Source:         "../main",
-				Keys:           []string{"API_KEY", "API_SECRET"},
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing source",
-			config: EnvCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
-				Key:            "API_KEY",
-			},
-			wantErr: true,
-			errMsg:  "env.copy: 'source' is required",
-		},
-		{
-			name: "missing key and keys",
-			config: EnvCopyConfig{
-				BaseStepConfig: BaseStepConfig{Name: "env.copy"},
-				Source:         "../main",
-			},
-			wantErr: true,
-			errMsg:  "env.copy: either 'key' or 'keys' must be specified",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestDbConfigs_Validate(t *testing.T) {
-	t.Run("db.create accepts all optional fields", func(t *testing.T) {
-		config := DbCreateConfig{
-			BaseStepConfig: BaseStepConfig{Name: "db.create"},
-			Type:           "mysql",
-			Args:           []string{"--charset=utf8mb4"},
-		}
-		if err := config.Validate(); err != nil {
-			t.Errorf("Validate() unexpected error = %v", err)
-		}
-	})
-
-	t.Run("db.create accepts no fields", func(t *testing.T) {
-		config := DbCreateConfig{
-			BaseStepConfig: BaseStepConfig{Name: "db.create"},
-		}
-		if err := config.Validate(); err != nil {
-			t.Errorf("Validate() unexpected error = %v", err)
-		}
-	})
-
-	t.Run("db.destroy accepts all optional fields", func(t *testing.T) {
-		config := DbDestroyConfig{
-			BaseStepConfig: BaseStepConfig{Name: "db.destroy"},
-			Type:           "mysql",
-			Args:           []string{"--force"},
-		}
-		if err := config.Validate(); err != nil {
-			t.Errorf("Validate() unexpected error = %v", err)
-		}
-	})
-}
-
-func TestBinaryStepConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  BinaryStepConfig
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "valid config with name",
-			config: BinaryStepConfig{
-				BaseStepConfig: BaseStepConfig{Name: "php"},
-				Args:           []string{"-v"},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid config with name only",
-			config: BinaryStepConfig{
-				BaseStepConfig: BaseStepConfig{Name: "npm"},
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing name",
-			config: BinaryStepConfig{
-				Args: []string{"install"},
-			},
-			wantErr: true,
-			errMsg:  "binary step: 'name' is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Validate() expected error but got nil")
-					return
-				}
-				if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("Validate() error = %v, want %v", err.Error(), tt.errMsg)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
+			if err.Error() != tt.wantErr {
+				t.Errorf("ValidateStepConfig() error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
 	}
