@@ -3,16 +3,86 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/naoray/anvil/internal/git"
 )
+
+var errCommandRun = errors.New("command run")
+
+func executeCommandForFlagValidation(t *testing.T, command *cobra.Command, args []string, flags ...string) error {
+	t.Helper()
+
+	originalRunE := command.RunE
+	originalPersistentPreRunE := rootCmd.PersistentPreRunE
+	originalSilenceUsage := rootCmd.SilenceUsage
+	originalValues := make(map[string]string, len(flags))
+	originalChanged := make(map[string]bool, len(flags))
+	for _, name := range flags {
+		flag := command.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("flag %q is not defined on %s", name, command.Name())
+		}
+		originalValues[name] = flag.Value.String()
+		originalChanged[name] = flag.Changed
+	}
+
+	command.RunE = func(*cobra.Command, []string) error {
+		return errCommandRun
+	}
+	rootCmd.PersistentPreRunE = nil
+	rootCmd.SilenceUsage = true
+	rootCmd.SetArgs(args)
+
+	defer func() {
+		command.RunE = originalRunE
+		rootCmd.PersistentPreRunE = originalPersistentPreRunE
+		rootCmd.SilenceUsage = originalSilenceUsage
+		rootCmd.SetArgs(nil)
+		for name, value := range originalValues {
+			flag := command.Flags().Lookup(name)
+			if err := flag.Value.Set(value); err != nil {
+				t.Errorf("resetting %s flag: %v", name, err)
+			}
+			flag.Changed = originalChanged[name]
+		}
+	}()
+
+	return rootCmd.Execute()
+}
+
+func TestListCommand_RejectsJSONAndPorcelainTogether(t *testing.T) {
+	err := executeCommandForFlagValidation(t, listCmd, []string{"list", "--json", "--porcelain"}, "json", "porcelain")
+
+	assert.EqualError(t, err, "if any flags in the group [json porcelain] are set none of the others can be; [json porcelain] were all set")
+}
+
+func TestListCommand_AcceptsEachOutputMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "table", args: []string{"list"}},
+		{name: "json", args: []string{"list", "--json"}},
+		{name: "porcelain", args: []string{"list", "--porcelain"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := executeCommandForFlagValidation(t, listCmd, tt.args, "json", "porcelain")
+
+			assert.ErrorIs(t, err, errCommandRun)
+		})
+	}
+}
 
 // createTestRepo creates a regular git repo and returns (gitDir, repoDir)
 func createTestRepo(t *testing.T) (string, string) {

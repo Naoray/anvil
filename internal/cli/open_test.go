@@ -11,6 +11,31 @@ import (
 	"github.com/naoray/anvil/internal/config"
 )
 
+func TestOpenCommand_RejectsEditorAndBrowserTogether(t *testing.T) {
+	err := executeCommandForFlagValidation(t, openCmd, []string{"open", "auth", "--editor", "--browser"}, "editor", "browser")
+
+	assert.EqualError(t, err, "if any flags in the group [editor browser] are set none of the others can be; [browser editor] were all set")
+}
+
+func TestOpenCommand_AcceptsEachActionMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "both", args: []string{"open", "auth"}},
+		{name: "editor", args: []string{"open", "auth", "--editor"}},
+		{name: "browser", args: []string{"open", "auth", "--browser"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := executeCommandForFlagValidation(t, openCmd, tt.args, "editor", "browser")
+
+			assert.ErrorIs(t, err, errCommandRun)
+		})
+	}
+}
+
 func TestResolveWorktreeURL_FromAppURL(t *testing.T) {
 	dir := t.TempDir()
 	envContent := "APP_URL=https://dashboard.test\nAPP_NAME=Dashboard\n"

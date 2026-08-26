@@ -129,4 +129,5 @@ func init() {
 	openCmd.Flags().Bool("editor", false, "Open IDE only (skip browser)")
 	openCmd.Flags().Bool("browser", false, "Open browser only (skip IDE)")
 	openCmd.Flags().String("editor-cmd", "", "IDE command to use (default: cursor)")
+	openCmd.MarkFlagsMutuallyExclusive("editor", "browser")
 }

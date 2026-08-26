@@ -153,4 +153,5 @@ func init() {
 	listCmd.Flags().Bool("porcelain", false, "Machine-parseable output")
 	listCmd.Flags().String("sort-by", "name", "Sort by: name, branch, created")
 	listCmd.Flags().Bool("reverse", false, "Reverse sort order")
+	listCmd.MarkFlagsMutuallyExclusive("json", "porcelain")
 }
