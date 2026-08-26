@@ -188,6 +188,10 @@ func pruneProjectWithDependencies(
 			ui.PrintInfo(message)
 			continue
 		}
+		if wt.Branch == "" {
+			ui.PrintWarning(fmt.Sprintf("Skipping branchless worktree at %s", wt.Path))
+			continue
+		}
 
 		if wt.Branch == pc.DefaultBranch {
 			ui.PrintInfo(fmt.Sprintf("%s at %s", wt.Branch, wt.Path))

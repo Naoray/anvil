@@ -507,6 +507,28 @@ func TestPruneProject_SkipsBareDetachedAndLockedRecords(t *testing.T) {
 	assert.Zero(t, removeCalls, "prune must not remove non-attached or locked records")
 }
 
+func TestPruneProject_SkipsBranchlessRecord(t *testing.T) {
+	mergeCalls := 0
+	deps := pruneProjectDependencies{
+		fetchOrigin: func(string) error { return nil },
+		listWorktrees: func(string) ([]git.Worktree, error) {
+			return []git.Worktree{{Path: "/worktrees/malformed"}}, nil
+		},
+		isMerged: func(string, string, string) (bool, error) {
+			mergeCalls++
+			return true, nil
+		},
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+			detectPreset:   func(*ProjectContext, string) string { return "" },
+			removeWorktree: func(string, string, bool) error { return nil },
+		},
+	}
+
+	require.NoError(t, pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps))
+	assert.Zero(t, mergeCalls, "branchless records must not reach merge probing")
+}
+
 func TestPruneProject_PreservesMergeCheckFailureWhenSelectionEmpty(t *testing.T) {
 	mergeErr := errors.New("cannot inspect merge status")
 	selectionCalls := 0
