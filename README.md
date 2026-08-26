@@ -763,7 +763,7 @@ All steps support template variables that are replaced at runtime:
 ```
 
 - Generates unique name: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}`
-- Suffix is generated once per scaffold run and shared across all `db.create` steps
+- Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
 - Persists suffix to `.anvil.local` for cleanup
@@ -1089,7 +1089,7 @@ This creates: `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 
 **Database Naming**
 - Automatically generates unique, readable database names
-- Suffix is generated once per scaffold run
+- Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Format: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}` (e.g., `myapp_swift_runner`, `app_cool_engine`)
 - Multiple `db.create` steps share the same suffix, allowing consistent database naming
 - Handles collisions with automatic retries
