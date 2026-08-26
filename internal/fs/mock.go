@@ -27,11 +27,10 @@ func (m *MockFileInfo) Sys() any           { return nil }
 
 // MockFS implements FS using an in-memory file system for testing.
 type MockFS struct {
-	mu     sync.RWMutex
-	files  map[string][]byte
-	perms  map[string]os.FileMode
-	dirs   map[string]bool
-	tempID int
+	mu    sync.RWMutex
+	files map[string][]byte
+	perms map[string]os.FileMode
+	dirs  map[string]bool
 }
 
 // NewMockFS creates a new MockFS with empty storage.
@@ -78,6 +77,20 @@ func (m *MockFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 	// Store a copy of the data
 	m.files[cleanPath] = make([]byte, len(data))
 	copy(m.files[cleanPath], data)
+	m.perms[cleanPath] = perm
+
+	return nil
+}
+
+// AtomicWriteFile replaces a file's contents and permissions while holding the filesystem lock.
+func (m *MockFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cleanPath := filepath.Clean(path)
+	replacement := make([]byte, len(data))
+	copy(replacement, data)
+	m.files[cleanPath] = replacement
 	m.perms[cleanPath] = perm
 
 	return nil
@@ -222,27 +235,6 @@ func (m *MockFS) Chmod(path string, mode os.FileMode) error {
 	return &os.PathError{Op: "chmod", Path: path, Err: errors.New("file not found")}
 }
 
-// CreateTemp creates a temporary file in memory.
-func (m *MockFS) CreateTemp(dir, pattern string) (*os.File, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.tempID++
-	base := strings.ReplaceAll(pattern, "*", "")
-	tempPath := filepath.Join(dir, base+".tmp."+string(rune('0'+m.tempID%10)))
-
-	// Create empty file
-	m.files[tempPath] = []byte{}
-	m.perms[tempPath] = 0600
-
-	// We can't easily return a real *os.File for in-memory storage,
-	// so this is a limitation of MockFS. For testing, steps that use
-	// CreateTemp will need special handling or the step should be
-	// refactored to work better with the FS interface.
-	// For now, return an error to indicate this isn't fully supported.
-	return nil, errors.New("MockFS.CreateTemp not fully supported - use real FS or refactor step")
-}
-
 // AddFile adds a file with content to the mock FS for testing.
 func (m *MockFS) AddFile(path string, content []byte, perm os.FileMode) {
 	m.mu.Lock()
@@ -285,5 +277,4 @@ func (m *MockFS) Reset() {
 	m.files = make(map[string][]byte)
 	m.perms = make(map[string]os.FileMode)
 	m.dirs = make(map[string]bool)
-	m.tempID = 0
 }

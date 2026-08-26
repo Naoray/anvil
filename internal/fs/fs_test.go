@@ -1,7 +1,9 @@
 package fs
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +43,103 @@ func TestMockFS_WriteFile(t *testing.T) {
 	}
 	if string(data) != "test data" {
 		t.Errorf("expected 'test data', got: %s", string(data))
+	}
+}
+
+func TestMockFS_AtomicWriteFile_ReplacesContentAndPermissions(t *testing.T) {
+	m := NewMockFS()
+	m.AddFile("/test/output.txt", []byte("old data"), 0600)
+
+	err := m.AtomicWriteFile("/test/output.txt", []byte("new data"), 0640)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	data, err := m.ReadFile("/test/output.txt")
+	if err != nil {
+		t.Fatalf("expected to read replaced file, got: %v", err)
+	}
+	if string(data) != "new data" {
+		t.Errorf("expected replaced content %q, got %q", "new data", string(data))
+	}
+
+	info, err := m.Stat("/test/output.txt")
+	if err != nil {
+		t.Fatalf("expected to stat replaced file, got: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0640 {
+		t.Errorf("expected permissions 0640, got %04o", got)
+	}
+}
+
+func TestRealFS_AtomicWriteFile_ReplacesFileAndCleansSameDirectoryTemp(t *testing.T) {
+	filesystem := &RealFS{}
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, ".env")
+	if err := os.WriteFile(target, []byte("old data"), 0600); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+
+	if err := filesystem.AtomicWriteFile(target, []byte("new data"), 0640); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("failed to read target: %v", err)
+	}
+	if string(data) != "new data" {
+		t.Errorf("expected replaced content %q, got %q", "new data", string(data))
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("failed to stat target: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0640 {
+		t.Errorf("expected permissions 0640, got %04o", got)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read target directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".env.") && strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("temporary file was not cleaned up: %s", entry.Name())
+		}
+	}
+}
+
+func TestRealFS_AtomicWriteFile_PreservesDestinationOnRenameFailureAndCleansTemp(t *testing.T) {
+	filesystem := &RealFS{}
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatalf("failed to create destination directory: %v", err)
+	}
+
+	err := filesystem.AtomicWriteFile(target, []byte("new data"), 0640)
+	if err == nil {
+		t.Fatal("expected rename failure, got nil")
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("destination should remain after failure: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("destination should remain a directory after failure")
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read target directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "target.") && strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Errorf("temporary file was not cleaned up: %s", entry.Name())
+		}
 	}
 }
 
@@ -241,14 +340,10 @@ func TestMockFS_Exists(t *testing.T) {
 func TestRealFS_Exists(t *testing.T) {
 	fs := &RealFS{}
 
-	// Create a temp file
-	tmpFile, err := fs.CreateTemp("", "exists-test-*.txt")
-	if err != nil {
+	tmpPath := filepath.Join(t.TempDir(), "exists-test.txt")
+	if err := os.WriteFile(tmpPath, []byte("content"), 0644); err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer fs.Remove(tmpPath)
 
 	// File exists
 	if !fs.Exists(tmpPath) {
@@ -265,18 +360,11 @@ func TestRealFS(t *testing.T) {
 	// Skip if not running on a real filesystem
 	fs := &RealFS{}
 
-	// Create a temp file
-	tmpFile, err := fs.CreateTemp("", "test-*.txt")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer fs.Remove(tmpPath)
+	tmpPath := filepath.Join(t.TempDir(), "test.txt")
 
 	// Write to it
 	testData := []byte("test content")
-	err = fs.WriteFile(tmpPath, testData, 0644)
+	err := fs.WriteFile(tmpPath, testData, 0644)
 	if err != nil {
 		t.Errorf("failed to write file: %v", err)
 	}

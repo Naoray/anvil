@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/fs"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
+
+type atomicWriteFailureFS struct {
+	*fs.MockFS
+	err error
+}
+
+func (f *atomicWriteFailureFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return f.err
+}
 
 func TestEnvWriteStep(t *testing.T) {
 	t.Run("name returns env.write", func(t *testing.T) {
@@ -291,4 +302,21 @@ APP_NAME=myapp
 			assert.False(t, strings.Contains(file.Name(), ".tmp"), "no temp files should remain")
 		}
 	})
+}
+
+func TestEnvWriteStep_PreservesDestinationWhenAtomicWriteFails(t *testing.T) {
+	mockFS := fs.NewMockFS()
+	filePath := filepath.Join("/worktree", ".env")
+	original := []byte("APP_NAME=myapp\n")
+	mockFS.AddFile(filePath, original, 0600)
+	failingFS := &atomicWriteFailureFS{MockFS: mockFS, err: errors.New("injected atomic write failure")}
+
+	step := NewEnvWriteStepWithFS(config.StepConfig{Key: "DB_DATABASE", Value: "test_db"}, failingFS)
+	err := step.Run(&types.ScaffoldContext{WorktreePath: "/worktree"}, types.StepOptions{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "writing file")
+	content, readErr := mockFS.ReadFile(filePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, string(original), string(content))
 }
