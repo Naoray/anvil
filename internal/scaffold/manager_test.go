@@ -4,7 +4,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/naoray/anvil/internal/config"
+	scaffoldsteps "github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
@@ -40,10 +44,6 @@ type cleanupRecordingRegistry struct {
 
 func (r *cleanupRecordingRegistry) Create(name string, _ config.StepConfig) (types.ScaffoldStep, error) {
 	return r.steps[name], nil
-}
-
-func (r *cleanupRecordingRegistry) ListRegistered() []string {
-	return nil
 }
 
 type cleanupRecordingPreset struct {
@@ -109,6 +109,38 @@ func TestRunCleanupWithOptions_DryRunInvokesDbDestroyWithDryRun(t *testing.T) {
 	if len(databaseStep.runOptions) != 1 || !databaseStep.runOptions[0].DryRun {
 		t.Fatalf("db.destroy run options = %#v", databaseStep.runOptions)
 	}
+}
+
+func TestNewScaffoldManager_UsesFreshDefaultRegistries(t *testing.T) {
+	first := NewScaffoldManager()
+	second := NewScaffoldManager()
+
+	firstRegistry, ok := first.registry.(*scaffoldsteps.Registry)
+	require.True(t, ok, "default manager should own an explicit registry")
+	secondRegistry, ok := second.registry.(*scaffoldsteps.Registry)
+	require.True(t, ok, "default manager should own an explicit registry")
+	require.NotSame(t, firstRegistry, secondRegistry)
+	builtIns := secondRegistry.ListRegistered()
+
+	firstRegistry.Register("custom.step", func(config.StepConfig) types.ScaffoldStep {
+		return nil
+	})
+
+	_, err := secondRegistry.Create("custom.step", config.StepConfig{})
+	assert.Error(t, err, "custom registrations must not leak between default managers")
+	assert.Equal(t, builtIns, secondRegistry.ListRegistered())
+
+	for _, registry := range []*scaffoldsteps.Registry{firstRegistry, secondRegistry} {
+		step, err := registry.Create("php", config.StepConfig{})
+		require.NoError(t, err)
+		assert.Equal(t, "php", step.Name())
+	}
+}
+
+func TestNewScaffoldManagerWithRegistry_RequiresExplicitRegistry(t *testing.T) {
+	assert.PanicsWithValue(t, "scaffold manager requires an explicit step registry", func() {
+		NewScaffoldManagerWithRegistry(nil)
+	})
 }
 
 func TestPrepareDbSuffixSetsProvenance(t *testing.T) {

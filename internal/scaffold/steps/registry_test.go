@@ -11,8 +11,11 @@ import (
 )
 
 func TestRegistry_StepRegistration(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterDefaults()
+
 	t.Run("env.read step is registered", func(t *testing.T) {
-		step, err := Create("env.read", config.StepConfig{
+		step, err := registry.Create("env.read", config.StepConfig{
 			Key:     "DB_DATABASE",
 			StoreAs: "DatabaseName",
 		})
@@ -22,7 +25,7 @@ func TestRegistry_StepRegistration(t *testing.T) {
 	})
 
 	t.Run("env.write step is registered", func(t *testing.T) {
-		step, err := Create("env.write", config.StepConfig{
+		step, err := registry.Create("env.write", config.StepConfig{
 			Key:   "DB_DATABASE",
 			Value: "{{ .SiteName }}_{{ .DbSuffix }}",
 		})
@@ -32,7 +35,7 @@ func TestRegistry_StepRegistration(t *testing.T) {
 	})
 
 	t.Run("node.bun step is registered", func(t *testing.T) {
-		step, err := Create("node.bun", config.StepConfig{
+		step, err := registry.Create("node.bun", config.StepConfig{
 			Args: []string{"install"},
 		})
 
@@ -46,21 +49,21 @@ func TestRegistry_StepRegistration(t *testing.T) {
 	})
 
 	t.Run("db.create step is registered", func(t *testing.T) {
-		step, err := Create("db.create", config.StepConfig{})
+		step, err := registry.Create("db.create", config.StepConfig{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "db.create", step.Name())
 	})
 
 	t.Run("db.destroy step is registered", func(t *testing.T) {
-		step, err := Create("db.destroy", config.StepConfig{})
+		step, err := registry.Create("db.destroy", config.StepConfig{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "db.destroy", step.Name())
 	})
 
 	t.Run("unregistered step returns error", func(t *testing.T) {
-		step, err := Create("nonexistent.step", config.StepConfig{})
+		step, err := registry.Create("nonexistent.step", config.StepConfig{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown step")
 		assert.Contains(t, err.Error(), "nonexistent.step")
@@ -82,7 +85,7 @@ func TestRegistry_StepRegistration(t *testing.T) {
 		}
 
 		for _, stepName := range binarySteps {
-			step, err := Create(stepName, config.StepConfig{})
+			step, err := registry.Create(stepName, config.StepConfig{})
 			require.NoError(t, err, "Binary step '%s' should be registered", stepName)
 			assert.Equal(t, stepName, step.Name())
 		}
@@ -102,7 +105,7 @@ func TestRegistry_StepRegistration(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			step, err := Create(tc.stepName, tc.cfg)
+			step, err := registry.Create(tc.stepName, tc.cfg)
 			require.NoError(t, err, "Step '%s' should be registered", tc.stepName)
 			assert.Equal(t, tc.stepName, step.Name())
 		}
@@ -110,7 +113,9 @@ func TestRegistry_StepRegistration(t *testing.T) {
 }
 
 func TestRegistry_ListRegistered(t *testing.T) {
-	names := ListRegistered()
+	registry := NewRegistry()
+	registry.RegisterDefaults()
+	names := registry.ListRegistered()
 
 	assert.NotEmpty(t, names)
 	assert.Contains(t, names, "php")
@@ -127,16 +132,17 @@ func TestRegistry_ListRegistered(t *testing.T) {
 
 func TestRegistry_DuplicateRegistration(t *testing.T) {
 	t.Run("duplicate registration panics", func(t *testing.T) {
-		// This test creates a temporary registry to test panic behavior
-		// without affecting the global registry
+		registry := NewRegistry()
+		registry.RegisterDefaults()
+
 		defer func() {
 			r := recover()
 			assert.NotNil(t, r, "Expected panic for duplicate registration")
 			assert.Contains(t, r, "already registered")
 		}()
 
-		// Register a duplicate step - this should panic
-		Register("php", func(cfg config.StepConfig) types.ScaffoldStep {
+		// Register a duplicate step - this should panic.
+		registry.Register("php", func(cfg config.StepConfig) types.ScaffoldStep {
 			return nil
 		})
 	})

@@ -11,8 +11,7 @@ import (
 type StepFactory func(cfg config.StepConfig) types.ScaffoldStep
 
 // Registry provides explicit step registration and creation.
-// Use NewRegistry() to create an instance, or use the global functions
-// for backward compatibility during migration.
+// Use NewRegistry() to create an instance.
 type Registry struct {
 	factories map[string]StepFactory
 	order     []string
@@ -103,28 +102,6 @@ func (r *Registry) RegisterDefaults() {
 	})
 }
 
-// Global registry for backward compatibility during migration.
-// Deprecated: Use NewRegistry() instead for new code.
-var globalRegistry = NewRegistry()
-
-// Register adds a step factory to the global registry.
-// Deprecated: Use Registry.Register() instead.
-func Register(name string, factory StepFactory) {
-	globalRegistry.Register(name, factory)
-}
-
-// Create instantiates a step by name using the global registry.
-// Deprecated: Use Registry.Create() instead.
-func Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
-	return globalRegistry.Create(name, cfg)
-}
-
-// ListRegistered returns a sorted list of all registered steps from the global registry.
-// Deprecated: Use Registry.ListRegistered() instead.
-func ListRegistered() []string {
-	return globalRegistry.ListRegistered()
-}
-
 type binaryDefinition struct {
 	name   string
 	binary string
@@ -140,10 +117,4 @@ var binaries = []binaryDefinition{
 	{"node.bun", "bun"},
 	{"herd", "herd"},
 	{"yerd", "yerd"},
-}
-
-func init() {
-	// Initialize global registry with default steps for backward compatibility.
-	// New code should use NewRegistry() and RegisterDefaults() explicitly.
-	globalRegistry.RegisterDefaults()
 }

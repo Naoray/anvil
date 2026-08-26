@@ -137,7 +137,9 @@ func TestLaravelPreset_HerdCompatibility(t *testing.T) {
 func TestLaravelPreset_PHPStanCacheStepIsNoOpWithoutBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 	cacheStepConfig := laravelPHPStanCacheStepConfig(t)
-	cacheStep, err := scaffoldsteps.Create(cacheStepConfig.Name, cacheStepConfig)
+	registry := scaffoldsteps.NewRegistry()
+	registry.RegisterDefaults()
+	cacheStep, err := registry.Create(cacheStepConfig.Name, cacheStepConfig)
 	require.NoError(t, err)
 
 	ctx := &types.ScaffoldContext{WorktreePath: tmpDir}
@@ -162,6 +164,8 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 
 	commander := &phpstanInvocationCommander{t: t, worktreePath: tmpDir}
 	commandExecutor := anvil_exec.NewCommandExecutor(commander)
+	registry := scaffoldsteps.NewRegistry()
+	registry.RegisterDefaults()
 
 	var relevantSteps []types.ScaffoldStep
 	for _, stepConfig := range NewLaravel().DefaultSteps() {
@@ -174,7 +178,7 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 			continue
 		}
 
-		step, err := scaffoldsteps.Create(stepConfig.Name, stepConfig)
+		step, err := registry.Create(stepConfig.Name, stepConfig)
 		require.NoError(t, err)
 		relevantSteps = append(relevantSteps, step)
 	}

@@ -14,6 +14,12 @@ import (
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
+func createDefaultStep(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
+	registry := steps.NewRegistry()
+	registry.RegisterDefaults()
+	return registry.Create(name, cfg)
+}
+
 func TestIntegration_TemplateReplacementChain(t *testing.T) {
 	t.Run("env.read sets variable used by env.write", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -33,13 +39,13 @@ APP_NAME=original_app
 			Branch:       "test",
 		}
 
-		readStep, err := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalApp"})
+		readStep, err := createDefaultStep("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalApp"})
 		require.NoError(t, err)
 		err = readStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 		assert.Equal(t, "original_app", ctx.GetVar("OriginalApp"))
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "NEW_APP", Value: "{{ .SiteName }}"})
+		writeStep, err := createDefaultStep("env.write", config.StepConfig{Key: "NEW_APP", Value: "{{ .SiteName }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -102,12 +108,12 @@ func TestIntegration_EnvReadWriteFlow(t *testing.T) {
 			Path:         "feature-auth",
 		}
 
-		readStep, err := steps.Create("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalName"})
+		readStep, err := createDefaultStep("env.read", config.StepConfig{Key: "APP_NAME", StoreAs: "OriginalName"})
 		require.NoError(t, err)
 		err = readStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "NEW_NAME", Value: "{{ .SiteName }}_{{ .Path }}"})
+		writeStep, err := createDefaultStep("env.write", config.StepConfig{Key: "NEW_NAME", Value: "{{ .SiteName }}_{{ .Path }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -147,7 +153,7 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
+		writeStep, err := createDefaultStep("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -213,7 +219,7 @@ APP_NAME=myapp
 
 func TestIntegration_BunIntegration(t *testing.T) {
 	t.Run("node.bun step is registered and functional", func(t *testing.T) {
-		step, err := steps.Create("node.bun", config.StepConfig{
+		step, err := createDefaultStep("node.bun", config.StepConfig{
 			Args: []string{"--version"},
 		})
 
@@ -251,7 +257,7 @@ APP_NAME=myapp
 		suffix := ctx.GetDbSuffix()
 		assert.NotEmpty(t, suffix)
 
-		writeDbStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
+		writeDbStep, err := createDefaultStep("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeDbStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -261,7 +267,7 @@ APP_NAME=myapp
 		expectedDbName := "myapp_" + suffix
 		assert.Contains(t, string(content), "DB_DATABASE="+expectedDbName)
 
-		writeDomainStep, err := steps.Create("env.write", config.StepConfig{Key: "APP_DOMAIN", Value: "app.{{ .Path }}.test"})
+		writeDomainStep, err := createDefaultStep("env.write", config.StepConfig{Key: "APP_DOMAIN", Value: "app.{{ .Path }}.test"})
 		require.NoError(t, err)
 		err = writeDomainStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)
@@ -432,7 +438,7 @@ APP_NAME=some-feature
 		actualDbName := createCalls[0]
 		assert.True(t, strings.HasPrefix(actualDbName, "some_feature_"), "Database should be created with sanitized name (underscores)")
 
-		writeStep, err := steps.Create("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
+		writeStep, err := createDefaultStep("env.write", config.StepConfig{Key: "DB_DATABASE", Value: "{{ .DatabaseName }}"})
 		require.NoError(t, err)
 		err = writeStep.Run(ctx, types.StepOptions{Verbose: false})
 		require.NoError(t, err)

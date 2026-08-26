@@ -32,7 +32,6 @@ type CleanupOptions struct {
 // This abstraction allows for dependency injection and testing.
 type StepRegistry interface {
 	Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error)
-	ListRegistered() []string
 }
 
 type Preset interface {
@@ -42,35 +41,23 @@ type Preset interface {
 	CleanupSteps() []config.CleanupStep
 }
 
-// NewScaffoldManager creates a new scaffold manager using the global step registry.
-// Deprecated: Use NewScaffoldManagerWithRegistry instead for explicit dependency injection.
+// NewScaffoldManager creates a new scaffold manager with a fresh default registry.
 func NewScaffoldManager() *ScaffoldManager {
-	return NewScaffoldManagerWithRegistry(nil)
+	registry := steps.NewRegistry()
+	registry.RegisterDefaults()
+	return NewScaffoldManagerWithRegistry(registry)
 }
 
 // NewScaffoldManagerWithRegistry creates a new scaffold manager with the given step registry.
-// If registry is nil, the global registry is used for backward compatibility.
 func NewScaffoldManagerWithRegistry(registry StepRegistry) *ScaffoldManager {
 	if registry == nil {
-		registry = &globalStepRegistryAdapter{}
+		panic("scaffold manager requires an explicit step registry")
 	}
 	return &ScaffoldManager{
 		presets:     make(map[string]Preset),
 		presetOrder: make([]string, 0),
 		registry:    registry,
 	}
-}
-
-// globalStepRegistryAdapter adapts the global step functions to the StepRegistry interface.
-// This provides backward compatibility during the migration to explicit registry.
-type globalStepRegistryAdapter struct{}
-
-func (a *globalStepRegistryAdapter) Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
-	return steps.Create(name, cfg)
-}
-
-func (a *globalStepRegistryAdapter) ListRegistered() []string {
-	return steps.ListRegistered()
 }
 
 func (m *ScaffoldManager) RegisterPreset(preset Preset) {
