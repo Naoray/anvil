@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ func TestStashAll(t *testing.T) {
 			}
 
 			// Run StashAll
-			err := StashAll(repoPath, "test stash message")
+			_, err := StashAll(repoPath, "test stash message")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("StashAll() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -155,6 +156,49 @@ func TestStashAll(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStashAllReturnsStableCreatedOID(t *testing.T) {
+	repoPath := setupStashTestRepo(t)
+	defer os.RemoveAll(repoPath)
+
+	readmePath := filepath.Join(repoPath, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Pre-existing\n"), 0644); err != nil {
+		t.Fatalf("failed to create pre-existing stash change: %v", err)
+	}
+	if _, err := StashAll(repoPath, "pre-existing stash"); err != nil {
+		t.Fatalf("failed to create pre-existing stash: %v", err)
+	}
+
+	if err := os.WriteFile(readmePath, []byte("# Auto-stash\n"), 0644); err != nil {
+		t.Fatalf("failed to create auto-stash change: %v", err)
+	}
+	autoStashOID, err := StashAll(repoPath, "auto-stash")
+	if err != nil {
+		t.Fatalf("StashAll() failed: %v", err)
+	}
+	if autoStashOID == "" {
+		t.Fatal("StashAll() returned an empty stash OID")
+	}
+
+	if err := os.WriteFile(readmePath, []byte("# Later stash\n"), 0644); err != nil {
+		t.Fatalf("failed to create later stash change: %v", err)
+	}
+	if _, err := StashAll(repoPath, "later stash"); err != nil {
+		t.Fatalf("failed to create later stash: %v", err)
+	}
+
+	cmd := exec.Command("git", "-C", repoPath, "stash", "list", "--format=%H")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to list stash OIDs: %v", err)
+	}
+	for _, oid := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if oid == autoStashOID {
+			return
+		}
+	}
+	t.Fatalf("auto-stash OID %q was not preserved in stash list %q", autoStashOID, string(output))
 }
 
 func TestPopStash(t *testing.T) {

@@ -199,10 +199,11 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 			}
 
 			if !dryRun {
-				if err := git.StashAll(pc.CWD, "anvil sync auto-stash"); err != nil {
+				stashOID, err := git.StashAll(pc.CWD, "anvil sync auto-stash")
+				if err != nil {
 					return fmt.Errorf("failed to stash changes: %w", err)
 				}
-				stashCreated = true
+				stashCreated = stashOID != ""
 				if !quiet {
 					ui.PrintSuccess("Changes stashed successfully")
 				}
