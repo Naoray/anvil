@@ -149,7 +149,7 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 			}
 			worktree.Path = path
 			hasPath = true
-		case strings.HasPrefix(field, "worktree"):
+		case field == "worktree":
 			return Worktree{}, fmt.Errorf("record %d: malformed worktree attribute %q", recordIndex, field)
 		case strings.HasPrefix(field, "HEAD "):
 			if strings.TrimPrefix(field, "HEAD ") == "" {
@@ -167,7 +167,7 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 			}
 			worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
 			hasBranch = true
-		case strings.HasPrefix(field, "branch"):
+		case field == "branch":
 			return Worktree{}, fmt.Errorf("record %d: malformed branch attribute %q", recordIndex, field)
 		case field == "detached":
 			if hasDetached {
@@ -175,7 +175,7 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 			}
 			worktree.Detached = true
 			hasDetached = true
-		case strings.HasPrefix(field, "detached"):
+		case strings.HasPrefix(field, "detached "):
 			return Worktree{}, fmt.Errorf("record %d: malformed detached attribute %q", recordIndex, field)
 		case field == "bare":
 			if hasBare {
@@ -183,7 +183,7 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 			}
 			worktree.Bare = true
 			hasBare = true
-		case strings.HasPrefix(field, "bare"):
+		case strings.HasPrefix(field, "bare "):
 			return Worktree{}, fmt.Errorf("record %d: malformed bare attribute %q", recordIndex, field)
 		case field == "locked", strings.HasPrefix(field, "locked "):
 			if hasLocked {

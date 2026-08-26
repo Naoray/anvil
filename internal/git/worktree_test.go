@@ -284,7 +284,7 @@ func TestListWorktrees_RetainsDetachedAndLockedRecords(t *testing.T) {
 
 func TestParseWorktreePorcelain_RetainsStatesAndUnknownFields(t *testing.T) {
 	fixture := []byte(
-		"worktree /repo/main\x00HEAD abc\x00branch refs/heads/main\x00unknown ignored\x00locked\x00\x00" +
+		"worktree /repo/main\x00HEAD abc\x00branch refs/heads/main\x00unknown ignored\x00branching ignored\x00barely ignored\x00lockedly ignored\x00worktreeish ignored\x00locked\x00\x00" +
 			"worktree /repo/detached worktree\x00HEAD def\x00detached\x00locked keep this\x00\x00" +
 			"worktree /repo/bare worktree\x00HEAD ghi\x00bare\x00unknown value\x00\x00",
 	)
