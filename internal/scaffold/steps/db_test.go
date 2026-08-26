@@ -902,6 +902,224 @@ func TestIsDatabaseExistsError(t *testing.T) {
 	})
 }
 
+func TestDbCreateStep_EqualFormArguments(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	var gotOptions DatabaseOptions
+	factory := func(_ string, options DatabaseOptions) (DatabaseClient, error) {
+		gotOptions = options
+		return client, nil
+	}
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Args: []string{
+			"--database=ignored",
+			"--prefix=custom",
+			"--username=anvil",
+			"--password=secret",
+			"--host=db.example",
+			"--port=15432",
+		},
+	}, factory)
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "site"}
+	ctx.SetDbSuffix("test_suffix")
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	assert.Equal(t, []string{"custom_test_suffix"}, client.GetCreateCalls())
+	assert.Equal(t, DatabaseOptions{
+		Host:     "db.example",
+		Port:     "15432",
+		Username: "anvil",
+		Password: "secret",
+	}, gotOptions)
+}
+
+func TestDbCreateStep_EqualFormSQLiteDatabaseOverride(t *testing.T) {
+	dir := t.TempDir()
+	step := NewDbCreateStep(config.StepConfig{
+		Type: "sqlite",
+		Args: []string{"--database=database/custom.sqlite"},
+	})
+
+	require.NoError(t, step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{}))
+	assert.FileExists(t, filepath.Join(dir, "database", "custom.sqlite"))
+	assert.NoFileExists(t, filepath.Join(dir, "database", "database.sqlite"))
+}
+
+func TestDbCreateStep_InvalidArgumentsFailBeforeClientOrFilesystemMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "unknown option", args: []string{"--unknown", "value"}},
+		{name: "unknown token", args: []string{"unexpected"}},
+		{name: "dangling option", args: []string{"--host"}},
+		{name: "option-looking value", args: []string{"--host", "--port", "1234"}},
+		{name: "empty host", args: []string{"--host="}},
+		{name: "empty prefix", args: []string{"--prefix="}},
+		{name: "empty database", args: []string{"--database="}},
+		{name: "empty username", args: []string{"--username="}},
+		{name: "empty port", args: []string{"--port="}},
+		{name: "empty option name", args: []string{"--=value"}},
+		{name: "duplicate split", args: []string{"--host", "one", "--host", "two"}},
+		{name: "duplicate equal", args: []string{"--host=one", "--host=two"}},
+		{name: "duplicate mixed", args: []string{"--host", "one", "--host=two"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			factoryCalled := false
+			factory := func(_ string, _ DatabaseOptions) (DatabaseClient, error) {
+				factoryCalled = true
+				return NewMockDatabaseClient(), nil
+			}
+			step := NewDbCreateStepWithFactory(config.StepConfig{Type: "mysql", Args: tt.args}, factory)
+			ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "site"}
+
+			err := step.Run(ctx, types.StepOptions{})
+			require.Error(t, err)
+			assert.False(t, factoryCalled)
+			assert.Empty(t, ctx.GetDbSuffix())
+			assert.NoFileExists(t, filepath.Join(dir, "database", "database.sqlite"))
+		})
+	}
+}
+
+func TestDbCreateStep_InvalidSQLiteArgumentsFailBeforeFilesystemMutation(t *testing.T) {
+	dir := t.TempDir()
+	step := NewDbCreateStep(config.StepConfig{
+		Type: "sqlite",
+		Args: []string{"--database="},
+	})
+
+	err := step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{})
+	require.Error(t, err)
+	assert.NoFileExists(t, filepath.Join(dir, "database", "database.sqlite"))
+}
+
+func TestDbCreateStep_ExplicitEmptyPasswordIsValid(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	var gotOptions DatabaseOptions
+	factory := func(_ string, options DatabaseOptions) (DatabaseClient, error) {
+		gotOptions = options
+		return client, nil
+	}
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Args: []string{"--password="},
+	}, factory)
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "site"}
+	ctx.SetDbSuffix("test_suffix")
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	assert.Empty(t, gotOptions.Password)
+}
+
+func TestParseDatabaseArgs_SupportsEveryOptionSyntax(t *testing.T) {
+	want := databaseStepArgs{
+		database: "database/custom.sqlite",
+		prefix:   "custom",
+		connection: DatabaseOptions{
+			Host:     "db.example",
+			Port:     "15432",
+			Username: "anvil",
+			Password: "secret",
+		},
+	}
+
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "split",
+			args: []string{
+				"--database", "database/custom.sqlite",
+				"--prefix", "custom",
+				"--username", "anvil",
+				"--password", "secret",
+				"--host", "db.example",
+				"--port", "15432",
+			},
+		},
+		{
+			name: "equal",
+			args: []string{
+				"--database=database/custom.sqlite",
+				"--prefix=custom",
+				"--username=anvil",
+				"--password=secret",
+				"--host=db.example",
+				"--port=15432",
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseDatabaseArgs(tt.args)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestParseDatabaseArgs_AllowsExplicitEmptyPassword(t *testing.T) {
+	for _, args := range [][]string{
+		{"--password", ""},
+		{"--password="},
+	} {
+		_, err := parseDatabaseArgs(args)
+		assert.NoError(t, err)
+	}
+}
+
+func TestDbDestroyStep_EqualFormArguments(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{DbSuffix: "test_suffix"}))
+	client := NewMockDatabaseClient()
+	client.AddDatabase("site_test_suffix")
+	var gotOptions DatabaseOptions
+	factory := func(_ string, options DatabaseOptions) (DatabaseClient, error) {
+		gotOptions = options
+		return client, nil
+	}
+	step := NewDbDestroyStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Args: []string{
+			"--database=ignored",
+			"--prefix=ignored",
+			"--username=anvil",
+			"--password=secret",
+			"--host=db.example",
+			"--port=15432",
+		},
+	}, factory)
+
+	require.NoError(t, step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{}))
+	assert.Equal(t, DatabaseOptions{
+		Host:     "db.example",
+		Port:     "15432",
+		Username: "anvil",
+		Password: "secret",
+	}, gotOptions)
+	assert.Equal(t, []string{"site_test_suffix"}, client.GetDropCalls())
+}
+
+func TestDbDestroyStep_InvalidArgumentsFailBeforeLocalStateRead(t *testing.T) {
+	step := NewDbDestroyStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Args: []string{"--unknown=value"},
+	}, func(_ string, _ DatabaseOptions) (DatabaseClient, error) {
+		t.Fatal("database client factory should not be called")
+		return nil, nil
+	})
+
+	err := step.Run(&types.ScaffoldContext{WorktreePath: filepath.Join(t.TempDir(), "missing")}, types.StepOptions{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unknown option")
+}
+
 func TestDatabaseSteps_CharacterizeClientFactoryDefaults(t *testing.T) {
 	tests := []struct {
 		name        string
