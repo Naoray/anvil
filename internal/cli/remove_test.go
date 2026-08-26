@@ -332,7 +332,7 @@ func TestRemoveCommand_RejectsBareAndLockedBeforeCleanup(t *testing.T) {
 					return &config.LocalState{}, nil
 				},
 				scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return nil },
-				detectPreset:    func(*ProjectContext, string) string { return "" },
+				resolvePreset:   func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			}
 
 			root := &cobra.Command{Use: "anvil"}
@@ -368,7 +368,7 @@ func TestRemoveCommand_DetachedWorktreeCannotDeleteBranch(t *testing.T) {
 		deleteBranch:     func(string, string, bool) error { deleteCalls++; return nil },
 		readLocalState:   func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
 		scaffoldManager:  func(*ProjectContext) *scaffold.ScaffoldManager { return nil },
-		detectPreset:     func(*ProjectContext, string) string { return "" },
+		resolvePreset:    func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 	}
 
 	root := &cobra.Command{Use: "anvil"}

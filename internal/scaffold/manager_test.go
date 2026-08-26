@@ -79,8 +79,6 @@ func (r *contextRecordingRegistry) Create(string, config.StepConfig) (types.Scaf
 	return r.step, nil
 }
 
-func (r *contextRecordingRegistry) ListRegistered() []string { return nil }
-
 func TestRunScaffold_UsesPassedPresetDefinition(t *testing.T) {
 	step := &contextRecordingStep{}
 	manager := NewScaffoldManagerWithRegistry(&contextRecordingRegistry{step: step})

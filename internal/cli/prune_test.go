@@ -500,7 +500,7 @@ func TestPruneProject_SkipsBareDetachedAndLockedRecords(t *testing.T) {
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
@@ -527,7 +527,7 @@ func TestPruneProject_SkipsBranchlessRecord(t *testing.T) {
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error { return nil },
 		},
 	}
