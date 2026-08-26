@@ -78,6 +78,7 @@ func TestScaffoldNoWorktreesInProject(t *testing.T) {
 	assert.True(t, len(output) > 0)
 }
 
+<<<<<<< HEAD
 func TestSelectWorktreeByContainment_NestedDirectory(t *testing.T) {
 	root := t.TempDir()
 	worktreePath := filepath.Join(root, "worktrees", "feature-auth")
@@ -176,4 +177,10 @@ func TestSelectWorktreeByContainment_RespectsSymlinkSemantics(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, selected)
 	assert.Equal(t, "feature/symlink", selected.Branch)
+}
+
+func TestScaffoldCommand_RejectsVerboseAndQuietBeforeOutput(t *testing.T) {
+	err := executeCommandForFlagValidation(t, scaffoldCmd, []string{"scaffold", "--verbose", "--quiet"}, "verbose", "quiet")
+
+	assert.EqualError(t, err, "if any flags in the group [verbose quiet] are set none of the others can be; [quiet verbose] were all set")
 }
