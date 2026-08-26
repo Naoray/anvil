@@ -119,5 +119,5 @@ type StashConflictError struct {
 }
 
 func (e *StashConflictError) Error() string {
-	return fmt.Sprintf("stash apply has conflicts:\n%s\n\nResolve the conflicts, stage the changes with 'git add', then run 'git stash drop' to remove the stash, or run 'git reset --hard && git stash apply' to try again", e.Output)
+	return fmt.Sprintf("stash apply has conflicts:\n%s", e.Output)
 }

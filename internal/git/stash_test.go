@@ -319,6 +319,20 @@ func TestApplyStashConflictPreservesOID(t *testing.T) {
 	}
 }
 
+func TestStashConflictErrorDoesNotSuggestUnsafeRecovery(t *testing.T) {
+	errText := (&StashConflictError{Output: "CONFLICT (content): Merge conflict in README.md"}).Error()
+
+	for _, unsafeGuidance := range []string{
+		"git reset --hard",
+		"git stash apply",
+		"git stash drop",
+	} {
+		if strings.Contains(errText, unsafeGuidance) {
+			t.Fatalf("StashConflictError() = %q, must not suggest %q", errText, unsafeGuidance)
+		}
+	}
+}
+
 func TestDropStashMissingOIDPreservesExistingStash(t *testing.T) {
 	repoPath := setupStashTestRepo(t)
 	defer os.RemoveAll(repoPath)

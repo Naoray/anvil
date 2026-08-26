@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -210,7 +211,7 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 							if runErr == nil {
 								runErr = restoreErr
 							} else {
-								runErr = fmt.Errorf("%w; additionally, auto-stash restoration failed: %v", runErr, restoreErr)
+								runErr = fmt.Errorf("%w; additionally, auto-stash restoration failed: %w", runErr, restoreErr)
 							}
 						}
 					}()
@@ -304,26 +305,37 @@ func finalizeAutoStash(worktreePath string, stashOID string, quiet bool) error {
 	}
 
 	if err := git.ApplyStash(worktreePath, stashOID); err != nil {
-		if _, isConflict := err.(*git.StashConflictError); isConflict {
+		var conflictErr *git.StashConflictError
+		if errors.As(err, &conflictErr) {
 			ui.PrintWarning("\nWarning: Could not automatically restore stashed changes due to conflicts")
+			guidance := fmt.Sprintf("The conflicted worktree already contains the attempted application of auto-stash %s. Resolve and stage the conflicts, then verify the restored files. Locate the matching reflog selector with `%s`; after verification, drop only that entry with `git stash drop <matching-selector>`.", stashOID, matchingStashSelectorCommand(stashOID))
+			ui.PrintInfo(guidance)
+			return fmt.Errorf("failed to apply auto-stash %s; stash preserved for recovery: %w; %s", stashOID, err, guidance)
 		} else {
 			ui.PrintWarning(fmt.Sprintf("\nWarning: Failed to restore stashed changes: %v", err))
+			guidance := fmt.Sprintf("Your changes remain recoverable in auto-stash %s. Resolve the issue without discarding the conflicted or partially applied worktree, then locate the matching reflog selector with `%s` before dropping only that entry after verification.", stashOID, matchingStashSelectorCommand(stashOID))
+			ui.PrintInfo(guidance)
+			return fmt.Errorf("failed to apply auto-stash %s; stash preserved for recovery: %w; %s", stashOID, err, guidance)
 		}
-		ui.PrintInfo(fmt.Sprintf("Your changes remain recoverable in auto-stash %s.", stashOID))
-		ui.PrintInfo(fmt.Sprintf("Resolve the issue, then run 'git stash apply %s' to restore them.", stashOID))
-		return fmt.Errorf("failed to apply auto-stash %s; stash preserved for recovery: %w", stashOID, err)
 	}
 
 	if err := git.DropStash(worktreePath, stashOID); err != nil {
 		ui.PrintWarning(fmt.Sprintf("\nWarning: Changes were restored, but auto-stash %s could not be dropped: %v", stashOID, err))
-		ui.PrintInfo("The stash remains recoverable. Use its exact OID with 'git stash list --format=\"%H %gd\"' before dropping it.")
-		return fmt.Errorf("auto-stash %s was applied but could not be dropped; changes restored and stash preserved: %w", stashOID, err)
+		guidance := fmt.Sprintf("Files are already restored, and the stash remains as auto-stash %s. Verify the restored files, locate the matching reflog selector with `%s`, then drop only that entry with `git stash drop <matching-selector>`.", stashOID, matchingStashSelectorCommand(stashOID))
+		ui.PrintInfo(guidance)
+		return fmt.Errorf("auto-stash %s was applied but could not be dropped; files are already restored and the stash remains: %w; %s", stashOID, err, guidance)
 	}
 
 	if !quiet {
 		ui.PrintSuccess("Stashed changes restored successfully")
 	}
 	return nil
+}
+
+const stashReflogLookup = `git stash list --format="%H %gd"`
+
+func matchingStashSelectorCommand(stashOID string) string {
+	return fmt.Sprintf("%s | grep '^%s '", stashReflogLookup, stashOID)
 }
 
 func init() {
