@@ -350,6 +350,39 @@ func TestParseWorktreePorcelain_RejectsMalformedRecords(t *testing.T) {
 	}
 }
 
+func TestListWorktreesDetailed_RetainsDetachedWithoutMergeStatus(t *testing.T) {
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	featurePath := filepath.Join(t.TempDir(), "detached worktree")
+
+	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
+		t.Fatalf("creating feature worktree: %v", err)
+	}
+	cmd := exec.Command("git", "-C", featurePath, "checkout", "--detach")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detaching worktree: %v\n%s", err, output)
+	}
+
+	worktrees, err := ListWorktreesDetailed(gitDir, repoDir, "main")
+	if err != nil {
+		t.Fatalf("listing detailed worktrees: %v", err)
+	}
+
+	var detached *Worktree
+	for i := range worktrees {
+		if worktrees[i].Detached {
+			detached = &worktrees[i]
+			break
+		}
+	}
+	if detached == nil {
+		t.Fatal("detached worktree should be retained in detailed listing")
+	}
+	if detached.IsMerged {
+		t.Error("detached worktree should not have merge status")
+	}
+}
+
 func TestRemoveWorktree(t *testing.T) {
 	repoDir := createTestRepo(t)
 	gitDir := filepath.Join(repoDir, ".git")

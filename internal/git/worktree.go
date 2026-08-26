@@ -144,7 +144,7 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 				return Worktree{}, fmt.Errorf("record %d: duplicate worktree path", recordIndex)
 			}
 			path := strings.TrimPrefix(field, "worktree ")
-			if strings.TrimSpace(path) == "" {
+			if path == "" {
 				return Worktree{}, fmt.Errorf("record %d: worktree path is empty", recordIndex)
 			}
 			worktree.Path = path
