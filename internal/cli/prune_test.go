@@ -119,14 +119,36 @@ func TestPruneProject_DryRunDoesNotRemove(t *testing.T) {
 	pc, _ := makeTestProject(t, "gamma")
 	wtPath := addMergedWorktree(t, pc, "feature-dry")
 
+	previousStdout := os.Stdout
 	output := captureStdout(t, func() {
 		err := pruneProject(pc, true, true /* dryRun */, false, false)
 		require.NoError(t, err)
 	})
+	require.Same(t, previousStdout, os.Stdout)
 
 	_, err := os.Stat(wtPath)
 	assert.NoError(t, err, "dry-run should not remove the worktree")
 	assert.NotContains(t, output, "Removed:")
+}
+
+func TestCaptureStdoutRestoresAfterCallbackPanic(t *testing.T) {
+	previousStdout := os.Stdout
+	defer func() {
+		if os.Stdout == previousStdout {
+			return
+		}
+		if err := os.Stdout.Close(); err != nil {
+			t.Errorf("closing leaked stdout: %v", err)
+		}
+		os.Stdout = previousStdout
+	}()
+
+	func() {
+		defer func() { require.NotNil(t, recover()) }()
+		captureStdout(t, func() { panic("callback failed") })
+	}()
+
+	assert.Same(t, previousStdout, os.Stdout)
 }
 
 func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
@@ -432,11 +454,36 @@ func captureStdout(t *testing.T, run func()) string {
 	require.NoError(t, err)
 	previous := os.Stdout
 	os.Stdout = writer
+	writerClosed := false
+	readerClosed := false
+	closeWriter := func() error {
+		if writerClosed {
+			return nil
+		}
+		writerClosed = true
+		return writer.Close()
+	}
+	closeReader := func() error {
+		if readerClosed {
+			return nil
+		}
+		readerClosed = true
+		return reader.Close()
+	}
+	defer func() {
+		os.Stdout = previous
+		if err := closeWriter(); err != nil {
+			t.Errorf("closing captured stdout writer: %v", err)
+		}
+		if err := closeReader(); err != nil {
+			t.Errorf("closing captured stdout reader: %v", err)
+		}
+	}()
+
 	run()
-	require.NoError(t, writer.Close())
-	os.Stdout = previous
+	require.NoError(t, closeWriter())
 	output, err := io.ReadAll(reader)
 	require.NoError(t, err)
-	require.NoError(t, reader.Close())
+	require.NoError(t, closeReader())
 	return string(output)
 }
