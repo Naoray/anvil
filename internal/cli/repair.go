@@ -312,10 +312,12 @@ func repairBranchTrackingWithDependencies(pc *ProjectContext, dryRun, verbose bo
 		fixed++
 	}
 
-	if fixed == 0 && skipped > 0 {
-		ui.PrintInfo("All branches already have tracking configured")
-	} else if fixed == 0 {
-		ui.PrintInfo("No branches needed tracking configuration")
+	if len(failures) == 0 {
+		if fixed == 0 && skipped > 0 {
+			ui.PrintInfo("All branches already have tracking configured")
+		} else if fixed == 0 {
+			ui.PrintInfo("No branches needed tracking configuration")
+		}
 	}
 
 	return errors.Join(failures...)

@@ -202,6 +202,28 @@ func TestRepairBranchTracking_DryRunDoesNotSetUpstream(t *testing.T) {
 	assert.False(t, configured)
 }
 
+func TestRepairBranchTracking_IsIdempotent(t *testing.T) {
+	tracked := false
+	setupCalls := 0
+	deps := repairBranchTrackingDependencies{
+		getBranchRefs: func(string) ([]string, []string, error) {
+			return []string{"main"}, []string{"origin/main"}, nil
+		},
+		hasBranchTracking: func(string, string) (bool, error) {
+			return tracked, nil
+		},
+		setBranchUpstream: func(string, string, string) error {
+			setupCalls++
+			tracked = true
+			return nil
+		},
+	}
+
+	assert.NoError(t, repairBranchTrackingWithDependencies(&ProjectContext{GitDir: "git-dir"}, false, false, deps))
+	assert.NoError(t, repairBranchTrackingWithDependencies(&ProjectContext{GitDir: "git-dir"}, false, false, deps))
+	assert.Equal(t, 1, setupCalls)
+}
+
 // createRepoWithRemote creates a source repo and a clone with remote configured.
 // Returns (gitDir, repoDir, sourceDir).
 func createRepoWithRemote(t *testing.T) (string, string, string) {
