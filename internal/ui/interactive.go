@@ -170,12 +170,8 @@ func SelectWorktreeToRemove(worktrees []git.Worktree) (*git.Worktree, error) {
 
 	options := make([]huh.Option[string], len(removable))
 	for i, wt := range removable {
-		status := ""
-		if wt.IsMerged {
-			status = " (merged)"
-		}
-		label := fmt.Sprintf("%s%s", wt.Branch, status)
-		options[i] = huh.NewOption(label, wt.Branch)
+		label, key := worktreeRemovalOption(wt)
+		options[i] = huh.NewOption(label, key)
 	}
 
 	var selected string
@@ -192,12 +188,41 @@ func SelectWorktreeToRemove(worktrees []git.Worktree) (*git.Worktree, error) {
 		return nil, NormalizeAbort(err)
 	}
 
-	for _, wt := range removable {
-		if wt.Branch == selected {
-			return &wt, nil
-		}
+	return findWorktreeForRemoval(removable, selected)
+}
+
+func worktreeRemovalOption(wt git.Worktree) (string, string) {
+	displayName := wt.Branch
+	if wt.Bare {
+		displayName = "(bare)"
+	} else if wt.Detached {
+		displayName = "(detached)"
+	} else if displayName == "" {
+		displayName = "(unknown)"
 	}
 
+	details := []string{wt.Path}
+	if wt.Locked {
+		lockLabel := "locked"
+		if wt.LockReason != "" {
+			lockLabel += ": " + wt.LockReason
+		}
+		details = append(details, lockLabel)
+	}
+	if wt.IsMerged && !wt.Bare && !wt.Detached {
+		details = append(details, "merged")
+	}
+
+	return fmt.Sprintf("%s (%s)", displayName, strings.Join(details, " | ")), wt.Path
+}
+
+func findWorktreeForRemoval(worktrees []git.Worktree, path string) (*git.Worktree, error) {
+	for _, wt := range worktrees {
+		if wt.Path == path {
+			selected := wt
+			return &selected, nil
+		}
+	}
 	return nil, fmt.Errorf("worktree not found")
 }
 
