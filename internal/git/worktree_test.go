@@ -321,6 +321,11 @@ func TestParseWorktreePorcelain_RejectsMalformedRecords(t *testing.T) {
 			want:    "missing worktree path",
 		},
 		{
+			name:    "missing primary state",
+			fixture: "worktree /repo\x00HEAD abc\x00unknown ignored\x00\x00",
+			want:    "missing primary worktree state",
+		},
+		{
 			name:    "malformed branch",
 			fixture: "worktree /repo\x00branch main\x00\x00",
 			want:    "malformed branch attribute",
@@ -764,6 +769,33 @@ func TestSortWorktrees_ByBranch(t *testing.T) {
 	for i, branch := range branches {
 		if branch != expected[i] {
 			t.Errorf("expected worktree %d to have branch %s, got %s", i, expected[i], branch)
+		}
+	}
+}
+
+func TestSortWorktrees_TieBreaksEmptyBranchesByPath(t *testing.T) {
+	worktrees := []Worktree{
+		{Path: "/worktrees/z-detached", Detached: true},
+		{Path: "/worktrees/a-bare", Bare: true},
+		{Path: "/worktrees/a-detached", Detached: true},
+		{Path: "/worktrees/z-bare", Bare: true},
+	}
+
+	sorted := SortWorktrees(worktrees, "branch", false)
+	paths := make([]string, len(sorted))
+	for i, worktree := range sorted {
+		paths[i] = worktree.Path
+	}
+
+	expected := []string{
+		"/worktrees/a-bare",
+		"/worktrees/a-detached",
+		"/worktrees/z-bare",
+		"/worktrees/z-detached",
+	}
+	for i, path := range expected {
+		if paths[i] != path {
+			t.Errorf("expected path %d to be %s, got %s", i, path, paths[i])
 		}
 	}
 }

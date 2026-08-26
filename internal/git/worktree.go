@@ -206,6 +206,22 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 	if worktree.Detached && worktree.Bare {
 		return Worktree{}, fmt.Errorf("record %d: detached state conflicts with bare state", recordIndex)
 	}
+	primaryStates := 0
+	if hasBranch {
+		primaryStates++
+	}
+	if worktree.Detached {
+		primaryStates++
+	}
+	if worktree.Bare {
+		primaryStates++
+	}
+	if primaryStates == 0 {
+		return Worktree{}, fmt.Errorf("record %d: missing primary worktree state", recordIndex)
+	}
+	if primaryStates != 1 {
+		return Worktree{}, fmt.Errorf("record %d: conflicting primary worktree states", recordIndex)
+	}
 
 	return worktree, nil
 }
@@ -287,6 +303,9 @@ func SortWorktrees(worktrees []Worktree, by string, reverse bool) []Worktree {
 			nameI := filepath.Base(sorted[i].Path)
 			nameJ := filepath.Base(sorted[j].Path)
 			cmp = strings.Compare(nameI, nameJ)
+		}
+		if cmp == 0 {
+			cmp = strings.Compare(sorted[i].Path, sorted[j].Path)
 		}
 		if reverse {
 			cmp = -cmp
