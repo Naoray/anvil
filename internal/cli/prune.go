@@ -107,6 +107,8 @@ type pruneProjectDependencies struct {
 	fetchOrigin     func(string) error
 	listWorktrees   func(string) ([]git.Worktree, error)
 	isMerged        func(string, string, string) (bool, error)
+	selectWorktrees func([]git.Worktree) ([]git.Worktree, error)
+	confirmRemoval  func(int) (bool, error)
 	removeLifecycle removeLifecycleDependencies
 }
 
@@ -115,6 +117,10 @@ func defaultPruneProjectDependencies() pruneProjectDependencies {
 		fetchOrigin:   git.FetchOrigin,
 		listWorktrees: git.ListWorktrees,
 		isMerged:      git.IsMerged,
+		selectWorktrees: func(worktrees []git.Worktree) ([]git.Worktree, error) {
+			return ui.SelectWorktreesToPrune(worktrees)
+		},
+		confirmRemoval: ui.ConfirmRemoval,
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState:  config.ReadLocalState,
 			scaffoldManager: func(pc *ProjectContext) *scaffold.ScaffoldManager { return pc.ScaffoldManager() },
@@ -146,11 +152,10 @@ func pruneProjectWithDependencies(
 	force, dryRun, verbose, quiet, keepDB bool,
 	deps pruneProjectDependencies,
 ) error {
-	var failures []error
 	if err := deps.fetchOrigin(pc.GitDir); err != nil {
 		failure := fmt.Errorf("fetching origin: %w", err)
 		ui.PrintWarning(failure.Error())
-		failures = append(failures, failure)
+		return failure
 	}
 
 	worktrees, err := deps.listWorktrees(pc.GitDir)
@@ -160,6 +165,7 @@ func pruneProjectWithDependencies(
 
 	remoteTarget := "origin/" + pc.DefaultBranch
 
+	var failures []error
 	var removable []git.Worktree
 
 	for _, wt := range worktrees {
@@ -197,22 +203,40 @@ func pruneProjectWithDependencies(
 	if force {
 		toRemove = removable
 	} else {
-		selected, err := ui.SelectWorktreesToPrune(removable)
+		selectWorktrees := deps.selectWorktrees
+		if selectWorktrees == nil {
+			selectWorktrees = func(worktrees []git.Worktree) ([]git.Worktree, error) {
+				return ui.SelectWorktreesToPrune(worktrees)
+			}
+		}
+		selected, err := selectWorktrees(removable)
 		if err != nil {
-			return fmt.Errorf("selecting worktrees: %w", err)
+			failures = append(failures, fmt.Errorf("selecting worktrees: %w", err))
+			return errors.Join(failures...)
 		}
 		toRemove = selected
 
 		if len(toRemove) == 0 {
+			if err := errors.Join(failures...); err != nil {
+				return err
+			}
 			ui.PrintInfo("No worktrees selected for removal.")
 			return nil
 		}
 
-		confirmed, err := ui.ConfirmRemoval(len(toRemove))
+		confirmRemoval := deps.confirmRemoval
+		if confirmRemoval == nil {
+			confirmRemoval = ui.ConfirmRemoval
+		}
+		confirmed, err := confirmRemoval(len(toRemove))
 		if err != nil {
-			return fmt.Errorf("confirmation: %w", err)
+			failures = append(failures, fmt.Errorf("confirmation: %w", err))
+			return errors.Join(failures...)
 		}
 		if !confirmed {
+			if err := errors.Join(failures...); err != nil {
+				return err
+			}
 			ui.PrintInfo("No worktrees removed.")
 			return nil
 		}

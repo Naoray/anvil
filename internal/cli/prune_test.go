@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -245,6 +246,40 @@ func TestRunPrune_SortsProjectsContinuesAfterFailuresAndJoinsErrors(t *testing.T
 	assert.ErrorIs(t, err, pruneErr)
 }
 
+func TestRunPrune_ContinuesAfterFetchFailure(t *testing.T) {
+	fetchErr := errors.New("origin unavailable")
+	var visited []string
+	globalCfg := &config.GlobalConfig{Projects: map[string]*config.ProjectInfo{
+		"alpha": {Path: "/projects/alpha"},
+		"beta":  {Path: "/projects/beta"},
+	}}
+	deps := pruneCommandDependencies{
+		loadGlobalConfig: func() (*config.GlobalConfig, error) { return globalCfg, nil },
+		openProject: func(_ string, name string, _ *config.ProjectInfo, _ *config.GlobalConfig) (*ProjectContext, error) {
+			return &ProjectContext{ProjectName: name}, nil
+		},
+		pruneProject: func(pc *ProjectContext, _, _, _, _, _ bool) error {
+			visited = append(visited, pc.ProjectName)
+			if pc.ProjectName == "alpha" {
+				return fmt.Errorf("fetching origin: %w", fetchErr)
+			}
+			return nil
+		},
+	}
+
+	root := &cobra.Command{Use: "anvil"}
+	root.PersistentFlags().Bool("dry-run", false, "")
+	root.PersistentFlags().Bool("verbose", false, "")
+	root.PersistentFlags().Bool("quiet", false, "")
+	root.AddCommand(newPruneCommand(deps))
+	root.SetArgs([]string{"prune", "--force"})
+
+	err := root.Execute()
+
+	require.ErrorIs(t, err, fetchErr)
+	assert.Equal(t, []string{"alpha", "beta"}, visited)
+}
+
 func TestPruneProject_ReportsRemovedOnlyAfterSuccessfulRemoval(t *testing.T) {
 	failedPath := "/worktrees/feature-failed"
 	successPath := "/worktrees/feature-success"
@@ -405,6 +440,175 @@ func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 		"Would drop database: app_feature_dry_test\n"+
 		"Would drop database: app_feature_dry_test_1\n"+
 		"Would drop database: app_feature_dry_test_test_1\n", cleanupOutput.String())
+}
+
+func TestPruneProject_FetchFailureStopsBeforeMutation(t *testing.T) {
+	fetchErr := errors.New("origin unavailable")
+	listCalls := 0
+	mergeCalls := 0
+	removeCalls := 0
+	deps := pruneProjectDependencies{
+		fetchOrigin: func(string) error { return fetchErr },
+		listWorktrees: func(string) ([]git.Worktree, error) {
+			listCalls++
+			return []git.Worktree{{Path: "/worktrees/feature-stale", Branch: "feature-stale"}}, nil
+		},
+		isMerged: func(string, string, string) (bool, error) {
+			mergeCalls++
+			return true, nil
+		},
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+			detectPreset:   func(*ProjectContext, string) string { return "" },
+			removeWorktree: func(string, string, bool) error {
+				removeCalls++
+				return nil
+			},
+		},
+	}
+
+	err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps)
+
+	require.ErrorIs(t, err, fetchErr)
+	assert.Zero(t, listCalls)
+	assert.Zero(t, mergeCalls)
+	assert.Zero(t, removeCalls)
+}
+
+func TestPruneProject_PreservesMergeCheckFailureWhenSelectionEmpty(t *testing.T) {
+	mergeErr := errors.New("cannot inspect merge status")
+	selectionCalls := 0
+	deps := pruneProjectDependencies{
+		fetchOrigin: func(string) error { return nil },
+		listWorktrees: func(string) ([]git.Worktree, error) {
+			return []git.Worktree{
+				{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
+				{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+			}, nil
+		},
+		isMerged: func(_ string, branch string, _ string) (bool, error) {
+			if branch == "feature-check-failed" {
+				return false, mergeErr
+			}
+			return true, nil
+		},
+		selectWorktrees: func(worktrees []git.Worktree) ([]git.Worktree, error) {
+			selectionCalls++
+			assert.Len(t, worktrees, 1)
+			return nil, nil
+		},
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+			detectPreset:   func(*ProjectContext, string) string { return "" },
+			removeWorktree: func(string, string, bool) error { return nil },
+		},
+	}
+
+	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+
+	require.ErrorIs(t, err, mergeErr)
+	assert.Equal(t, 1, selectionCalls)
+}
+
+func TestPruneProject_PreservesMergeCheckFailureWhenConfirmationDeclined(t *testing.T) {
+	mergeErr := errors.New("cannot inspect merge status")
+	confirmationCalls := 0
+	deps := pruneProjectDependencies{
+		fetchOrigin: func(string) error { return nil },
+		listWorktrees: func(string) ([]git.Worktree, error) {
+			return []git.Worktree{
+				{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
+				{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+			}, nil
+		},
+		isMerged: func(_ string, branch string, _ string) (bool, error) {
+			if branch == "feature-check-failed" {
+				return false, mergeErr
+			}
+			return true, nil
+		},
+		selectWorktrees: func(worktrees []git.Worktree) ([]git.Worktree, error) {
+			assert.Len(t, worktrees, 1)
+			return worktrees, nil
+		},
+		confirmRemoval: func(count int) (bool, error) {
+			confirmationCalls++
+			assert.Equal(t, 1, count)
+			return false, nil
+		},
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+			detectPreset:   func(*ProjectContext, string) string { return "" },
+			removeWorktree: func(string, string, bool) error { return nil },
+		},
+	}
+
+	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+
+	require.ErrorIs(t, err, mergeErr)
+	assert.Equal(t, 1, confirmationCalls)
+}
+
+func TestPruneProject_PreservesPriorFailureWithSelectionOrConfirmationError(t *testing.T) {
+	mergeErr := errors.New("cannot inspect merge status")
+	selectionErr := errors.New("selection failed")
+	confirmationErr := errors.New("confirmation failed")
+	tests := []struct {
+		name            string
+		selectWorktrees func([]git.Worktree) ([]git.Worktree, error)
+		confirmRemoval  func(int) (bool, error)
+		currentFailure  error
+	}{
+		{
+			name: "selection",
+			selectWorktrees: func([]git.Worktree) ([]git.Worktree, error) {
+				return nil, selectionErr
+			},
+			currentFailure: selectionErr,
+		},
+		{
+			name: "confirmation",
+			selectWorktrees: func(worktrees []git.Worktree) ([]git.Worktree, error) {
+				return worktrees, nil
+			},
+			confirmRemoval: func(int) (bool, error) {
+				return false, confirmationErr
+			},
+			currentFailure: confirmationErr,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := pruneProjectDependencies{
+				fetchOrigin: func(string) error { return nil },
+				listWorktrees: func(string) ([]git.Worktree, error) {
+					return []git.Worktree{
+						{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
+						{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+					}, nil
+				},
+				isMerged: func(_ string, branch string, _ string) (bool, error) {
+					if branch == "feature-check-failed" {
+						return false, mergeErr
+					}
+					return true, nil
+				},
+				selectWorktrees: tt.selectWorktrees,
+				confirmRemoval:  tt.confirmRemoval,
+				removeLifecycle: removeLifecycleDependencies{
+					readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+					detectPreset:   func(*ProjectContext, string) string { return "" },
+					removeWorktree: func(string, string, bool) error { return nil },
+				},
+			}
+
+			err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+
+			require.ErrorIs(t, err, mergeErr)
+			require.ErrorIs(t, err, tt.currentFailure)
+		})
+	}
 }
 
 func TestPruneProject_ReturnsMergeCheckFailureAfterContinuing(t *testing.T) {
