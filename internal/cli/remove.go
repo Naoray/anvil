@@ -88,6 +88,7 @@ type removeLifecycleDependencies struct {
 	scaffoldManager func(*ProjectContext) *scaffold.ScaffoldManager
 	detectPreset    func(*ProjectContext, string) string
 	removeWorktree  func(string, string, bool) error
+	printInfo       func(string)
 }
 
 func planWorktreeCleanup(
@@ -111,7 +112,7 @@ func runRemoveLifecycle(
 	cleanupOpts.Verbose = options.Verbose
 	cleanupOpts.Quiet = options.Quiet
 	for _, message := range cleanupMessages {
-		ui.PrintInfo(message)
+		deps.printInfoMessage(message)
 	}
 
 	preset := pc.Config.Preset
@@ -120,7 +121,7 @@ func runRemoveLifecycle(
 	}
 
 	if options.Verbose && preset != "" {
-		ui.PrintInfo(fmt.Sprintf("Running cleanup for preset: %s", preset))
+		deps.printInfoMessage(fmt.Sprintf("Running cleanup for preset: %s", preset))
 	}
 
 	if preset != "" {
@@ -139,7 +140,7 @@ func runRemoveLifecycle(
 	}
 
 	if options.DryRun {
-		ui.PrintInfo(fmt.Sprintf("[DRY RUN] Would remove %s at %s", worktree.Branch, worktree.Path))
+		deps.printInfoMessage(fmt.Sprintf("[DRY RUN] Would remove %s at %s", worktree.Branch, worktree.Path))
 		return nil
 	}
 
@@ -160,6 +161,7 @@ type removeCommandDependencies struct {
 	readLocalState   func(string) (*config.LocalState, error)
 	scaffoldManager  func(*ProjectContext) *scaffold.ScaffoldManager
 	detectPreset     func(*ProjectContext, string) string
+	printInfo        func(string)
 }
 
 func defaultRemoveCommandDependencies() removeCommandDependencies {
@@ -329,7 +331,11 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 		ui.PrintInfo("[DRY RUN] Would delete branch")
 	}
 
-	ui.PrintDone("Worktree removed")
+	if dryRun {
+		ui.PrintInfo("[DRY RUN] Worktree removal planned")
+	} else {
+		ui.PrintDone("Worktree removed")
+	}
 	return nil
 }
 
@@ -339,7 +345,16 @@ func (deps removeCommandDependencies) lifecycleDependencies() removeLifecycleDep
 		scaffoldManager: deps.scaffoldManager,
 		detectPreset:    deps.detectPreset,
 		removeWorktree:  deps.removeWorktree,
+		printInfo:       deps.printInfo,
 	}
+}
+
+func (deps removeLifecycleDependencies) printInfoMessage(message string) {
+	if deps.printInfo != nil {
+		deps.printInfo(message)
+		return
+	}
+	ui.PrintInfo(message)
 }
 
 func init() {

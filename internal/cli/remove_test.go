@@ -73,6 +73,7 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	manager.RegisterPreset(removeTestPreset{})
 	pc := &ProjectContext{GitDir: "git-dir", Config: &config.Config{Preset: "remove-test"}}
 	removeCalls := 0
+	var infoMessages []string
 	deps := removeCommandDependencies{
 		openProject:      func() (*ProjectContext, error) { return pc, nil },
 		getwd:            func() (string, error) { return "/main", nil },
@@ -89,6 +90,7 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 		readLocalState:  config.ReadLocalState,
 		scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
 		detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+		printInfo:       func(message string) { infoMessages = append(infoMessages, message) },
 	}
 
 	root := &cobra.Command{Use: "anvil"}
@@ -98,7 +100,12 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	root.AddCommand(newRemoveCommand(deps))
 	root.SetArgs([]string{"remove", filepath.Base(worktreePath), "--dry-run", "--force", "--quiet"})
 
-	require.NoError(t, root.Execute())
+	var output string
+	output = captureStdout(t, func() {
+		require.NoError(t, root.Execute())
+	})
+	assert.Contains(t, infoMessages, "[DRY RUN] Would remove agent/test at "+worktreePath)
+	assert.NotContains(t, output, "Worktree removed")
 	assert.Equal(t, "Would drop database: app_top_provider\n"+
 		"Would drop database: app_top_provider_test\n"+
 		"Would drop database: app_top_provider_test_1\n"+
