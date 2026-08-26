@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -294,4 +295,263 @@ func TestSyncCommand_DoesNotStashWhenRemoteMissing(t *testing.T) {
 	hasStash, err = git.HasStash(featurePath)
 	assert.NoError(t, err)
 	assert.False(t, hasStash)
+}
+
+func TestSyncCommand_RestoresAutoStashAfterFetchFailure(t *testing.T) {
+	ensureSyncTestFlags(t)
+
+	sourceDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	readmePath := filepath.Join(sourceDir, "README.md")
+	requireNoError(t, os.WriteFile(readmePath, []byte("test"), 0644))
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	cmd = exec.Command("git", "clone", sourceDir, repoDir)
+	requireNoError(t, cmd.Run())
+
+	gitDir := filepath.Join(repoDir, ".git")
+	parentDir := filepath.Dir(repoDir)
+	worktreeBase := filepath.Join(parentDir, "worktrees")
+	featurePath := filepath.Join(worktreeBase, "repo", "feature-wt")
+	requireNoError(t, os.MkdirAll(filepath.Dir(featurePath), 0755))
+	requireNoError(t, git.CreateWorktree(gitDir, featurePath, "feature", "main"))
+	worktreeBase = evalSymlinks(worktreeBase)
+	repoDir = evalSymlinks(repoDir)
+	featurePath = evalSymlinks(featurePath)
+
+	featureReadmePath := filepath.Join(featurePath, "README.md")
+	requireNoError(t, os.WriteFile(featureReadmePath, []byte("pre-existing"), 0644))
+	preExistingOID, err := git.StashAll(featurePath, "pre-existing stash")
+	requireNoError(t, err)
+
+	changePath := filepath.Join(featurePath, "untracked.txt")
+	requireNoError(t, os.WriteFile(changePath, []byte("changes"), 0644))
+
+	missingRemote := filepath.Join(t.TempDir(), "missing-remote")
+	cmd = exec.Command("git", "-C", repoDir, "remote", "add", "upstream", missingRemote)
+	requireNoError(t, cmd.Run())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	requireNoError(t, config.SaveGlobalConfig(&config.GlobalConfig{
+		WorktreeBase: worktreeBase,
+		Projects: map[string]*config.ProjectInfo{
+			"repo": {
+				Path:          repoDir,
+				DefaultBranch: "main",
+			},
+		},
+	}))
+	assert.Equal(t, missingRemote, mustRemoteURL(t, gitDir, "upstream"))
+	assert.Error(t, git.FetchRemote(gitDir, "upstream"))
+
+	originalDir, err := os.Getwd()
+	requireNoError(t, err)
+	defer func() { requireNoError(t, os.Chdir(originalDir)) }()
+	requireNoError(t, os.Chdir(featurePath))
+
+	defer func() {
+		requireNoError(t, syncCmd.Flags().Set("upstream", ""))
+		requireNoError(t, syncCmd.Flags().Set("remote", ""))
+	}()
+	requireNoError(t, syncCmd.Flags().Set("upstream", "main"))
+	requireNoError(t, syncCmd.Flags().Set("remote", "upstream"))
+
+	err = syncCmd.RunE(syncCmd, []string{})
+	assert.Error(t, err)
+
+	restored, err := os.ReadFile(changePath)
+	requireNoError(t, err)
+	assert.Equal(t, "changes", string(restored))
+
+	currentReadme, err := os.ReadFile(featureReadmePath)
+	requireNoError(t, err)
+	assert.Equal(t, "test", string(currentReadme))
+
+	cmd = exec.Command("git", "-C", featurePath, "stash", "list", "--format=%H")
+	output, err := cmd.Output()
+	requireNoError(t, err)
+	assert.Equal(t, preExistingOID, strings.TrimSpace(string(output)))
+}
+
+func TestSyncCommand_RestoresAutoStashAfterSuccessfulSync(t *testing.T) {
+	ensureSyncTestFlags(t)
+
+	sourceDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	requireNoError(t, os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("test"), 0644))
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	cmd = exec.Command("git", "clone", sourceDir, repoDir)
+	requireNoError(t, cmd.Run())
+
+	gitDir := filepath.Join(repoDir, ".git")
+	parentDir := filepath.Dir(repoDir)
+	worktreeBase := filepath.Join(parentDir, "worktrees")
+	featurePath := filepath.Join(worktreeBase, "repo", "feature-wt")
+	requireNoError(t, os.MkdirAll(filepath.Dir(featurePath), 0755))
+	requireNoError(t, git.CreateWorktree(gitDir, featurePath, "feature", "main"))
+	worktreeBase = evalSymlinks(worktreeBase)
+	repoDir = evalSymlinks(repoDir)
+	featurePath = evalSymlinks(featurePath)
+
+	readmePath := filepath.Join(featurePath, "README.md")
+	requireNoError(t, os.WriteFile(readmePath, []byte("pre-existing"), 0644))
+	preExistingOID, err := git.StashAll(featurePath, "pre-existing stash")
+	requireNoError(t, err)
+	changePath := filepath.Join(featurePath, "untracked.txt")
+	requireNoError(t, os.WriteFile(changePath, []byte("changes"), 0644))
+
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	requireNoError(t, config.SaveGlobalConfig(&config.GlobalConfig{
+		WorktreeBase: worktreeBase,
+		Projects: map[string]*config.ProjectInfo{
+			"repo": {
+				Path:          repoDir,
+				DefaultBranch: "main",
+			},
+		},
+	}))
+
+	originalDir, err := os.Getwd()
+	requireNoError(t, err)
+	defer func() { requireNoError(t, os.Chdir(originalDir)) }()
+	requireNoError(t, os.Chdir(featurePath))
+	defer func() {
+		requireNoError(t, syncCmd.Flags().Set("upstream", ""))
+		requireNoError(t, syncCmd.Flags().Set("remote", ""))
+	}()
+	requireNoError(t, syncCmd.Flags().Set("upstream", "main"))
+	requireNoError(t, syncCmd.Flags().Set("remote", "origin"))
+
+	err = syncCmd.RunE(syncCmd, []string{})
+	requireNoError(t, err)
+
+	restored, err := os.ReadFile(changePath)
+	requireNoError(t, err)
+	assert.Equal(t, "changes", string(restored))
+
+	cmd = exec.Command("git", "-C", featurePath, "stash", "list", "--format=%H")
+	output, err := cmd.Output()
+	requireNoError(t, err)
+	assert.Equal(t, preExistingOID, strings.TrimSpace(string(output)))
+}
+
+func TestSyncCommand_RestoresAutoStashAfterSyncFailure(t *testing.T) {
+	ensureSyncTestFlags(t)
+
+	sourceDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	requireNoError(t, os.WriteFile(filepath.Join(sourceDir, "README.md"), []byte("test"), 0644))
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = sourceDir
+	requireNoError(t, cmd.Run())
+
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	cmd = exec.Command("git", "clone", sourceDir, repoDir)
+	requireNoError(t, cmd.Run())
+
+	gitDir := filepath.Join(repoDir, ".git")
+	parentDir := filepath.Dir(repoDir)
+	worktreeBase := filepath.Join(parentDir, "worktrees")
+	featurePath := filepath.Join(worktreeBase, "repo", "feature-wt")
+	requireNoError(t, os.MkdirAll(filepath.Dir(featurePath), 0755))
+	requireNoError(t, git.CreateWorktree(gitDir, featurePath, "feature", "main"))
+	worktreeBase = evalSymlinks(worktreeBase)
+	repoDir = evalSymlinks(repoDir)
+	featurePath = evalSymlinks(featurePath)
+
+	readmePath := filepath.Join(featurePath, "README.md")
+	requireNoError(t, os.WriteFile(readmePath, []byte("pre-existing"), 0644))
+	preExistingOID, err := git.StashAll(featurePath, "pre-existing stash")
+	requireNoError(t, err)
+	changePath := filepath.Join(featurePath, "untracked.txt")
+	requireNoError(t, os.WriteFile(changePath, []byte("changes"), 0644))
+
+	emptyRemote := filepath.Join(parentDir, "empty-remote.git")
+	cmd = exec.Command("git", "init", "--bare", emptyRemote)
+	requireNoError(t, cmd.Run())
+	cmd = exec.Command("git", "-C", repoDir, "remote", "add", "upstream", emptyRemote)
+	requireNoError(t, cmd.Run())
+
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	requireNoError(t, config.SaveGlobalConfig(&config.GlobalConfig{
+		WorktreeBase: worktreeBase,
+		Projects: map[string]*config.ProjectInfo{
+			"repo": {
+				Path:          repoDir,
+				DefaultBranch: "main",
+			},
+		},
+	}))
+
+	originalDir, err := os.Getwd()
+	requireNoError(t, err)
+	defer func() { requireNoError(t, os.Chdir(originalDir)) }()
+	requireNoError(t, os.Chdir(featurePath))
+	defer func() {
+		requireNoError(t, syncCmd.Flags().Set("upstream", ""))
+		requireNoError(t, syncCmd.Flags().Set("remote", ""))
+	}()
+	requireNoError(t, syncCmd.Flags().Set("upstream", "main"))
+	requireNoError(t, syncCmd.Flags().Set("remote", "upstream"))
+
+	err = syncCmd.RunE(syncCmd, []string{})
+	assert.Error(t, err)
+
+	restored, err := os.ReadFile(changePath)
+	requireNoError(t, err)
+	assert.Equal(t, "changes", string(restored))
+
+	cmd = exec.Command("git", "-C", featurePath, "stash", "list", "--format=%H")
+	output, err := cmd.Output()
+	requireNoError(t, err)
+	assert.Equal(t, preExistingOID, strings.TrimSpace(string(output)))
+}
+
+func mustRemoteURL(t *testing.T, gitDir string, remote string) string {
+	t.Helper()
+	url, err := git.GetRemoteURL(gitDir, remote)
+	requireNoError(t, err)
+	return url
 }
