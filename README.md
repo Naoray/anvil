@@ -92,7 +92,7 @@ anvil completion fish   # installs to fish completions dir
 anvil completion zsh --print
 ```
 
-For **zsh** with Homebrew, the completion file is written to `$(brew --prefix)/share/zsh/site-functions/_anvil`. For user-local installs, it goes to `~/.zsh/completions/_anvil`. Add the directory to your `fpath` if needed:
+After installation, restart your shell to activate the completion. Existing zsh shells may need a manual refresh, and Anvil leaves zsh completion cache files untouched. For **zsh** with Homebrew, the completion file is written to `$(brew --prefix)/share/zsh/site-functions/_anvil`. For user-local installs, it goes to `~/.zsh/completions/_anvil`. Add the directory to your `fpath` if needed, then run `autoload -Uz compinit && compinit`:
 
 ```zsh
 # ~/.zshrc

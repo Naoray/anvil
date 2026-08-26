@@ -181,43 +181,23 @@ func installCompletion(cmd *cobra.Command, shell string) error {
 	}
 
 	ui.PrintSuccess(fmt.Sprintf("Completion installed at %s", targetPath))
-
-	if shell == "zsh" {
-		rebuildZshCompletionCache()
-	}
+	printCompletionActivationGuidance(shell, targetPath)
 
 	return nil
 }
 
-// rebuildZshCompletionCache removes the zsh completion cache so the next shell
-// session picks up the newly installed completion without a manual reset.
-func rebuildZshCompletionCache() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-
-	// Remove both the default dump file and the common .zcompdump-<hostname>-<version> variants.
-	dumps := []string{
-		filepath.Join(home, ".zcompdump"),
-	}
-
-	// Also glob for versioned dump files (e.g. ~/.zcompdump-mymac-5.9)
-	if matches, err := filepath.Glob(filepath.Join(home, ".zcompdump-*")); err == nil {
-		dumps = append(dumps, matches...)
-	}
-
-	removed := false
-	for _, f := range dumps {
-		if err := os.Remove(f); err == nil {
-			removed = true
-		}
-	}
-
-	if removed {
-		ui.PrintInfo("Cleared zsh completion cache — restart your shell or run: exec zsh")
-	} else {
-		ui.PrintInfo("Restart your shell or run: exec zsh")
+// printCompletionActivationGuidance explains when the installed completion becomes available.
+func printCompletionActivationGuidance(shell, targetPath string) {
+	switch shell {
+	case "zsh":
+		completionDir := filepath.Dir(targetPath)
+		ui.PrintInfo("Restart your shell to activate the completion.")
+		ui.PrintInfo(fmt.Sprintf("If needed, add the completion directory to fpath in ~/.zshrc: fpath=(%s $fpath)", completionDir))
+		ui.PrintInfo("Then run: autoload -Uz compinit && compinit")
+	case "bash":
+		ui.PrintInfo("Restart your shell or source the installed completion file to activate it.")
+	case "fish":
+		ui.PrintInfo("Restart your shell to activate the completion.")
 	}
 }
 
