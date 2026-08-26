@@ -130,6 +130,26 @@ func TestRepairCommand_DryRun(t *testing.T) {
 	assert.False(t, hasRefspec)
 }
 
+func TestRemoteURLFromWorktrees_SkipsBareAndUsesDetachedOrLockedPaths(t *testing.T) {
+	var inspected []string
+	worktrees := []git.Worktree{
+		{Path: "/worktrees/bare", Bare: true},
+		{Path: "/worktrees/detached", Detached: true},
+		{Path: "/worktrees/locked", Branch: "feature-locked", Locked: true},
+	}
+
+	remoteURL := remoteURLFromWorktrees(worktrees, func(path string) (string, error) {
+		inspected = append(inspected, path)
+		if path == "/worktrees/locked" {
+			return "https://example.test/repo.git", nil
+		}
+		return "", nil
+	})
+
+	assert.Equal(t, "https://example.test/repo.git", remoteURL)
+	assert.Equal(t, []string{"/worktrees/detached", "/worktrees/locked"}, inspected)
+}
+
 func TestRepairCommand_FixesBranchTracking(t *testing.T) {
 	// Create a source repo with feature branch
 	sourceDir := t.TempDir()

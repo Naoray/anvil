@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -169,7 +170,26 @@ func pruneProjectWithDependencies(
 	var removable []git.Worktree
 
 	for _, wt := range worktrees {
-		if wt.Branch == pc.DefaultBranch || wt.Branch == "(bare)" {
+		var skippedStates []string
+		if wt.Bare {
+			skippedStates = append(skippedStates, "bare")
+		}
+		if wt.Detached {
+			skippedStates = append(skippedStates, "detached")
+		}
+		if wt.Locked {
+			skippedStates = append(skippedStates, "locked")
+		}
+		if len(skippedStates) > 0 {
+			message := fmt.Sprintf("Skipping %s worktree at %s", strings.Join(skippedStates, " and "), wt.Path)
+			if wt.LockReason != "" {
+				message += fmt.Sprintf(" (%s)", wt.LockReason)
+			}
+			ui.PrintInfo(message)
+			continue
+		}
+
+		if wt.Branch == pc.DefaultBranch {
 			ui.PrintInfo(fmt.Sprintf("%s at %s", wt.Branch, wt.Path))
 			continue
 		}

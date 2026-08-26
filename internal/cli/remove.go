@@ -258,6 +258,15 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 	if targetWorktree.IsMain {
 		return fmt.Errorf("cannot remove main worktree")
 	}
+	if targetWorktree.Bare {
+		return fmt.Errorf("cannot remove bare worktree")
+	}
+	if targetWorktree.Locked {
+		if targetWorktree.LockReason == "" {
+			return fmt.Errorf("cannot remove locked worktree")
+		}
+		return fmt.Errorf("cannot remove locked worktree: %s", targetWorktree.LockReason)
+	}
 
 	cleanupOpts, cleanupMessages, err := planWorktreeCleanup(
 		targetWorktree.Path,
@@ -270,7 +279,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 		return err
 	}
 
-	ui.PrintInfo(fmt.Sprintf("Removing %s at %s", targetWorktree.Branch, targetWorktree.Path))
+	ui.PrintInfo(fmt.Sprintf("Removing %s at %s", worktreeBranchLabel(*targetWorktree), targetWorktree.Path))
 
 	deleteBranch := false
 	if !force {
@@ -288,7 +297,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 			return nil
 		}
 
-		if deps.branchExists(pc.GitDir, targetWorktree.Branch) {
+		if !targetWorktree.Detached && targetWorktree.Branch != "" && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
 			deleteBranch, err = ui.Confirm(fmt.Sprintf("Also delete branch '%s'?", targetWorktree.Branch))
 			if err != nil {
 				return fmt.Errorf("branch deletion confirmation: %w", err)
@@ -312,7 +321,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 
 	if !dryRun {
 		ui.PrintSuccessPath("Removed", targetWorktree.Path)
-		if deleteBranch && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
+		if deleteBranch && !targetWorktree.Detached && targetWorktree.Branch != "" && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
 			if err := deps.deleteBranch(pc.GitDir, targetWorktree.Branch, true); err != nil {
 				ui.PrintErrorWithHint("Failed to delete branch", err.Error())
 			} else {
@@ -327,7 +336,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 				ui.PrintErrorWithHint(fmt.Sprintf("Could not remove empty directory %s", parentDir), err.Error())
 			}
 		}
-	} else if deleteBranch {
+	} else if deleteBranch && !targetWorktree.Detached && targetWorktree.Branch != "" {
 		ui.PrintInfo("[DRY RUN] Would delete branch")
 	}
 

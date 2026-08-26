@@ -88,16 +88,7 @@ func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
 
-		for _, wt := range worktrees {
-			if wt.Branch == "(bare)" {
-				continue
-			}
-			url, err := git.GetRemoteURLFromWorktree(wt.Path)
-			if err == nil && url != "" {
-				remoteURL = url
-				break
-			}
-		}
+		remoteURL = remoteURLFromWorktrees(worktrees, git.GetRemoteURLFromWorktree)
 	}
 
 	// If still no URL, prompt user
@@ -201,6 +192,19 @@ func confirmOrEditURL(message, currentValue string) (bool, string, error) {
 	}
 
 	return false, "", nil
+}
+
+func remoteURLFromWorktrees(worktrees []git.Worktree, getRemoteURL func(string) (string, error)) string {
+	for _, wt := range worktrees {
+		if wt.Bare {
+			continue
+		}
+		url, err := getRemoteURL(wt.Path)
+		if err == nil && url != "" {
+			return url
+		}
+	}
+	return ""
 }
 
 func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
