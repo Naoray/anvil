@@ -149,6 +149,59 @@ func TestRepairCommand_DoesNotPrintCompletionOnAggregateError(t *testing.T) {
 	assert.NotContains(t, output, "Repair complete")
 }
 
+func TestRepairBranchTracking_PreservesTrackingAndNoRemoteSkips(t *testing.T) {
+	var configured []string
+
+	err := repairBranchTrackingWithDependencies(
+		&ProjectContext{GitDir: "git-dir"},
+		false,
+		false,
+		repairBranchTrackingDependencies{
+			getBranchRefs: func(string) ([]string, []string, error) {
+				return []string{"tracked", "no-remote", "needs-tracking"}, []string{
+					"origin/tracked",
+					"origin/needs-tracking",
+				}, nil
+			},
+			hasBranchTracking: func(_ string, branch string) (bool, error) {
+				return branch == "tracked", nil
+			},
+			setBranchUpstream: func(_ string, branch, _ string) error {
+				configured = append(configured, branch)
+				return nil
+			},
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"needs-tracking"}, configured)
+}
+
+func TestRepairBranchTracking_DryRunDoesNotSetUpstream(t *testing.T) {
+	configured := false
+
+	err := repairBranchTrackingWithDependencies(
+		&ProjectContext{GitDir: "git-dir"},
+		true,
+		false,
+		repairBranchTrackingDependencies{
+			getBranchRefs: func(string) ([]string, []string, error) {
+				return []string{"needs-tracking"}, []string{"origin/needs-tracking"}, nil
+			},
+			hasBranchTracking: func(string, string) (bool, error) {
+				return false, nil
+			},
+			setBranchUpstream: func(string, string, string) error {
+				configured = true
+				return nil
+			},
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.False(t, configured)
+}
+
 // createRepoWithRemote creates a source repo and a clone with remote configured.
 // Returns (gitDir, repoDir, sourceDir).
 func createRepoWithRemote(t *testing.T) (string, string, string) {
