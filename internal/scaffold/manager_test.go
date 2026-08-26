@@ -120,6 +120,7 @@ func TestNewScaffoldManager_UsesFreshDefaultRegistries(t *testing.T) {
 	secondRegistry, ok := second.registry.(*scaffoldsteps.Registry)
 	require.True(t, ok, "default manager should own an explicit registry")
 	require.NotSame(t, firstRegistry, secondRegistry)
+	assert.Equal(t, firstRegistry.ListRegistered(), secondRegistry.ListRegistered())
 	builtIns := secondRegistry.ListRegistered()
 
 	firstRegistry.Register("custom.step", func(config.StepConfig) types.ScaffoldStep {
