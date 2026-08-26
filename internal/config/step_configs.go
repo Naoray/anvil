@@ -1,168 +1,72 @@
 package config
 
-import (
-	"fmt"
-)
+import "fmt"
 
-// StepValidator is an interface for step-specific configuration validation.
-// Each step type can implement this interface to validate its required fields.
-type StepValidator interface {
-	Validate() error
-}
-
-// BaseStepConfig contains fields common to all steps.
-type BaseStepConfig struct {
-	Name      string         `mapstructure:"name"`
-	Enabled   *bool          `mapstructure:"enabled"`
-	Condition map[string]any `mapstructure:"condition"`
-}
-
-// BinaryStepConfig represents configuration for binary execution steps (php, npm, etc.)
-type BinaryStepConfig struct {
-	BaseStepConfig
-	Args    []string `mapstructure:"args"`
-	StoreAs string   `mapstructure:"store_as"`
-}
-
-// Validate checks that the binary step config is valid.
-// Binary steps only require a name; all other fields are optional.
-func (c BinaryStepConfig) Validate() error {
-	if c.Name == "" {
+func validateBinaryStepConfig(stepName string) error {
+	if stepName == "" {
 		return fmt.Errorf("binary step: 'name' is required")
 	}
 	return nil
 }
 
-// FileCopyConfig represents configuration for file.copy step
-type FileCopyConfig struct {
-	BaseStepConfig
-	From string `mapstructure:"from"`
-	To   string `mapstructure:"to"`
-}
-
-// Validate checks that required fields are present for file.copy step
-func (c FileCopyConfig) Validate() error {
-	if c.From == "" {
+func validateFileCopyStepConfig(cfg StepConfig) error {
+	if cfg.From == "" {
 		return fmt.Errorf("file.copy: 'from' is required")
 	}
-	if c.To == "" {
+	if cfg.To == "" {
 		return fmt.Errorf("file.copy: 'to' is required")
 	}
 	return nil
 }
 
-// BashRunConfig represents configuration for bash.run step
-type BashRunConfig struct {
-	BaseStepConfig
-	Command string `mapstructure:"command"`
-	StoreAs string `mapstructure:"store_as"`
-}
-
-// Validate checks that required fields are present for bash.run step
-func (c BashRunConfig) Validate() error {
-	if c.Command == "" {
+func validateBashRunStepConfig(cfg StepConfig) error {
+	if cfg.Command == "" {
 		return fmt.Errorf("bash.run: 'command' is required")
 	}
 	return nil
 }
 
-// CommandRunConfig represents configuration for command.run step
-type CommandRunConfig struct {
-	BaseStepConfig
-	Command string `mapstructure:"command"`
-	StoreAs string `mapstructure:"store_as"`
-}
-
-// Validate checks that required fields are present for command.run step
-func (c CommandRunConfig) Validate() error {
-	if c.Command == "" {
+func validateCommandRunStepConfig(cfg StepConfig) error {
+	if cfg.Command == "" {
 		return fmt.Errorf("command.run: 'command' is required")
 	}
 	return nil
 }
 
-// EnvReadConfig represents configuration for env.read step
-type EnvReadConfig struct {
-	BaseStepConfig
-	Key     string `mapstructure:"key"`
-	StoreAs string `mapstructure:"store_as"`
-	File    string `mapstructure:"file"`
-}
-
-// Validate checks that required fields are present for env.read step
-func (c EnvReadConfig) Validate() error {
-	if c.Key == "" {
+func validateEnvReadStepConfig(cfg StepConfig) error {
+	if cfg.Key == "" {
 		return fmt.Errorf("env.read: 'key' is required")
 	}
 	return nil
 }
 
-// EnvWriteConfig represents configuration for env.write step
-type EnvWriteConfig struct {
-	BaseStepConfig
-	Key   string `mapstructure:"key"`
-	Value string `mapstructure:"value"`
-	File  string `mapstructure:"file"`
-}
-
-// Validate checks that required fields are present for env.write step
-func (c EnvWriteConfig) Validate() error {
-	if c.Key == "" {
+func validateEnvWriteStepConfig(cfg StepConfig) error {
+	if cfg.Key == "" {
 		return fmt.Errorf("env.write: 'key' is required")
 	}
 	return nil
 }
 
-// EnvCopyConfig represents configuration for env.copy step
-type EnvCopyConfig struct {
-	BaseStepConfig
-	Source     string   `mapstructure:"source"`
-	SourceFile string   `mapstructure:"source_file"`
-	Key        string   `mapstructure:"key"`
-	Keys       []string `mapstructure:"keys"`
-	File       string   `mapstructure:"file"`
-}
-
-// Validate checks that required fields are present for env.copy step
-func (c EnvCopyConfig) Validate() error {
-	if c.Source == "" {
+func validateEnvCopyStepConfig(cfg StepConfig) error {
+	if cfg.Source == "" {
 		return fmt.Errorf("env.copy: 'source' is required")
 	}
-	if c.Key == "" && len(c.Keys) == 0 {
+	if cfg.Key == "" && len(cfg.Keys) == 0 {
 		return fmt.Errorf("env.copy: either 'key' or 'keys' must be specified")
 	}
 	return nil
 }
 
-// DbCreateConfig represents configuration for db.create step
-type DbCreateConfig struct {
-	BaseStepConfig
-	Args []string `mapstructure:"args"`
-	Type string   `mapstructure:"type"`
-	Role string   `mapstructure:"role"`
-}
-
-// Validate checks that the db.create step config is valid.
-// All fields are optional for db.create.
-func (c DbCreateConfig) Validate() error {
-	switch c.Role {
+func validateDbCreateStepConfig(cfg StepConfig) error {
+	switch cfg.Role {
 	case "", DbRoleApplication, DbRoleTesting:
 		return nil
 	default:
-		return fmt.Errorf("db.create: invalid role %q (supported roles: application, testing)", c.Role)
+		return fmt.Errorf("db.create: invalid role %q (supported roles: application, testing)", cfg.Role)
 	}
 }
 
-// DbDestroyConfig represents configuration for db.destroy step
-type DbDestroyConfig struct {
-	BaseStepConfig
-	Args []string `mapstructure:"args"`
-	Type string   `mapstructure:"type"`
-}
-
-// Validate checks that the db.destroy step config is valid.
-// All fields are optional for db.destroy.
-func (c DbDestroyConfig) Validate() error {
+func validateDbDestroyStepConfig(StepConfig) error {
 	return nil
 }
 
@@ -170,73 +74,25 @@ func (c DbDestroyConfig) Validate() error {
 // The stepName parameter is used to determine the step type for validation.
 // This is the main entry point for step validation.
 func ValidateStepConfig(stepName string, cfg StepConfig) error {
-	base := BaseStepConfig{
-		Name:      stepName,
-		Enabled:   cfg.Enabled,
-		Condition: cfg.Condition,
-	}
-
 	switch stepName {
 	case StepFileCopy:
-		return FileCopyConfig{
-			BaseStepConfig: base,
-			From:           cfg.From,
-			To:             cfg.To,
-		}.Validate()
+		return validateFileCopyStepConfig(cfg)
 	case StepBashRun:
-		return BashRunConfig{
-			BaseStepConfig: base,
-			Command:        cfg.Command,
-			StoreAs:        cfg.StoreAs,
-		}.Validate()
+		return validateBashRunStepConfig(cfg)
 	case StepCommandRun:
-		return CommandRunConfig{
-			BaseStepConfig: base,
-			Command:        cfg.Command,
-			StoreAs:        cfg.StoreAs,
-		}.Validate()
+		return validateCommandRunStepConfig(cfg)
 	case StepEnvRead:
-		return EnvReadConfig{
-			BaseStepConfig: base,
-			Key:            cfg.Key,
-			StoreAs:        cfg.StoreAs,
-			File:           cfg.File,
-		}.Validate()
+		return validateEnvReadStepConfig(cfg)
 	case StepEnvWrite:
-		return EnvWriteConfig{
-			BaseStepConfig: base,
-			Key:            cfg.Key,
-			Value:          cfg.Value,
-			File:           cfg.File,
-		}.Validate()
+		return validateEnvWriteStepConfig(cfg)
 	case StepEnvCopy:
-		return EnvCopyConfig{
-			BaseStepConfig: base,
-			Source:         cfg.Source,
-			SourceFile:     cfg.SourceFile,
-			Key:            cfg.Key,
-			Keys:           cfg.Keys,
-			File:           cfg.File,
-		}.Validate()
+		return validateEnvCopyStepConfig(cfg)
 	case StepDbCreate:
-		return DbCreateConfig{
-			BaseStepConfig: base,
-			Args:           cfg.Args,
-			Type:           cfg.Type,
-			Role:           cfg.Role,
-		}.Validate()
+		return validateDbCreateStepConfig(cfg)
 	case StepDbDestroy:
-		return DbDestroyConfig{
-			BaseStepConfig: base,
-			Args:           cfg.Args,
-			Type:           cfg.Type,
-		}.Validate()
+		return validateDbDestroyStepConfig(cfg)
 	default:
-		// Binary steps (php, npm, composer, etc.) and unknown steps
-		return BinaryStepConfig{
-			BaseStepConfig: base,
-			Args:           cfg.Args,
-			StoreAs:        cfg.StoreAs,
-		}.Validate()
+		// Binary steps (php, npm, composer, etc.) and unknown steps.
+		return validateBinaryStepConfig(stepName)
 	}
 }
