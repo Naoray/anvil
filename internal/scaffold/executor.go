@@ -57,11 +57,12 @@ func (e *StepExecutor) Execute() error {
 	// Eligibility is evaluated as each step reaches its turn, so earlier steps
 	// can change the context used by later conditions.
 	totalSteps := len(e.steps)
-	currentStep := 0
 
 	// Execute steps sequentially in the order they were provided
 	// Preset steps come first, followed by config steps
-	for _, step := range e.steps {
+	for stepIndex, step := range e.steps {
+		// Progress uses the configured ordinal, including skipped steps.
+		currentStep := stepIndex + 1
 		eligible, skipReason := e.evaluateEligibility(step)
 		if !eligible {
 			e.recordResult(step, nil, true)
@@ -70,9 +71,6 @@ func (e *StepExecutor) Execute() error {
 			}
 			continue
 		}
-
-		// Increment current step counter
-		currentStep++
 
 		if err := e.executeStep(step, currentStep, totalSteps); err != nil {
 			return err

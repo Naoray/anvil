@@ -1,12 +1,34 @@
 package scaffold
 
 import (
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = original
+	}()
+
+	fn()
+	require.NoError(t, writer.Close())
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	return string(output)
+}
 
 type mockStep struct {
 	name            string
@@ -221,6 +243,102 @@ func TestStepExecutor_Results_PreservesExecutorOwnedSlice(t *testing.T) {
 
 	results[0].Skipped = true
 	assert.True(t, executor.Results()[0].Skipped)
+}
+
+func TestStepExecutor_Execute_VerboseProgressUsesConfiguredStepOrdinals(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	skipped := &mockStep{name: "skipped", conditionResult: false}
+	executed := &mockStep{name: "executed", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{skipped, executed}, ctx, types.StepOptions{Verbose: true})
+
+	var err error
+	output := captureStdout(t, func() {
+		err = executor.Execute()
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, output, "[2/2] Executing step: executed")
+	assert.Contains(t, output, "✓ [2/2] executed completed")
+	assert.NotContains(t, output, "[1/2] Executing step: executed")
+}
+
+func TestStepExecutor_Execute_VerboseProgressUsesConfiguredOrdinalsForSkipPositions(t *testing.T) {
+	tests := []struct {
+		name           string
+		steps          []*mockStep
+		expectedOutput []string
+	}{
+		{
+			name: "skipped first",
+			steps: []*mockStep{
+				{name: "skipped", conditionResult: false},
+				{name: "last", conditionResult: true},
+			},
+			expectedOutput: []string{"[2/2] Executing step: last", "✓ [2/2] last completed"},
+		},
+		{
+			name: "skipped middle",
+			steps: []*mockStep{
+				{name: "first", conditionResult: true},
+				{name: "skipped", conditionResult: false},
+				{name: "last", conditionResult: true},
+			},
+			expectedOutput: []string{
+				"[1/3] Executing step: first",
+				"✓ [1/3] first completed",
+				"[3/3] Executing step: last",
+				"✓ [3/3] last completed",
+			},
+		},
+		{
+			name: "skipped last",
+			steps: []*mockStep{
+				{name: "first", conditionResult: true},
+				{name: "skipped", conditionResult: false},
+			},
+			expectedOutput: []string{"[1/2] Executing step: first", "✓ [1/2] first completed"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+			steps := make([]types.ScaffoldStep, len(tt.steps))
+			for i, step := range tt.steps {
+				steps[i] = step
+			}
+			executor := NewStepExecutor(steps, ctx, types.StepOptions{Verbose: true})
+
+			var err error
+			output := captureStdout(t, func() {
+				err = executor.Execute()
+			})
+
+			assert.NoError(t, err)
+			for _, expected := range tt.expectedOutput {
+				assert.Contains(t, output, expected)
+			}
+		})
+	}
+}
+
+func TestStepExecutor_Execute_VerboseDryRunProgressUsesConfiguredOrdinals(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	skipped := &mockStep{name: "skipped", conditionResult: false}
+	executed := &mockStep{name: "executed", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{skipped, executed}, ctx, types.StepOptions{DryRun: true, Verbose: true})
+
+	var err error
+	output := captureStdout(t, func() {
+		err = executor.Execute()
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, output, "[2/2] Executing step: executed")
+	assert.Contains(t, output, "[DRY-RUN] Would execute: executed")
+	assert.False(t, executed.runCalled)
+	assert.Equal(t, 1, executor.completedCnt)
+	assert.Equal(t, 1, executor.skippedCnt)
 }
 
 func TestStepExecutor_Execute_AllStepsPass(t *testing.T) {
