@@ -100,6 +100,35 @@ func TestPullConfig_MissingConfig(t *testing.T) {
 	assert.ErrorContains(t, err, "no anvil.yaml found in default branch worktree")
 }
 
+func TestPullConfig_DoesNotUseUnregisteredConventionalPath(t *testing.T) {
+	root := t.TempDir()
+	projectPath := filepath.Join(root, "project")
+	worktreeBase := filepath.Join(root, "worktrees")
+	stalePath := filepath.Join(worktreeBase, "project", "main")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+	require.NoError(t, os.MkdirAll(stalePath, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(stalePath, "anvil.yaml"), []byte("stale"), 0644))
+
+	err := runPullConfigForProject(
+		&ProjectContext{
+			GitDir:        "unused",
+			ProjectPath:   projectPath,
+			DefaultBranch: "main",
+			ProjectName:   "project",
+			WorktreeBase:  worktreeBase,
+		},
+		false,
+		false,
+		false,
+		newPullConfigTestDependencies([]git.Worktree{{Path: filepath.Join(root, "feature"), Branch: "feature/current"}}),
+	)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `default branch "main" is absent from the registered worktree inventory`)
+	_, statErr := os.Stat(filepath.Join(projectPath, "anvil.yaml"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
 func TestPullConfig_SamePathIsSuccessfulNoOpBeforePrompt(t *testing.T) {
 	projectPath := t.TempDir()
 	prompted := false
