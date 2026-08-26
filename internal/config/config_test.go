@@ -54,14 +54,18 @@ func TestLoadProject_InvalidYAML(t *testing.T) {
 
 func TestLoadGlobal_ValidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
 
 	configContent := `default_branch: develop
 detected_tools:
   php: true
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, ProjectConfigFile), []byte(configContent), 0644))
 
-	cfg, err := loadGlobalFromTestDir(tmpDir)
+	cfg, err := LoadGlobal()
 
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
@@ -71,11 +75,68 @@ detected_tools:
 
 func TestLoadGlobal_MissingConfig(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
-	cfg, err := loadGlobalFromTestDir(tmpDir)
+	cfg, err := LoadGlobal()
 
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
+	assert.ErrorIs(t, err, ErrGlobalConfigNotFound)
+	var configFileNotFoundError viper.ConfigFileNotFoundError
+	assert.ErrorAs(t, err, &configFileNotFoundError)
+}
+
+func TestLoadOrCreateGlobalConfig_InvalidYAMLReturnsErrorWithoutWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	configPath := filepath.Join(configDir, ProjectConfigFile)
+	invalidContent := []byte("default_branch: [\n")
+	require.NoError(t, os.WriteFile(configPath, invalidContent, 0644))
+
+	cfg, err := LoadOrCreateGlobalConfig()
+
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.NotErrorIs(t, err, ErrGlobalConfigNotFound)
+	actualContent, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, invalidContent, actualContent)
+}
+
+func TestLoadOrCreateGlobalConfig_UnreadableConfigReturnsErrorWithoutWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	configPath := filepath.Join(configDir, ProjectConfigFile)
+	originalContent := []byte("default_branch: develop\n")
+	require.NoError(t, os.WriteFile(configPath, originalContent, 0600))
+	require.NoError(t, os.Chmod(configPath, 0000))
+	t.Cleanup(func() {
+		if err := os.Chmod(configPath, 0600); err != nil {
+			t.Errorf("restoring config permissions: %v", err)
+		}
+	})
+
+	if _, err := os.ReadFile(configPath); err == nil {
+		t.Skip("file permissions do not make files unreadable on this platform")
+	}
+
+	cfg, err := LoadOrCreateGlobalConfig()
+
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.NotErrorIs(t, err, ErrGlobalConfigNotFound)
+	require.NoError(t, os.Chmod(configPath, 0600))
+	actualContent, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, originalContent, actualContent)
 }
 
 func TestGetGlobalConfigDir_XDGSet(t *testing.T) {
@@ -446,6 +507,7 @@ func TestLoadOrCreateGlobalConfig_NoExistingConfig(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 	assert.Equal(t, DefaultBranch, cfg.DefaultBranch)
+	assert.NotNil(t, cfg.DetectedTools)
 	assert.NotNil(t, cfg.Projects)
 }
 
