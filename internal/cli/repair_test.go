@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,39 @@ import (
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
 )
+
+func TestRepairBranchTracking_ReturnsInspectionErrorAndContinues(t *testing.T) {
+	inspectionErr := errors.New("tracking inspection failed")
+	var inspected []string
+	var configured []string
+
+	err := repairBranchTrackingWithDependencies(
+		&ProjectContext{GitDir: "git-dir"},
+		false,
+		false,
+		repairBranchTrackingDependencies{
+			getBranchRefs: func(string) ([]string, []string, error) {
+				return []string{"first", "second"}, []string{"origin/first", "origin/second"}, nil
+			},
+			hasBranchTracking: func(_ string, branch string) (bool, error) {
+				inspected = append(inspected, branch)
+				if branch == "first" {
+					return false, inspectionErr
+				}
+				return false, nil
+			},
+			setBranchUpstream: func(_ string, branch, _ string) error {
+				configured = append(configured, branch)
+				return nil
+			},
+		},
+	)
+
+	assert.ErrorIs(t, err, inspectionErr)
+	assert.Contains(t, err.Error(), "first")
+	assert.Equal(t, []string{"first", "second"}, inspected)
+	assert.Equal(t, []string{"second"}, configured)
+}
 
 // createRepoWithRemote creates a source repo and a clone with remote configured.
 // Returns (gitDir, repoDir, sourceDir).

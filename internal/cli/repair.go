@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -207,8 +208,26 @@ func remoteURLFromWorktrees(worktrees []git.Worktree, getRemoteURL func(string) 
 	return ""
 }
 
+type repairBranchTrackingDependencies struct {
+	getBranchRefs     func(string) ([]string, []string, error)
+	hasBranchTracking func(string, string) (bool, error)
+	setBranchUpstream func(string, string, string) error
+}
+
+func defaultRepairBranchTrackingDependencies() repairBranchTrackingDependencies {
+	return repairBranchTrackingDependencies{
+		getBranchRefs:     git.GetBranchRefs,
+		hasBranchTracking: git.HasBranchTracking,
+		setBranchUpstream: git.SetBranchUpstream,
+	}
+}
+
 func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
-	localBranches, remoteBranches, err := git.GetBranchRefs(pc.GitDir)
+	return repairBranchTrackingWithDependencies(pc, dryRun, verbose, defaultRepairBranchTrackingDependencies())
+}
+
+func repairBranchTrackingWithDependencies(pc *ProjectContext, dryRun, verbose bool, deps repairBranchTrackingDependencies) error {
+	localBranches, remoteBranches, err := deps.getBranchRefs(pc.GitDir)
 	if err != nil {
 		return fmt.Errorf("listing branches: %w", err)
 	}
@@ -224,12 +243,15 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 
 	fixed := 0
 	skipped := 0
+	var failures []error
 
 	for _, branch := range localBranches {
-		hasTracking, err := git.HasBranchTracking(pc.GitDir, branch)
+		hasTracking, err := deps.hasBranchTracking(pc.GitDir, branch)
 		if err != nil {
+			failure := fmt.Errorf("branch %q: checking tracking: %w", branch, err)
+			failures = append(failures, failure)
 			if verbose {
-				ui.PrintInfo(fmt.Sprintf("Could not check tracking for '%s': %v", branch, err))
+				ui.PrintWarning(failure.Error())
 			}
 			continue
 		}
@@ -256,8 +278,10 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 			continue
 		}
 
-		if err := git.SetBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
-			ui.PrintInfo(fmt.Sprintf("Could not set up tracking for '%s': %v", branch, err))
+		if err := deps.setBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
+			failure := fmt.Errorf("branch %q: setting upstream: %w", branch, err)
+			failures = append(failures, failure)
+			ui.PrintWarning(failure.Error())
 			continue
 		}
 
@@ -271,7 +295,7 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 		ui.PrintInfo("No branches needed tracking configuration")
 	}
 
-	return nil
+	return errors.Join(failures...)
 }
 
 func init() {
