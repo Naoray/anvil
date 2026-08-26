@@ -238,6 +238,46 @@ func TestPrintPorcelain_Empty(t *testing.T) {
 	assert.Equal(t, "", buf.String(), "empty worktree list should produce empty output")
 }
 
+func TestPrintOutputs_ExposeWorktreeStates(t *testing.T) {
+	worktrees := []git.Worktree{
+		{Path: "/test/bare worktree", Bare: true},
+		{Path: "/test/detached worktree", Detached: true},
+		{Path: "/test/locked worktree", Branch: "feature/locked", Locked: true, LockReason: "keep for review"},
+	}
+
+	var tableOutput bytes.Buffer
+	if err := printTable(&tableOutput, worktrees); err != nil {
+		t.Fatalf("printTable failed: %v", err)
+	}
+	for _, expected := range []string{"bare", "detached", "locked", "keep for review"} {
+		if !strings.Contains(tableOutput.String(), expected) {
+			t.Errorf("table output should contain %q, got: %s", expected, tableOutput.String())
+		}
+	}
+
+	var jsonOutput bytes.Buffer
+	if err := printJSON(&jsonOutput, worktrees); err != nil {
+		t.Fatalf("printJSON failed: %v", err)
+	}
+	var result []map[string]any
+	if err := json.Unmarshal(jsonOutput.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\n%s", err, jsonOutput.String())
+	}
+	if result[0]["isBare"] != true || result[1]["isDetached"] != true || result[2]["isLocked"] != true || result[2]["lockReason"] != "keep for review" {
+		t.Errorf("JSON output should expose worktree states, got: %s", jsonOutput.String())
+	}
+
+	var porcelainOutput bytes.Buffer
+	if err := printPorcelain(&porcelainOutput, worktrees); err != nil {
+		t.Fatalf("printPorcelain failed: %v", err)
+	}
+	for _, expected := range []string{"bare", "detached", "locked", "keep%20for%20review"} {
+		if !strings.Contains(porcelainOutput.String(), expected) {
+			t.Errorf("porcelain output should contain %q, got: %s", expected, porcelainOutput.String())
+		}
+	}
+}
+
 func TestPrintJSON_Empty(t *testing.T) {
 	var buf bytes.Buffer
 	err := printJSON(&buf, []git.Worktree{})

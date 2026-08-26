@@ -97,10 +97,10 @@ func RenderWorktreeTable(worktrees []git.Worktree) string {
 	var mergedCount int
 	for _, wt := range worktrees {
 		worktreeName := truncate(filepath.Base(wt.Path), worktreeMax)
-		branch := truncate(wt.Branch, branchMax)
+		branch := truncate(formatWorktreeBranch(wt), branchMax)
 		status := formatWorktreeStatus(wt)
 		t.Row(worktreeName, branch, status)
-		if wt.IsMerged && !wt.IsMain {
+		if wt.IsMerged && !wt.IsMain && !wt.Bare && !wt.Detached {
 			mergedCount++
 		}
 	}
@@ -132,6 +132,22 @@ func formatWorktreeStatus(wt git.Worktree) string {
 	if wt.IsCurrent {
 		parts = append(parts, CurrentWorktreeStyle.Render("● current"))
 	}
+	if wt.Bare {
+		parts = append(parts, MutedStyle.Render("○ bare"))
+	} else if wt.Detached {
+		parts = append(parts, MutedStyle.Render("○ detached"))
+	}
+	if wt.Locked {
+		locked := "🔒 locked"
+		if wt.LockReason != "" {
+			locked += ": " + wt.LockReason
+		}
+		parts = append(parts, MutedStyle.Render(locked))
+	}
+
+	if wt.Bare || wt.Detached {
+		return strings.Join(parts, " ")
+	}
 	if wt.IsMain {
 		parts = append(parts, MainWorktreeStyle.Render("★ main"))
 	} else if wt.IsMerged {
@@ -141,4 +157,14 @@ func formatWorktreeStatus(wt git.Worktree) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+func formatWorktreeBranch(wt git.Worktree) string {
+	if wt.Bare {
+		return "(bare)"
+	}
+	if wt.Detached {
+		return "(detached)"
+	}
+	return wt.Branch
 }

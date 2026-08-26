@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -61,21 +63,29 @@ func printTable(w io.Writer, worktrees []git.Worktree) error {
 
 func printJSON(w io.Writer, worktrees []git.Worktree) error {
 	type worktreeJSON struct {
-		Path      string `json:"path"`
-		Branch    string `json:"branch"`
-		IsMain    bool   `json:"isMain"`
-		IsCurrent bool   `json:"isCurrent"`
-		IsMerged  bool   `json:"isMerged"`
+		Path       string `json:"path"`
+		Branch     string `json:"branch"`
+		IsBare     bool   `json:"isBare"`
+		IsDetached bool   `json:"isDetached"`
+		IsLocked   bool   `json:"isLocked"`
+		LockReason string `json:"lockReason,omitempty"`
+		IsMain     bool   `json:"isMain"`
+		IsCurrent  bool   `json:"isCurrent"`
+		IsMerged   bool   `json:"isMerged"`
 	}
 
 	jsonWorktrees := make([]worktreeJSON, len(worktrees))
 	for i, wt := range worktrees {
 		jsonWorktrees[i] = worktreeJSON{
-			Path:      wt.Path,
-			Branch:    wt.Branch,
-			IsMain:    wt.IsMain,
-			IsCurrent: wt.IsCurrent,
-			IsMerged:  wt.IsMerged,
+			Path:       wt.Path,
+			Branch:     wt.Branch,
+			IsBare:     wt.Bare,
+			IsDetached: wt.Detached,
+			IsLocked:   wt.Locked,
+			LockReason: wt.LockReason,
+			IsMain:     wt.IsMain,
+			IsCurrent:  wt.IsCurrent,
+			IsMerged:   wt.IsMerged,
 		}
 	}
 
@@ -103,12 +113,37 @@ func printPorcelain(w io.Writer, worktrees []git.Worktree) error {
 			merged = "-"
 		}
 
-		if _, err := fmt.Fprintf(w, "%s %s %s %s %s\n", wt.Path, wt.Branch, main, current, merged); err != nil {
+		fields := []string{wt.Path, worktreeBranchLabel(wt), main, current, merged}
+		if wt.Bare {
+			fields = append(fields, "bare")
+		}
+		if wt.Detached {
+			fields = append(fields, "detached")
+		}
+		if wt.Locked {
+			locked := "locked"
+			if wt.LockReason != "" {
+				locked += "=" + url.PathEscape(wt.LockReason)
+			}
+			fields = append(fields, locked)
+		}
+
+		if _, err := fmt.Fprintln(w, strings.Join(fields, " ")); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func worktreeBranchLabel(wt git.Worktree) string {
+	if wt.Bare {
+		return "(bare)"
+	}
+	if wt.Detached {
+		return "(detached)"
+	}
+	return wt.Branch
 }
 
 func init() {
