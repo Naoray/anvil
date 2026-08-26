@@ -146,13 +146,10 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 		if shouldPrompt {
 			// Prompt for upstream if not set via flag or config
 			if upstreamFlag == "" && pc.Config.Sync.Upstream == "" {
-				localBranches, err := git.ListLocalBranches(pc.GitDir)
+				localBranches, remoteBranches, err := branchRefsForSelection(pc.GitDir)
 				if err != nil {
-					return fmt.Errorf("listing local branches: %w", err)
+					return err
 				}
-
-				// Best-effort: remote branches enhance UI selection but are not required
-				remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 				selected, err := ui.SelectUpstreamBranch(localBranches, remoteBranches, pc.DefaultBranch)
 				if err != nil {

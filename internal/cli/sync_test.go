@@ -535,6 +535,7 @@ func TestSyncCommand_DoesNotStashWhenRemoteMissing(t *testing.T) {
 	assert.False(t, hasStash)
 }
 
+<<<<<<< HEAD
 func TestSyncCommand_RestoresAutoStashAfterFetchFailure(t *testing.T) {
 	ensureSyncTestFlags(t)
 
@@ -792,4 +793,18 @@ func mustRemoteURL(t *testing.T, gitDir string, remote string) string {
 	url, err := git.GetRemoteURL(gitDir, remote)
 	requireNoError(t, err)
 	return url
+}
+
+func TestSyncBranchSelectionUsesUnifiedRefInventory(t *testing.T) {
+	gitDir, repoDir := createTestRepo(t)
+	commit := runBranchSelectionGitOutput(t, repoDir, "rev-parse", "HEAD")
+
+	runBranchSelectionGit(t, repoDir, "remote", "add", "origin", "https://example.test/origin.git")
+	runBranchSelectionGit(t, repoDir, "update-ref", "refs/remotes/origin/main", commit)
+	runBranchSelectionGit(t, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	local, remote, err := branchRefsForSelection(gitDir)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"main"}, local)
+	assert.Equal(t, []string{"origin/main"}, remote)
 }

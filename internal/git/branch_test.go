@@ -93,18 +93,6 @@ func TestGetBranchRefs(t *testing.T) {
 	assert.Empty(t, remote)
 }
 
-func TestListLocalBranches(t *testing.T) {
-	repoDir := createTestRepo(t)
-	gitDir := filepath.Join(repoDir, ".git")
-
-	// Get local branches
-	branches, err := ListLocalBranches(gitDir)
-	assert.NoError(t, err)
-
-	// Should have at least main branch
-	assert.Contains(t, branches, "main")
-}
-
 func TestGetBranchRefs_PreservesBranchInventory(t *testing.T) {
 	repoDir := createTestRepo(t)
 	gitDir := filepath.Join(repoDir, ".git")

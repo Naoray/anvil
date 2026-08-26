@@ -87,3 +87,39 @@ func TestWorkCommand_SetsUpBranchTracking(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "refs/heads/feature", strings.TrimSpace(string(output)))
 }
+
+func TestWorkBranchSelectionUsesUnifiedRefInventory(t *testing.T) {
+	gitDir, repoDir := createTestRepo(t)
+	commit := runBranchSelectionGitOutput(t, repoDir, "rev-parse", "HEAD")
+
+	for _, branch := range []string{"feature/nested", "release"} {
+		runBranchSelectionGit(t, repoDir, "branch", branch)
+	}
+	runBranchSelectionGit(t, repoDir, "remote", "add", "origin", "https://example.test/origin.git")
+	runBranchSelectionGit(t, repoDir, "update-ref", "refs/remotes/origin/main", commit)
+
+	local, remote, err := branchRefsForSelection(gitDir)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"feature/nested", "main", "release"}, local)
+	assert.Equal(t, []string{"origin/main"}, remote)
+}
+
+func runBranchSelectionGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func runBranchSelectionGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(output))
+}

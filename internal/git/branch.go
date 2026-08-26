@@ -75,9 +75,3 @@ func GetBranchRefs(gitDir string) (local []string, remote []string, err error) {
 
 	return local, remote, nil
 }
-
-// ListLocalBranches returns all local branch names.
-func ListLocalBranches(gitDir string) ([]string, error) {
-	local, _, err := GetBranchRefs(gitDir)
-	return local, err
-}

@@ -40,13 +40,10 @@ available branches or entering a new branch name.`,
 		if len(args) > 0 {
 			branch = args[0]
 		} else if ui.IsInteractive() {
-			localBranches, err := git.ListAllBranches(pc.GitDir)
+			localBranches, remoteBranches, err := branchRefsForSelection(pc.GitDir)
 			if err != nil {
-				return fmt.Errorf("listing local branches: %w", err)
+				return err
 			}
-
-			// Best-effort: remote branches enhance UI selection but are not required
-			remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 			selected, err := ui.SelectBranchInteractive(pc.GitDir, localBranches, remoteBranches)
 			if err != nil {
@@ -149,6 +146,14 @@ available branches or entering a new branch name.`,
 		ui.PrintDone(fmt.Sprintf("Worktree ready at %s", absWorktreePath))
 		return nil
 	},
+}
+
+func branchRefsForSelection(gitDir string) (local, remote []string, err error) {
+	local, remote, err = git.GetBranchRefs(gitDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing branches: %w", err)
+	}
+	return local, remote, nil
 }
 
 // stripRemotePrefix removes the remote prefix from a branch name
