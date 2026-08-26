@@ -288,7 +288,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 		}
 
 		ui.PrintInfo("This will run cleanup steps.")
-		confirmed, err := ui.Confirm(fmt.Sprintf("Remove worktree '%s'?", targetWorktree.Branch))
+		confirmed, err := ui.Confirm(fmt.Sprintf("Remove worktree '%s'?", worktreeBranchLabel(*targetWorktree)))
 		if err != nil {
 			return fmt.Errorf("confirmation: %w", err)
 		}
