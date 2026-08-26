@@ -38,6 +38,67 @@ func TestCleanupConfigToStepConfig_PreservesArgsAndHerdDefault(t *testing.T) {
 	}
 }
 
+func TestGetCleanupSteps_UsesPassedPresetDefinition(t *testing.T) {
+	herdStep := &mockStep{name: "herd"}
+	manager := NewScaffoldManagerWithRegistry(&cleanupRecordingRegistry{steps: map[string]*mockStep{
+		"herd": herdStep,
+	}})
+
+	steps, err := manager.GetCleanupSteps(
+		&config.Config{}, t.TempDir(), "branch", "recording",
+		[]config.CleanupStep{{Name: "herd"}},
+	)
+
+	if err != nil {
+		t.Fatalf("GetCleanupSteps() error = %v", err)
+	}
+	if len(steps) != 1 || steps[0] != herdStep {
+		t.Fatalf("GetCleanupSteps() = %#v, want the passed preset step", steps)
+	}
+}
+
+type contextRecordingStep struct {
+	preset string
+}
+
+func (s *contextRecordingStep) Name() string        { return "selected-step" }
+func (s *contextRecordingStep) Description() string { return "selected step" }
+func (s *contextRecordingStep) Condition(*types.ScaffoldContext) bool {
+	return true
+}
+func (s *contextRecordingStep) Run(ctx *types.ScaffoldContext, _ types.StepOptions) error {
+	s.preset = ctx.Preset
+	return nil
+}
+
+type contextRecordingRegistry struct {
+	step *contextRecordingStep
+}
+
+func (r *contextRecordingRegistry) Create(string, config.StepConfig) (types.ScaffoldStep, error) {
+	return r.step, nil
+}
+
+func (r *contextRecordingRegistry) ListRegistered() []string { return nil }
+
+func TestRunScaffold_UsesPassedPresetDefinition(t *testing.T) {
+	step := &contextRecordingStep{}
+	manager := NewScaffoldManagerWithRegistry(&contextRecordingRegistry{step: step})
+
+	err := manager.RunScaffold(
+		t.TempDir(), "branch", "repo", "site", "selected",
+		[]config.StepConfig{{Name: "selected-step"}},
+		&config.Config{}, false, false, true,
+	)
+
+	if err != nil {
+		t.Fatalf("RunScaffold() error = %v", err)
+	}
+	if step.preset != "selected" {
+		t.Fatalf("step context preset = %q, want selected", step.preset)
+	}
+}
+
 type cleanupRecordingRegistry struct {
 	steps map[string]*mockStep
 }
@@ -45,15 +106,6 @@ type cleanupRecordingRegistry struct {
 func (r *cleanupRecordingRegistry) Create(name string, _ config.StepConfig) (types.ScaffoldStep, error) {
 	return r.steps[name], nil
 }
-
-type cleanupRecordingPreset struct {
-	cleanup []config.CleanupStep
-}
-
-func (p cleanupRecordingPreset) Name() string                       { return "recording" }
-func (p cleanupRecordingPreset) Detect(string) bool                 { return false }
-func (p cleanupRecordingPreset) DefaultSteps() []config.StepConfig  { return nil }
-func (p cleanupRecordingPreset) CleanupSteps() []config.CleanupStep { return p.cleanup }
 
 func TestRunCleanupWithOptions_SkipDatabaseCleanup(t *testing.T) {
 	herdStep := &mockStep{name: "herd", conditionResult: true}
@@ -63,14 +115,14 @@ func TestRunCleanupWithOptions_SkipDatabaseCleanup(t *testing.T) {
 		config.StepDbDestroy: databaseStep,
 	}}
 	manager := NewScaffoldManagerWithRegistry(registry)
-	manager.RegisterPreset(cleanupRecordingPreset{cleanup: []config.CleanupStep{
+	cleanupSteps := []config.CleanupStep{
 		{Name: "herd"},
 		{Name: config.StepDbDestroy},
-	}})
+	}
 	cfg := &config.Config{Preset: "recording"}
 
 	err := manager.RunCleanupWithOptions(
-		t.TempDir(), "branch", "repo", "site", "recording", cfg,
+		t.TempDir(), "branch", "repo", "site", "recording", cleanupSteps, cfg,
 		CleanupOptions{Quiet: true, SkipDatabaseCleanup: true},
 	)
 
@@ -83,7 +135,7 @@ func TestRunCleanupWithOptions_SkipDatabaseCleanup(t *testing.T) {
 
 	herdStep.runCalled = false
 	databaseStep.runCalled = false
-	if err := manager.RunCleanup(t.TempDir(), "branch", "repo", "site", "recording", cfg, false, false, true); err != nil {
+	if err := manager.RunCleanup(t.TempDir(), "branch", "repo", "site", "recording", cleanupSteps, cfg, false, false, true); err != nil {
 		t.Fatalf("RunCleanup() error = %v", err)
 	}
 	if !herdStep.runCalled || !databaseStep.runCalled {
@@ -96,10 +148,11 @@ func TestRunCleanupWithOptions_DryRunInvokesDbDestroyWithDryRun(t *testing.T) {
 	manager := NewScaffoldManagerWithRegistry(&cleanupRecordingRegistry{steps: map[string]*mockStep{
 		config.StepDbDestroy: databaseStep,
 	}})
-	manager.RegisterPreset(cleanupRecordingPreset{cleanup: []config.CleanupStep{{Name: config.StepDbDestroy}}})
 
 	err := manager.RunCleanupWithOptions(
-		t.TempDir(), "branch", "repo", "site", "recording", &config.Config{Preset: "recording"},
+		t.TempDir(), "branch", "repo", "site", "recording",
+		[]config.CleanupStep{{Name: config.StepDbDestroy}},
+		&config.Config{Preset: "recording"},
 		CleanupOptions{DryRun: true, Quiet: true},
 	)
 

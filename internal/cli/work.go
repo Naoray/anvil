@@ -119,19 +119,27 @@ available branches or entering a new branch name.`,
 				ui.PrintInfo("Scaffold skipped (run 'anvil scaffold' to set up later)")
 			}
 		} else if !dryRun {
-			preset := pc.Config.Preset
-			if preset == "" {
-				preset = pc.PresetManager().Detect(absWorktreePath)
-			}
+			resolvedPreset := pc.ResolvePreset("", absWorktreePath)
 
-			if verbose && preset != "" {
-				ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", preset))
+			if verbose && resolvedPreset.Name() != "" {
+				ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", resolvedPreset.Name()))
 			}
 
 			repoName := filepath.Base(filepath.Dir(absWorktreePath))
 			siteName := worktreeSiteName(absWorktreePath, branch, pc.DefaultBranch, pc.Config.SiteName)
 
-			if err := pc.ScaffoldManager().RunScaffold(absWorktreePath, branch, repoName, siteName, preset, pc.Config, false, verbose, quiet); err != nil {
+			if err := pc.ScaffoldManager().RunScaffold(
+				absWorktreePath,
+				branch,
+				repoName,
+				siteName,
+				resolvedPreset.Name(),
+				resolvedPreset.DefaultSteps(),
+				pc.Config,
+				false,
+				verbose,
+				quiet,
+			); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			}
 

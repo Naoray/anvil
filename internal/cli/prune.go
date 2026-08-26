@@ -10,6 +10,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -125,8 +126,10 @@ func defaultPruneProjectDependencies() pruneProjectDependencies {
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState:  config.ReadLocalState,
 			scaffoldManager: func(pc *ProjectContext) *scaffold.ScaffoldManager { return pc.ScaffoldManager() },
-			detectPreset:    func(pc *ProjectContext, path string) string { return pc.PresetManager().Detect(path) },
-			removeWorktree:  git.RemoveWorktree,
+			resolvePreset: func(pc *ProjectContext, explicit, path string) presets.ResolvedPreset {
+				return pc.ResolvePreset(explicit, path)
+			},
+			removeWorktree: git.RemoveWorktree,
 		},
 	}
 }

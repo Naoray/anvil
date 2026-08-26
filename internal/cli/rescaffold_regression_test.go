@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
@@ -52,13 +53,26 @@ func TestPostgresRescaffold_IdempotentEndToEnd(t *testing.T) {
 	factory := steps.MockClientFactory(client)
 
 	manager := scaffold.NewScaffoldManagerWithRegistry(&pgRegressionRegistry{factory: factory})
-	manager.RegisterPreset(pgRegressionPreset{})
+	presetManager := presets.NewManager()
+	presetManager.Register(pgRegressionPreset{})
+	resolvedPreset := presetManager.Resolve("pg-regression", "", dir)
 	cfg := &config.Config{Preset: "pg-regression"}
 
 	runScaffoldPass := func(pass int) {
 		t.Helper()
 		require.NoError(t,
-			manager.RunScaffold(dir, "feature-x", "repo", "demo", "pg-regression", cfg, false, false, true),
+			manager.RunScaffold(
+				dir,
+				"feature-x",
+				"repo",
+				"demo",
+				resolvedPreset.Name(),
+				resolvedPreset.DefaultSteps(),
+				cfg,
+				false,
+				false,
+				true,
+			),
 			"scaffold pass %d", pass)
 	}
 

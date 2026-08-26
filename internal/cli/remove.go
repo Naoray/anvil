@@ -11,6 +11,7 @@ import (
 	"github.com/naoray/anvil/internal/config"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -86,7 +87,7 @@ type removeLifecycleOptions struct {
 type removeLifecycleDependencies struct {
 	readLocalState  func(string) (*config.LocalState, error)
 	scaffoldManager func(*ProjectContext) *scaffold.ScaffoldManager
-	detectPreset    func(*ProjectContext, string) string
+	resolvePreset   func(*ProjectContext, string, string) presets.ResolvedPreset
 	removeWorktree  func(string, string, bool) error
 	printInfo       func(string)
 }
@@ -115,23 +116,21 @@ func runRemoveLifecycle(
 		deps.printInfoMessage(message)
 	}
 
-	preset := pc.Config.Preset
-	if preset == "" {
-		preset = deps.detectPreset(pc, worktree.Path)
+	resolvedPreset := deps.resolvePreset(pc, "", worktree.Path)
+
+	if options.Verbose && resolvedPreset.Name() != "" {
+		deps.printInfoMessage(fmt.Sprintf("Running cleanup for preset: %s", resolvedPreset.Name()))
 	}
 
-	if options.Verbose && preset != "" {
-		deps.printInfoMessage(fmt.Sprintf("Running cleanup for preset: %s", preset))
-	}
-
-	if preset != "" {
+	if resolvedPreset.Name() != "" {
 		siteName := worktreeSiteName(worktree.Path, worktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 		if err := deps.scaffoldManager(pc).RunCleanupWithOptions(
 			worktree.Path,
 			worktree.Branch,
 			"",
 			siteName,
-			preset,
+			resolvedPreset.Name(),
+			resolvedPreset.CleanupSteps(),
 			pc.Config,
 			cleanupOpts,
 		); err != nil {
@@ -160,7 +159,7 @@ type removeCommandDependencies struct {
 	deleteBranch     func(string, string, bool) error
 	readLocalState   func(string) (*config.LocalState, error)
 	scaffoldManager  func(*ProjectContext) *scaffold.ScaffoldManager
-	detectPreset     func(*ProjectContext, string) string
+	resolvePreset    func(*ProjectContext, string, string) presets.ResolvedPreset
 	printInfo        func(string)
 }
 
@@ -175,7 +174,9 @@ func defaultRemoveCommandDependencies() removeCommandDependencies {
 		deleteBranch:     git.DeleteBranch,
 		readLocalState:   config.ReadLocalState,
 		scaffoldManager:  func(pc *ProjectContext) *scaffold.ScaffoldManager { return pc.ScaffoldManager() },
-		detectPreset:     func(pc *ProjectContext, path string) string { return pc.PresetManager().Detect(path) },
+		resolvePreset: func(pc *ProjectContext, explicit, path string) presets.ResolvedPreset {
+			return pc.ResolvePreset(explicit, path)
+		},
 	}
 }
 
@@ -352,7 +353,7 @@ func (deps removeCommandDependencies) lifecycleDependencies() removeLifecycleDep
 	return removeLifecycleDependencies{
 		readLocalState:  deps.readLocalState,
 		scaffoldManager: deps.scaffoldManager,
-		detectPreset:    deps.detectPreset,
+		resolvePreset:   deps.resolvePreset,
 		removeWorktree:  deps.removeWorktree,
 		printInfo:       deps.printInfo,
 	}

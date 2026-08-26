@@ -112,19 +112,27 @@ Examples:
 		ui.PrintStep(fmt.Sprintf("Scaffolding worktree: %s", selectedWorktree.Branch))
 		ui.PrintInfo(fmt.Sprintf("Path: %s", selectedWorktree.Path))
 
-		preset := pc.Config.Preset
-		if preset == "" {
-			preset = pc.PresetManager().Detect(selectedWorktree.Path)
-		}
+		resolvedPreset := pc.ResolvePreset("", selectedWorktree.Path)
 
-		if verbose && preset != "" {
-			ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", preset))
+		if verbose && resolvedPreset.Name() != "" {
+			ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", resolvedPreset.Name()))
 		}
 
 		repoName := filepath.Base(pc.ProjectPath)
 		siteName := worktreeSiteName(selectedWorktree.Path, selectedWorktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 
-		if err := pc.ScaffoldManager().RunScaffold(selectedWorktree.Path, selectedWorktree.Branch, repoName, siteName, preset, pc.Config, dryRun, verbose, quiet); err != nil {
+		if err := pc.ScaffoldManager().RunScaffold(
+			selectedWorktree.Path,
+			selectedWorktree.Branch,
+			repoName,
+			siteName,
+			resolvedPreset.Name(),
+			resolvedPreset.DefaultSteps(),
+			pc.Config,
+			dryRun,
+			verbose,
+			quiet,
+		); err != nil {
 			ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			return err
 		}

@@ -280,6 +280,29 @@ func TestProjectContext_Managers(t *testing.T) {
 	}
 }
 
+func TestProjectContext_ResolvePresetUsesExplicitConfiguredDetectedPrecedence(t *testing.T) {
+	worktreePath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktreePath, "composer.json"), []byte(`{"name": "test/app"}`), 0644); err != nil {
+		t.Fatalf("writing composer.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "artisan"), []byte("#!/usr/bin/env php"), 0644); err != nil {
+		t.Fatalf("writing artisan: %v", err)
+	}
+
+	pc := &ProjectContext{
+		Config:       &config.Config{Preset: "laravel"},
+		GlobalConfig: &config.GlobalConfig{},
+	}
+	resolved := pc.ResolvePreset("php", worktreePath)
+
+	if resolved.Name() != "php" {
+		t.Fatalf("ResolvePreset() name = %q, want php", resolved.Name())
+	}
+	if len(resolved.DefaultSteps()) != 2 {
+		t.Fatalf("ResolvePreset() default steps = %d, want 2", len(resolved.DefaultSteps()))
+	}
+}
+
 func TestProjectContext_GetWorktreePath(t *testing.T) {
 	repoDir := createLinkedProject(t)
 	tmpDir := filepath.Dir(repoDir)

@@ -201,6 +201,11 @@ func (pc *ProjectContext) ScaffoldManager() *scaffold.ScaffoldManager {
 	return pc.scaffoldManager
 }
 
+// ResolvePreset selects one preset definition for a scaffold or cleanup run.
+func (pc *ProjectContext) ResolvePreset(explicit, path string) presets.ResolvedPreset {
+	return pc.PresetManager().Resolve(explicit, pc.Config.Preset, path)
+}
+
 func (pc *ProjectContext) initManagers() {
 	siteDriver := pc.GlobalConfig.ResolveSiteDriver(nil)
 	stepRegistry := steps.NewRegistry()
@@ -208,5 +213,4 @@ func (pc *ProjectContext) initManagers() {
 
 	pc.presetManager = presets.NewManager(siteDriver)
 	pc.scaffoldManager = scaffold.NewScaffoldManagerWithRegistry(stepRegistry)
-	presets.RegisterAllWithScaffold(pc.scaffoldManager, siteDriver)
 }

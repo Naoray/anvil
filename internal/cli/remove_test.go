@@ -16,6 +16,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
@@ -70,9 +71,12 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	}
 	var cleanupOutput bytes.Buffer
 	manager := scaffold.NewScaffoldManagerWithRegistry(&removeTestRegistry{client: client, output: &cleanupOutput})
-	manager.RegisterPreset(removeTestPreset{})
+	presetManager := presets.NewManager()
+	presetManager.Register(removeTestPreset{})
+	resolvedPreset := presetManager.Resolve("remove-test", "", worktreePath)
 	pc := &ProjectContext{GitDir: "git-dir", Config: &config.Config{Preset: "remove-test"}}
 	removeCalls := 0
+	resolveCalls := 0
 	var infoMessages []string
 	deps := removeCommandDependencies{
 		openProject:      func() (*ProjectContext, error) { return pc, nil },
@@ -89,8 +93,11 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 		deleteBranch:    func(string, string, bool) error { return nil },
 		readLocalState:  config.ReadLocalState,
 		scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
-		detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
-		printInfo:       func(message string) { infoMessages = append(infoMessages, message) },
+		resolvePreset: func(*ProjectContext, string, string) presets.ResolvedPreset {
+			resolveCalls++
+			return resolvedPreset
+		},
+		printInfo: func(message string) { infoMessages = append(infoMessages, message) },
 	}
 
 	root := &cobra.Command{Use: "anvil"}
@@ -113,6 +120,7 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	assert.Equal(t, []string{`app\_top\_provider\_test\_%`, `app\_top\_provider\_test\_test\_%`}, client.GetListCalls())
 	assert.Empty(t, client.GetDropCalls())
 	assert.Zero(t, removeCalls)
+	assert.Equal(t, 1, resolveCalls, "cleanup run should resolve its preset exactly once")
 	_, err = os.Stat(worktreePath)
 	require.NoError(t, err)
 	stateAfter, err := os.ReadFile(statePath)

@@ -306,7 +306,7 @@ APP_NAME=myapp
 		cfg := &config.Config{Preset: ""}
 		manager := NewScaffoldManager()
 
-		err = manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
+		err = manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", nil, cfg, false, false, false)
 		require.NoError(t, err)
 
 		localStateAfter, err := config.ReadLocalState(tmpDir)
@@ -329,7 +329,7 @@ APP_NAME=myapp
 		cfg := &config.Config{Preset: ""}
 		manager := NewScaffoldManager()
 
-		err := manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", cfg, false, false, false)
+		err := manager.RunScaffold(tmpDir, "test", "myrepo", "myapp", "", nil, cfg, false, false, false)
 		require.NoError(t, err)
 
 		localStateAfter, err := config.ReadLocalState(tmpDir)
@@ -475,7 +475,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.NoError(t, err, "Pre-flight should pass when all dependencies exist")
 	})
 
@@ -496,7 +496,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		require.Error(t, err, "Pre-flight should fail when map form dependencies are missing")
 		assert.Contains(t, err.Error(), "Missing environment variables")
 		assert.Contains(t, err.Error(), "NONEXISTENT_MAP_ENV")
@@ -524,7 +524,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		require.Error(t, err, "Pre-flight should fail when nested condition fails")
 		assert.EqualError(t, err, "pre-flight checks failed")
 	})
@@ -544,7 +544,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.Error(t, err, "Pre-flight should fail when env var is missing")
 		assert.Contains(t, err.Error(), "pre-flight checks failed")
 		assert.Contains(t, err.Error(), "Missing environment variables")
@@ -566,7 +566,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.Error(t, err, "Pre-flight should fail when command is missing")
 		assert.Contains(t, err.Error(), "pre-flight checks failed")
 		assert.Contains(t, err.Error(), "Missing commands")
@@ -588,7 +588,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.Error(t, err, "Pre-flight should fail when file is missing")
 		assert.Contains(t, err.Error(), "pre-flight checks failed")
 		assert.Contains(t, err.Error(), "Missing files")
@@ -612,7 +612,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.Error(t, err, "Pre-flight should fail when multiple dependencies are missing")
 		assert.Contains(t, err.Error(), "pre-flight checks failed")
 		assert.Contains(t, err.Error(), "Missing environment variables")
@@ -636,7 +636,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.NoError(t, err, "Scaffold should run normally when no pre-flight is configured")
 	})
 
@@ -658,7 +658,7 @@ func TestIntegration_PreFlightChecks(t *testing.T) {
 		}
 
 		manager := NewScaffoldManager()
-		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", cfg, false, false, true)
+		err := manager.RunScaffold(tmpDir, "test", "testrepo", "testsite", "", nil, cfg, false, false, true)
 		assert.Error(t, err, "Pre-flight should fail when ANY file is missing")
 		assert.Contains(t, err.Error(), "Missing files")
 		assert.Contains(t, err.Error(), "missing.txt")

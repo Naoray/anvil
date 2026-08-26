@@ -15,9 +15,16 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 )
+
+func resolvedRemoveTestPreset() presets.ResolvedPreset {
+	manager := presets.NewManager()
+	manager.Register(removeTestPreset{})
+	return manager.Resolve("remove-test", "", "")
+}
 
 // makeTestProject creates a git repo with a local "origin" remote and returns
 // a ProjectContext ready for pruneProject.
@@ -165,7 +172,7 @@ func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
 		client: client,
 		output: &bytes.Buffer{},
 	})
-	manager.RegisterPreset(removeTestPreset{})
+	resolvedPreset := resolvedRemoveTestPreset()
 
 	pc := &ProjectContext{
 		GitDir:        "git-dir",
@@ -186,7 +193,7 @@ func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
 				}}, nil
 			},
 			scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
-			detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+			resolvePreset:   func(*ProjectContext, string, string) presets.ResolvedPreset { return resolvedPreset },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
@@ -295,7 +302,7 @@ func TestPruneProject_ReportsRemovedOnlyAfterSuccessfulRemoval(t *testing.T) {
 		isMerged: func(string, string, string) (bool, error) { return true, nil },
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(_ string, path string, _ bool) error {
 				if path == failedPath {
 					return removeErr
@@ -360,7 +367,7 @@ func TestPruneProject_ForceAndKeepDBOptionsAreShared(t *testing.T) {
 		client: client,
 		output: &bytes.Buffer{},
 	})
-	manager.RegisterPreset(removeTestPreset{})
+	resolvedPreset := resolvedRemoveTestPreset()
 	removeCalls := 0
 	deps := pruneProjectDependencies{
 		fetchOrigin: func(string) error { return nil },
@@ -371,7 +378,7 @@ func TestPruneProject_ForceAndKeepDBOptionsAreShared(t *testing.T) {
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState:  config.ReadLocalState,
 			scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
-			detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+			resolvePreset:   func(*ProjectContext, string, string) presets.ResolvedPreset { return resolvedPreset },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
@@ -408,7 +415,7 @@ func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 	}
 	var cleanupOutput bytes.Buffer
 	manager := scaffold.NewScaffoldManagerWithRegistry(&removeTestRegistry{client: client, output: &cleanupOutput})
-	manager.RegisterPreset(removeTestPreset{})
+	resolvedPreset := resolvedRemoveTestPreset()
 	removeCalls := 0
 	deps := pruneProjectDependencies{
 		fetchOrigin: func(string) error { return nil },
@@ -419,7 +426,7 @@ func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState:  config.ReadLocalState,
 			scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
-			detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+			resolvePreset:   func(*ProjectContext, string, string) presets.ResolvedPreset { return resolvedPreset },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
@@ -459,7 +466,7 @@ func TestPruneProject_FetchFailureStopsBeforeMutation(t *testing.T) {
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
@@ -553,7 +560,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenSelectionEmpty(t *testing.T)
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error { return nil },
 		},
 	}
@@ -592,7 +599,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenConfirmationDeclined(t *test
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error { return nil },
 		},
 	}
@@ -652,7 +659,7 @@ func TestPruneProject_PreservesPriorFailureWithSelectionOrConfirmationError(t *t
 				confirmRemoval:  tt.confirmRemoval,
 				removeLifecycle: removeLifecycleDependencies{
 					readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-					detectPreset:   func(*ProjectContext, string) string { return "" },
+					resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 					removeWorktree: func(string, string, bool) error { return nil },
 				},
 			}
@@ -684,7 +691,7 @@ func TestPruneProject_ReturnsMergeCheckFailureAfterContinuing(t *testing.T) {
 		},
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
-			detectPreset:   func(*ProjectContext, string) string { return "" },
+			resolvePreset:  func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
 			removeWorktree: func(string, string, bool) error {
 				removeCalls++
 				return nil
