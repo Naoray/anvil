@@ -139,7 +139,7 @@ func runRemoveLifecycle(
 	}
 
 	if options.DryRun {
-		ui.PrintInfo("[DRY RUN] Would remove worktree")
+		ui.PrintInfo(fmt.Sprintf("[DRY RUN] Would remove %s at %s", worktree.Branch, worktree.Path))
 		return nil
 	}
 

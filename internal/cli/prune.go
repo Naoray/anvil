@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -11,45 +13,94 @@ import (
 	"github.com/naoray/anvil/internal/ui"
 )
 
-var pruneCmd = &cobra.Command{
-	Use:   "prune",
-	Short: "Remove merged worktrees across all linked projects",
-	Long: `Fetches origin and removes merged worktrees for every linked project.
+type pruneCommandDependencies struct {
+	loadGlobalConfig func() (*config.GlobalConfig, error)
+	openProject      func(string, string, *config.ProjectInfo, *config.GlobalConfig) (*ProjectContext, error)
+	pruneProject     func(*ProjectContext, bool, bool, bool, bool, bool) error
+}
+
+func defaultPruneCommandDependencies() pruneCommandDependencies {
+	return pruneCommandDependencies{
+		loadGlobalConfig: config.LoadOrCreateGlobalConfig,
+		openProject:      openProject,
+		pruneProject: func(pc *ProjectContext, force, dryRun, verbose, quiet, keepDB bool) error {
+			return pruneProject(pc, force, dryRun, verbose, quiet, keepDB)
+		},
+	}
+}
+
+var pruneCmd = newPruneCommand(defaultPruneCommandDependencies())
+
+func newPruneCommand(deps pruneCommandDependencies) *cobra.Command {
+	command := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove merged worktrees across all linked projects",
+		Long: `Fetches origin and removes merged worktrees for every linked project.
 
 Lists all worktrees across all anvil-linked projects, identifies merged ones
 against origin/<default-branch>, and provides an interactive review before removal.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		force := mustGetBool(cmd, "force")
-		dryRun := mustGetBool(cmd, "dry-run")
-		verbose := mustGetBool(cmd, "verbose")
-		quiet := mustGetBool(cmd, "quiet")
-		keepDB := mustGetBool(cmd, "keep-db")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPrune(cmd, deps)
+		},
+	}
+	command.Flags().BoolP("force", "f", false, "Skip interactive confirmation")
+	command.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
+	return command
+}
 
-		globalCfg, err := config.LoadOrCreateGlobalConfig()
-		if err != nil {
-			return fmt.Errorf("loading global config: %w", err)
-		}
+func runPrune(cmd *cobra.Command, deps pruneCommandDependencies) error {
+	force := mustGetBool(cmd, "force")
+	dryRun := mustGetBool(cmd, "dry-run")
+	verbose := mustGetBool(cmd, "verbose")
+	quiet := mustGetBool(cmd, "quiet")
+	keepDB := mustGetBool(cmd, "keep-db")
 
-		if len(globalCfg.Projects) == 0 {
-			ui.PrintDone("No linked projects found. Run 'anvil link' first.")
-			return nil
-		}
+	globalCfg, err := deps.loadGlobalConfig()
+	if err != nil {
+		return fmt.Errorf("loading global config: %w", err)
+	}
 
-		for name, info := range globalCfg.Projects {
-			ui.PrintInfo(fmt.Sprintf("Project: %s", name))
-			pc, err := openProject(info.Path, name, info, globalCfg)
-			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Skipping %s: %v", name, err))
-				continue
-			}
-			if err := pruneProject(pc, force, dryRun, verbose, quiet, keepDB); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Error pruning %s: %v", name, err))
-			}
-			fmt.Println()
-		}
-
+	if len(globalCfg.Projects) == 0 {
+		ui.PrintDone("No linked projects found. Run 'anvil link' first.")
 		return nil
-	},
+	}
+
+	projectNames := make([]string, 0, len(globalCfg.Projects))
+	for name := range globalCfg.Projects {
+		projectNames = append(projectNames, name)
+	}
+	sort.Strings(projectNames)
+
+	var failures []error
+	for _, name := range projectNames {
+		info := globalCfg.Projects[name]
+		ui.PrintInfo(fmt.Sprintf("Project: %s", name))
+
+		if info == nil {
+			err := fmt.Errorf("project %q has no configuration", name)
+			ui.PrintWarning(err.Error())
+			failures = append(failures, err)
+			fmt.Println()
+			continue
+		}
+
+		pc, err := deps.openProject(info.Path, name, info, globalCfg)
+		if err != nil {
+			failure := fmt.Errorf("project %q: opening project: %w", name, err)
+			ui.PrintWarning(failure.Error())
+			failures = append(failures, failure)
+			fmt.Println()
+			continue
+		}
+		if err := deps.pruneProject(pc, force, dryRun, verbose, quiet, keepDB); err != nil {
+			failure := fmt.Errorf("project %q: %w", name, err)
+			ui.PrintWarning(failure.Error())
+			failures = append(failures, failure)
+		}
+		fmt.Println()
+	}
+
+	return errors.Join(failures...)
 }
 
 type pruneProjectDependencies struct {
@@ -95,8 +146,11 @@ func pruneProjectWithDependencies(
 	force, dryRun, verbose, quiet, keepDB bool,
 	deps pruneProjectDependencies,
 ) error {
+	var failures []error
 	if err := deps.fetchOrigin(pc.GitDir); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Could not fetch origin: %v", err))
+		failure := fmt.Errorf("fetching origin: %w", err)
+		ui.PrintWarning(failure.Error())
+		failures = append(failures, failure)
 	}
 
 	worktrees, err := deps.listWorktrees(pc.GitDir)
@@ -117,6 +171,7 @@ func pruneProjectWithDependencies(
 		merged, err := deps.isMerged(pc.GitDir, wt.Branch, remoteTarget)
 		if err != nil {
 			ui.PrintErrorWithHint(fmt.Sprintf("Error checking %s", wt.Branch), err.Error())
+			failures = append(failures, fmt.Errorf("worktree %q: checking merge status: %w", wt.Branch, err))
 			continue
 		}
 
@@ -129,6 +184,9 @@ func pruneProjectWithDependencies(
 	}
 
 	if len(removable) == 0 {
+		if err := errors.Join(failures...); err != nil {
+			return err
+		}
 		ui.PrintDone("No merged worktrees to remove.")
 		return nil
 	}
@@ -160,11 +218,13 @@ func pruneProjectWithDependencies(
 		}
 	}
 
-	ui.PrintInfo(fmt.Sprintf("Removing %d worktree(s):", len(toRemove)))
-	for _, wt := range toRemove {
-		ui.PrintSuccessPath("Removed", wt.Path)
+	if dryRun {
+		ui.PrintInfo(fmt.Sprintf("[DRY RUN] Would remove %d worktree(s):", len(toRemove)))
+	} else {
+		ui.PrintInfo(fmt.Sprintf("Removing %d worktree(s):", len(toRemove)))
 	}
 
+	var removalErrors []error
 	for _, wt := range toRemove {
 		ui.PrintStep(fmt.Sprintf("Removing %s...", wt.Branch))
 
@@ -176,7 +236,10 @@ func pruneProjectWithDependencies(
 			deps.removeLifecycle.readLocalState,
 		)
 		if err != nil {
-			return fmt.Errorf("preparing cleanup for %s: %w", wt.Branch, err)
+			failure := fmt.Errorf("worktree %q: preparing cleanup: %w", wt.Branch, err)
+			ui.PrintWarning(failure.Error())
+			removalErrors = append(removalErrors, failure)
+			continue
 		}
 		cleanupOpts.Verbose = verbose
 		cleanupOpts.Quiet = quiet
@@ -188,16 +251,19 @@ func pruneProjectWithDependencies(
 			cleanupMessages,
 			deps.removeLifecycle,
 		); err != nil {
-			return fmt.Errorf("removing %s: %w", wt.Branch, err)
+			failure := fmt.Errorf("worktree %q: %w", wt.Branch, err)
+			ui.PrintWarning(failure.Error())
+			removalErrors = append(removalErrors, failure)
+			continue
+		}
+		if !dryRun {
+			ui.PrintSuccessPath("Removed", wt.Path)
 		}
 	}
 
-	return nil
+	return errors.Join(append(failures, removalErrors...)...)
 }
 
 func init() {
 	rootCmd.AddCommand(pruneCmd)
-
-	pruneCmd.Flags().BoolP("force", "f", false, "Skip interactive confirmation")
-	pruneCmd.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
 }
