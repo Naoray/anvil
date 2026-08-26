@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -200,7 +201,8 @@ func TestInstallCompletionPreservesZshCaches(t *testing.T) {
 	os.Stdin = reader
 	t.Cleanup(func() {
 		os.Stdin = oldStdin
-		_ = reader.Close()
+		reportCleanupError(t, "close completion installer stdin reader", reader.Close())
+		reportCleanupError(t, "close completion installer stdin writer", writer.Close())
 	})
 	if _, err := writer.WriteString("y\n"); err != nil {
 		t.Fatalf("confirm completion installation: %v", err)
@@ -256,29 +258,39 @@ func captureStderr(t *testing.T, fn func()) string {
 	stderrFD := int(os.Stderr.Fd())
 	originalFD, err := syscall.Dup(stderrFD)
 	if err != nil {
-		_ = reader.Close()
-		_ = writer.Close()
+		reportCleanupError(t, "close stderr reader after duplicating stderr", reader.Close())
+		reportCleanupError(t, "close stderr writer after duplicating stderr", writer.Close())
 		t.Fatalf("duplicate stderr: %v", err)
 	}
 	if err := syscall.Dup2(int(writer.Fd()), stderrFD); err != nil {
-		_ = syscall.Close(originalFD)
-		_ = reader.Close()
-		_ = writer.Close()
+		reportCleanupError(t, "close duplicated stderr after redirect failure", syscall.Close(originalFD))
+		reportCleanupError(t, "close stderr reader after redirect failure", reader.Close())
+		reportCleanupError(t, "close stderr writer after redirect failure", writer.Close())
 		t.Fatalf("redirect stderr: %v", err)
 	}
 
+	restored := false
+	restoreStderr := func() error {
+		if restored {
+			return nil
+		}
+		if err := syscall.Dup2(originalFD, stderrFD); err != nil {
+			return err
+		}
+		restored = true
+		return nil
+	}
+
 	defer func() {
-		_ = syscall.Dup2(originalFD, stderrFD)
-		_ = syscall.Close(originalFD)
-		_ = reader.Close()
-		_ = writer.Close()
+		reportCleanupError(t, "restore stderr during capture cleanup", restoreStderr())
+		reportCleanupError(t, "close duplicated stderr", syscall.Close(originalFD))
+		reportCleanupError(t, "close captured stderr reader", reader.Close())
+		reportCleanupError(t, "close captured stderr writer", writer.Close())
 	}()
 
 	fn()
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close stderr pipe: %v", err)
-	}
-	if err := syscall.Dup2(originalFD, stderrFD); err != nil {
+	reportCleanupError(t, "close captured stderr writer", writer.Close())
+	if err := restoreStderr(); err != nil {
 		t.Fatalf("restore stderr: %v", err)
 	}
 
@@ -287,4 +299,12 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("read captured stderr: %v", err)
 	}
 	return string(captured)
+}
+
+func reportCleanupError(t *testing.T, operation string, err error) {
+	t.Helper()
+	if err == nil || errors.Is(err, os.ErrClosed) {
+		return
+	}
+	t.Errorf("%s: %v", operation, err)
 }
