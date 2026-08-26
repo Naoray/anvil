@@ -7,6 +7,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
 
@@ -22,6 +23,7 @@ against origin/<default-branch>, and provides an interactive review before remov
 		dryRun := mustGetBool(cmd, "dry-run")
 		verbose := mustGetBool(cmd, "verbose")
 		quiet := mustGetBool(cmd, "quiet")
+		keepDB := mustGetBool(cmd, "keep-db")
 
 		globalCfg, err := config.LoadOrCreateGlobalConfig()
 		if err != nil {
@@ -40,7 +42,7 @@ against origin/<default-branch>, and provides an interactive review before remov
 				ui.PrintWarning(fmt.Sprintf("Skipping %s: %v", name, err))
 				continue
 			}
-			if err := pruneProject(pc, force, dryRun, verbose, quiet); err != nil {
+			if err := pruneProject(pc, force, dryRun, verbose, quiet, keepDB); err != nil {
 				ui.PrintWarning(fmt.Sprintf("Error pruning %s: %v", name, err))
 			}
 			fmt.Println()
@@ -50,13 +52,54 @@ against origin/<default-branch>, and provides an interactive review before remov
 	},
 }
 
+type pruneProjectDependencies struct {
+	fetchOrigin     func(string) error
+	listWorktrees   func(string) ([]git.Worktree, error)
+	isMerged        func(string, string, string) (bool, error)
+	removeLifecycle removeLifecycleDependencies
+}
+
+func defaultPruneProjectDependencies() pruneProjectDependencies {
+	return pruneProjectDependencies{
+		fetchOrigin:   git.FetchOrigin,
+		listWorktrees: git.ListWorktrees,
+		isMerged:      git.IsMerged,
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState:  config.ReadLocalState,
+			scaffoldManager: func(pc *ProjectContext) *scaffold.ScaffoldManager { return pc.ScaffoldManager() },
+			detectPreset:    func(pc *ProjectContext, path string) string { return pc.PresetManager().Detect(path) },
+			removeWorktree:  git.RemoveWorktree,
+		},
+	}
+}
+
 // pruneProject fetches origin and removes merged worktrees for a single project.
-func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool) error {
-	if err := git.FetchOrigin(pc.GitDir); err != nil {
+func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool, keepDB ...bool) error {
+	keepDatabases := false
+	if len(keepDB) > 0 {
+		keepDatabases = keepDB[0]
+	}
+	return pruneProjectWithDependencies(
+		pc,
+		force,
+		dryRun,
+		verbose,
+		quiet,
+		keepDatabases,
+		defaultPruneProjectDependencies(),
+	)
+}
+
+func pruneProjectWithDependencies(
+	pc *ProjectContext,
+	force, dryRun, verbose, quiet, keepDB bool,
+	deps pruneProjectDependencies,
+) error {
+	if err := deps.fetchOrigin(pc.GitDir); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Could not fetch origin: %v", err))
 	}
 
-	worktrees, err := git.ListWorktrees(pc.GitDir)
+	worktrees, err := deps.listWorktrees(pc.GitDir)
 	if err != nil {
 		return fmt.Errorf("listing worktrees: %w", err)
 	}
@@ -71,7 +114,7 @@ func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool) error 
 			continue
 		}
 
-		merged, err := git.IsMerged(pc.GitDir, wt.Branch, remoteTarget)
+		merged, err := deps.isMerged(pc.GitDir, wt.Branch, remoteTarget)
 		if err != nil {
 			ui.PrintErrorWithHint(fmt.Sprintf("Error checking %s", wt.Branch), err.Error())
 			continue
@@ -125,22 +168,27 @@ func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool) error 
 	for _, wt := range toRemove {
 		ui.PrintStep(fmt.Sprintf("Removing %s...", wt.Branch))
 
-		if !dryRun {
-			preset := pc.Config.Preset
-			if preset == "" {
-				preset = pc.PresetManager().Detect(wt.Path)
-			}
-
-			siteName := worktreeSiteName(wt.Path, wt.Branch, pc.DefaultBranch, pc.Config.SiteName)
-			if err := pc.ScaffoldManager().RunCleanup(wt.Path, wt.Branch, "", siteName, preset, pc.Config, false, verbose, quiet); err != nil {
-				ui.PrintErrorWithHint("Cleanup failed", err.Error())
-			}
-
-			if err := git.RemoveWorktree(pc.GitDir, wt.Path, true); err != nil {
-				ui.PrintErrorWithHint(fmt.Sprintf("Error removing %s", wt.Branch), err.Error())
-			}
-		} else {
-			ui.PrintInfo(fmt.Sprintf("[DRY RUN] Would remove %s and run cleanup", wt.Branch))
+		cleanupOpts, cleanupMessages, err := planWorktreeCleanup(
+			wt.Path,
+			keepDB,
+			dryRun,
+			force,
+			deps.removeLifecycle.readLocalState,
+		)
+		if err != nil {
+			return fmt.Errorf("preparing cleanup for %s: %w", wt.Branch, err)
+		}
+		cleanupOpts.Verbose = verbose
+		cleanupOpts.Quiet = quiet
+		if err := runRemoveLifecycle(
+			pc,
+			wt,
+			removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
+			cleanupOpts,
+			cleanupMessages,
+			deps.removeLifecycle,
+		); err != nil {
+			return fmt.Errorf("removing %s: %w", wt.Branch, err)
 		}
 	}
 
@@ -151,4 +199,5 @@ func init() {
 	rootCmd.AddCommand(pruneCmd)
 
 	pruneCmd.Flags().BoolP("force", "f", false, "Skip interactive confirmation")
+	pruneCmd.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
 }

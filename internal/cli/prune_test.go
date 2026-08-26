@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +12,8 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/scaffold"
+	"github.com/naoray/anvil/internal/scaffold/steps"
 )
 
 // makeTestProject creates a git repo with a local "origin" remote and returns
@@ -118,4 +122,53 @@ func TestPruneProject_DryRunDoesNotRemove(t *testing.T) {
 
 	_, err = os.Stat(wtPath)
 	assert.NoError(t, err, "dry-run should not remove the worktree")
+}
+
+func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
+	worktreePath := t.TempDir()
+	require.NoError(t, config.WriteLocalState(worktreePath, config.LocalState{Databases: []config.OwnedDatabase{
+		{Name: "app_feature_failed", Engine: "mysql", Role: config.DbRoleApplication},
+	}}))
+
+	client := steps.NewMockDatabaseClient()
+	client.SetDropError(errors.New("database cleanup failed"))
+	client.AddDatabase("app_feature_failed")
+	manager := scaffold.NewScaffoldManagerWithRegistry(&removeTestRegistry{
+		client: client,
+		output: &bytes.Buffer{},
+	})
+	manager.RegisterPreset(removeTestPreset{})
+
+	pc := &ProjectContext{
+		GitDir:        "git-dir",
+		DefaultBranch: "main",
+		Config:        &config.Config{Preset: "remove-test"},
+	}
+	removeCalls := 0
+	deps := pruneProjectDependencies{
+		fetchOrigin: func(string) error { return nil },
+		listWorktrees: func(string) ([]git.Worktree, error) {
+			return []git.Worktree{{Path: worktreePath, Branch: "feature-failed"}}, nil
+		},
+		isMerged: func(string, string, string) (bool, error) { return true, nil },
+		removeLifecycle: removeLifecycleDependencies{
+			readLocalState: func(string) (*config.LocalState, error) {
+				return &config.LocalState{Databases: []config.OwnedDatabase{
+					{Name: "app_feature_failed", Engine: "mysql", Role: config.DbRoleApplication},
+				}}, nil
+			},
+			scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
+			detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+			removeWorktree: func(string, string, bool) error {
+				removeCalls++
+				return nil
+			},
+		},
+	}
+
+	err := pruneProjectWithDependencies(pc, true, false, false, false, false, deps)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database cleanup failed")
+	assert.Zero(t, removeCalls, "Git removal must not run after cleanup failure")
 }
