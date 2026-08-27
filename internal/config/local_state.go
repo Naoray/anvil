@@ -14,6 +14,7 @@ import (
 const (
 	DbRoleApplication = "application"
 	DbRoleTesting     = "testing"
+	DbRoleAuxiliary   = "auxiliary"
 )
 
 var databaseIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
@@ -58,16 +59,18 @@ func ValidateOwnedDatabases(databases []OwnedDatabase) error {
 			seenNames[database.Name] = index
 		}
 		switch database.Role {
-		case DbRoleApplication, DbRoleTesting:
+		case DbRoleApplication, DbRoleTesting, DbRoleAuxiliary:
 			if firstIndex, exists := seenRoles[database.Role]; exists {
-				validationErrors = append(validationErrors,
-					fmt.Errorf("duplicate database role %q in record %d; first seen in record %d", database.Role, index, firstIndex))
+				if database.Role != DbRoleAuxiliary {
+					validationErrors = append(validationErrors,
+						fmt.Errorf("duplicate database role %q in record %d; first seen in record %d", database.Role, index, firstIndex))
+				}
 			} else {
 				seenRoles[database.Role] = index
 			}
 		default:
 			validationErrors = append(validationErrors,
-				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing", database.Role, database.Name))
+				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing, auxiliary", database.Role, database.Name))
 		}
 
 		switch DatabaseEngine(database.Engine) {

@@ -171,6 +171,18 @@ func TestValidateOwnedDatabases_ValidSingleEngine(t *testing.T) {
 	}
 }
 
+func TestValidateOwnedDatabases_AllowsMultipleAuxiliaryRecords(t *testing.T) {
+	err := ValidateOwnedDatabases([]OwnedDatabase{
+		{Name: "app", Engine: "mysql", Role: DbRoleApplication},
+		{Name: "quotes", Engine: "mysql", Role: "auxiliary"},
+		{Name: "knowledge", Engine: "mysql", Role: "auxiliary"},
+		{Name: "app_test", Engine: "mysql", Role: DbRoleTesting},
+	})
+	if err != nil {
+		t.Fatalf("ValidateOwnedDatabases() error = %v, want nil", err)
+	}
+}
+
 func TestValidateOwnedDatabases_RejectsDuplicateCardinalityInStateOrder(t *testing.T) {
 	err := ValidateOwnedDatabases([]OwnedDatabase{
 		{Name: "bad;first", Engine: "mysql", Role: DbRoleApplication},
