@@ -22,6 +22,7 @@ type FS interface {
 	WriteFile(path string, data []byte, perm os.FileMode) error
 
 	// AtomicWriteFile replaces the file at path with data and the given permissions.
+	// Platforms without POSIX permission bits apply only the permissions they support.
 	// Implementations must leave an existing destination unchanged when preparation fails.
 	AtomicWriteFile(path string, data []byte, perm os.FileMode) error
 

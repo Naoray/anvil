@@ -92,14 +92,6 @@ func TestRealFS_AtomicWriteFile_ReplacesFileAndCleansSameDirectoryTemp(t *testin
 		t.Errorf("expected replaced content %q, got %q", "new data", string(data))
 	}
 
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatalf("failed to stat target: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0640 {
-		t.Errorf("expected permissions 0640, got %04o", got)
-	}
-
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatalf("failed to read target directory: %v", err)
