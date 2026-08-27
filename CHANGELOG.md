@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.10.0](https://github.com/naoray/anvil/compare/v1.9.1...v1.10.0) - 2026-08-27
+
+### Added
+
+- **Complete worktree lifecycle state** — detached, branchless, stale, and primary worktrees retain enough identity for deterministic listing, selection, removal, pruning, and config synchronization.
+- **Complete database ownership history** — every Anvil-created application and testing database remains recorded for exact cleanup, while canonical roles keep `anvil exec` selection unambiguous.
+- **Atomic filesystem updates** — configuration and environment-copy writes now use durable atomic replacement with cross-platform cleanup coverage.
+
+### Changed
+
+- **Single-source scaffold execution** — step validation, preset catalogs, registry construction, and sequential progress now share authoritative per-run state.
+- **Shared removal lifecycle** — `anvil remove` and `anvil prune` use the same cleanup path while preserving dry-run and failure outcomes.
+- **Ownership-first cleanup** — database cleanup validates recorded ownership before dropping exact databases and their worker families; suffix matching remains a legacy fallback only.
+
+### Fixed
+
+- **Fail-closed lifecycle errors** — invalid global configuration, repair inspection failures, prune/remove failures, conflicting CLI modes, and database ownership conflicts no longer report misleading success.
+- **Safe database collisions** — MySQL existence errors use typed detection; only fresh application collisions rotate, while unowned application/testing collisions fail closed without changing ownership state.
+- **Exact auto-stash recovery** — sync tracks, restores, reports, and drops the exact stash OID with conflict-safe recovery guidance.
+- **Portable worktree identity and atomic writes** — path comparison, line endings, replacement behavior, and tests now work consistently across macOS, Linux, and Windows.
+- **Completion and scaffold reliability** — zsh cache files are preserved, cleanup failures remain visible, enabled conditions run once, and configured-step progress stays accurate.
+
+### Removed
+
+- **Parallel GoReleaser specification** — removed the unused `.goreleaser.yml`; the GitHub release workflow remains the sole release definition.
+
 ## [v1.9.1](https://github.com/naoray/anvil/compare/v1.9.0...v1.9.1) - 2026-08-10
 
 ### Fixed
