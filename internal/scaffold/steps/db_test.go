@@ -502,6 +502,62 @@ func TestDbCreateStep_TestingRoleExistsIsSuccessNoRotationPGContract(t *testing.
 	assert.Equal(t, "dashboard_top_provider_test", state.Databases[0].Name)
 }
 
+func TestDbCreateStep_TestingRoleFreshUnrecordedCollisionFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_top_provider_test")
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Role: config.DbRoleTesting,
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	err := step.Run(ctx, types.StepOptions{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not owned by this worktree")
+	assert.Equal(t, []string{"dashboard_top_provider_test"}, client.GetCreateCalls())
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	assert.Empty(t, state.DbSuffix)
+	assert.Empty(t, state.Databases)
+}
+
+func TestDbCreateStep_TestingRolePersistedUnrecordedCollisionFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("quotes_top_provider_test")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{{
+			Name: "dashboard_top_provider", Engine: "mysql", Role: config.DbRoleApplication,
+		}},
+	}))
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "mysql",
+		Role: config.DbRoleTesting,
+		Args: []string{"--prefix", "quotes"},
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+	ctx.SetDbSuffixLoadedFromState()
+
+	err := step.Run(ctx, types.StepOptions{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not owned by this worktree")
+	assert.Equal(t, []string{"quotes_top_provider_test"}, client.GetCreateCalls())
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	assert.Equal(t, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{{
+			Name: "dashboard_top_provider", Engine: "mysql", Role: config.DbRoleApplication,
+		}},
+	}, *state)
+}
+
 func TestDbCreateStep_TestingRoleNoSuffixOrSQLiteSkips(t *testing.T) {
 	t.Run("no suffix", func(t *testing.T) {
 		client := NewMockDatabaseClient()
