@@ -382,7 +382,7 @@ func (s *DbCreateStep) knownDatabaseCollision(
 		return false, fmt.Errorf("reading local state for database collision: %w", err)
 	}
 	if len(state.Databases) == 0 {
-		return ctx.DbSuffixFromLegacyState(), nil
+		return role == config.DbRoleApplication && ctx.DbSuffixFromLegacyState(), nil
 	}
 
 	for _, database := range state.Databases {

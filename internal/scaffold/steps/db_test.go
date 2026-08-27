@@ -761,6 +761,47 @@ func TestCreateWithRetry_ExistsOnPersistedSuffixUnrecordedApplicationPrefixRotat
 	}, state.Databases)
 }
 
+func TestCreateWithRetry_ExistsOnLegacySuffixOnlyStateAdoptsDatabase(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_top_provider")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{DbSuffix: "top_provider"}))
+	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+	ctx.SetDbSuffixLoadedFromState()
+	ctx.SetDbSuffixLoadedFromLegacyState()
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []config.OwnedDatabase{{
+		Name: "dashboard_top_provider", Engine: "pgsql", Role: config.DbRoleApplication,
+	}}, state.Databases)
+}
+
+func TestDbCreateStep_TestingRoleLegacySuffixOnlyCollisionFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("dashboard_top_provider_test")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{DbSuffix: "top_provider"}))
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "pgsql",
+		Role: config.DbRoleTesting,
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+	ctx.SetDbSuffixLoadedFromState()
+	ctx.SetDbSuffixLoadedFromLegacyState()
+
+	err := step.Run(ctx, types.StepOptions{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not owned by this worktree")
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	assert.Equal(t, config.LocalState{DbSuffix: "top_provider"}, *state)
+}
+
 func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {
 	dir := t.TempDir()
 	client := NewMockDatabaseClient()

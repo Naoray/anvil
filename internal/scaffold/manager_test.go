@@ -1,6 +1,8 @@
 package scaffold
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -196,6 +198,20 @@ func TestNewScaffoldManagerWithRegistry_RequiresExplicitRegistry(t *testing.T) {
 }
 
 func TestPrepareDbSuffixSetsProvenance(t *testing.T) {
+	t.Run("migrated legacy suffix", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "anvil.yaml"), []byte("db_suffix: top_provider\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		ctx := &types.ScaffoldContext{WorktreePath: dir}
+		if err := prepareDbSuffix(ctx, dir, false); err != nil {
+			t.Fatalf("prepareDbSuffix() error = %v", err)
+		}
+		if !ctx.DbSuffixFromState() || !ctx.DbSuffixFromLegacyState() {
+			t.Fatalf("migrated suffix provenance = state:%v legacy:%v", ctx.DbSuffixFromState(), ctx.DbSuffixFromLegacyState())
+		}
+	})
+
 	t.Run("persisted suffix", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := config.WriteLocalState(dir, config.LocalState{DbSuffix: "top_provider"}); err != nil {
@@ -205,7 +221,7 @@ func TestPrepareDbSuffixSetsProvenance(t *testing.T) {
 		if err := prepareDbSuffix(ctx, dir, false); err != nil {
 			t.Fatalf("prepareDbSuffix() error = %v", err)
 		}
-		if ctx.GetDbSuffix() != "top_provider" || !ctx.DbSuffixFromState() {
+		if ctx.GetDbSuffix() != "top_provider" || !ctx.DbSuffixFromState() || ctx.DbSuffixFromLegacyState() {
 			t.Fatalf("persisted suffix state = %q, provenance=%v", ctx.GetDbSuffix(), ctx.DbSuffixFromState())
 		}
 	})
