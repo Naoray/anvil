@@ -117,9 +117,10 @@ func ReadLocalState(worktreePath string) (*LocalState, error) {
 	return &state, nil
 }
 
-// WriteLocalState merges worktree-local state into .anvil.local. Canonical
-// database records replace by role, while distinct application records are
-// retained as auxiliary cleanup records. Unknown YAML fields are preserved.
+// WriteLocalState merges worktree-local state into .anvil.local. The first
+// record for each canonical role remains canonical, while distinct records
+// are retained as auxiliary cleanup records. Unknown YAML fields are
+// preserved.
 func WriteLocalState(worktreePath string, data LocalState) error {
 	configPath := filepath.Join(worktreePath, LocalStateFile)
 
@@ -188,8 +189,8 @@ func mergeOwnedDatabases(existingRaw any, updates []OwnedDatabase) ([]any, error
 	for _, update := range updates {
 		var err error
 		switch update.Role {
-		case DbRoleApplication:
-			records, err = mergeApplicationDatabase(records, update)
+		case DbRoleApplication, DbRoleTesting:
+			records, err = mergeCanonicalDatabase(records, update)
 		case DbRoleAuxiliary:
 			records, err = mergeAuxiliaryDatabase(records, update)
 		default:
@@ -206,12 +207,12 @@ func mergeOwnedDatabases(existingRaw any, updates []OwnedDatabase) ([]any, error
 	return records, nil
 }
 
-func mergeApplicationDatabase(records []any, update OwnedDatabase) ([]any, error) {
+func mergeCanonicalDatabase(records []any, update OwnedDatabase) ([]any, error) {
 	canonicalIndex := -1
 	for index, raw := range records {
 		record := raw.(map[string]any)
 		role, _ := record["role"].(string)
-		if role == DbRoleApplication {
+		if role == update.Role {
 			canonicalIndex = index
 			break
 		}
@@ -237,7 +238,7 @@ func mergeApplicationDatabase(records []any, update OwnedDatabase) ([]any, error
 		for index, raw := range records {
 			record := raw.(map[string]any)
 			role, _ := record["role"].(string)
-			if role == DbRoleApplication {
+			if role == update.Role {
 				if index != canonicalIndex {
 					continue
 				}
@@ -261,10 +262,10 @@ func mergeApplicationDatabase(records []any, update OwnedDatabase) ([]any, error
 		setOwnedDatabaseFields(record, OwnedDatabase{
 			Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
 		})
-		return removeDuplicateRole(records, DbRoleApplication, canonicalIndex), nil
+		return removeDuplicateRole(records, update.Role, canonicalIndex), nil
 	}
 
-	return appendOwnedDatabase(removeDuplicateRole(records, DbRoleApplication, canonicalIndex), OwnedDatabase{
+	return appendOwnedDatabase(removeDuplicateRole(records, update.Role, canonicalIndex), OwnedDatabase{
 		Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
 	}), nil
 }

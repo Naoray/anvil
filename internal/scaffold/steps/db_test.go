@@ -563,6 +563,30 @@ func TestDbCreateStep_MultipleApplicationRolesPersistCanonicalAndAuxiliaryDataba
 	assert.Equal(t, want, state.Databases)
 }
 
+func TestDbCreateStep_MultipleTestingRolesPersistCanonicalAndAuxiliaryDatabases(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	for _, prefix := range []string{"app", "quotes"} {
+		step := NewDbCreateStepWithFactory(config.StepConfig{
+			Type: "mysql",
+			Role: config.DbRoleTesting,
+			Args: []string{"--prefix", prefix},
+		}, MockClientFactory(client))
+		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	}
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	want := []config.OwnedDatabase{
+		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "quotes_top_provider_test", Engine: "mysql", Role: config.DbRoleAuxiliary},
+	}
+	assert.Equal(t, want, state.Databases)
+}
+
 func TestDbCreateStep_MultipleApplicationRolesAreIdempotentOnRescaffold(t *testing.T) {
 	dir := t.TempDir()
 	client := NewMockDatabaseClient()

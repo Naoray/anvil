@@ -403,12 +403,12 @@ databases:
     role: testing
 ```
 
-- `role: application` (the default) is the regular app database step; its
-  first created database is the canonical application record. Additional
-  distinct application databases are retained as cleanup-only `auxiliary`
-  records, so every database remains eligible for exact cleanup. `auxiliary`
-  is an internal ownership role and is not valid in a user-configured
-  `db.create` step.
+- `role: application` (the default) and `role: testing` each use the
+  first-created database for that role as the canonical record used by
+  `anvil exec`. Additional distinct application or testing databases are
+  retained as cleanup-only `auxiliary` records, so every database remains
+  eligible for exact cleanup. `auxiliary` is an internal ownership role and
+  is not valid in a user-configured `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
   Laravel's parallel-worker suffixes still fit MySQL's 64 and PostgreSQL's 63
   identifier limits), creates it empty — no migrations; your test runner

@@ -50,7 +50,7 @@ func TestReadLocalState_LegacySuffixOnly(t *testing.T) {
 	}
 }
 
-func TestWriteLocalState_CanonicalReplaceByRole(t *testing.T) {
+func TestWriteLocalState_CanonicalAndAuxiliaryByRole(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteLocalState(dir, LocalState{
 		DbSuffix: "top_provider",
@@ -75,13 +75,14 @@ func TestWriteLocalState_CanonicalReplaceByRole(t *testing.T) {
 	if state.DbSuffix != "top_provider" {
 		t.Fatalf("DbSuffix = %q, want top_provider", state.DbSuffix)
 	}
-	if len(state.Databases) != 3 {
+	if len(state.Databases) != 4 {
 		t.Fatalf("Databases = %#v, want canonical records plus auxiliary history", state.Databases)
 	}
 	want := []OwnedDatabase{
 		{Name: "app_old", Engine: "pgsql", Role: DbRoleApplication},
-		{Name: "app_new_test", Engine: "pgsql", Role: DbRoleTesting},
+		{Name: "app_old_test", Engine: "pgsql", Role: DbRoleTesting},
 		{Name: "app_new", Engine: "pgsql", Role: DbRoleAuxiliary},
+		{Name: "app_new_test", Engine: "pgsql", Role: DbRoleAuxiliary},
 	}
 	for i := range want {
 		if state.Databases[i] != want[i] {
@@ -116,6 +117,47 @@ func TestWriteLocalState_PreservesDistinctApplicationDatabases(t *testing.T) {
 		if state.Databases[i] != want[i] {
 			t.Fatalf("Databases[%d] = %#v, want %#v", i, state.Databases[i], want[i])
 		}
+	}
+}
+
+func TestWriteLocalState_PreservesDistinctTestingDatabases(t *testing.T) {
+	dir := t.TempDir()
+	writeTestLocalState(t, dir, "databases:\n  - name: app\n    engine: mysql\n    role: application\n  - name: app_old_test\n    engine: mysql\n    role: testing\n    custom_rec: keep-too\n")
+
+	for _, database := range []OwnedDatabase{
+		{Name: "app_old_test", Engine: "mysql", Role: DbRoleTesting},
+		{Name: "app_new_test", Engine: "mysql", Role: DbRoleTesting},
+		{Name: "app_new_test", Engine: "mysql", Role: DbRoleTesting},
+	} {
+		if err := WriteLocalState(dir, LocalState{Databases: []OwnedDatabase{database}}); err != nil {
+			t.Fatalf("WriteLocalState(%q) error = %v", database.Name, err)
+		}
+	}
+
+	state, err := ReadLocalState(dir)
+	if err != nil {
+		t.Fatalf("ReadLocalState() error = %v", err)
+	}
+	want := []OwnedDatabase{
+		{Name: "app", Engine: "mysql", Role: DbRoleApplication},
+		{Name: "app_old_test", Engine: "mysql", Role: DbRoleTesting},
+		{Name: "app_new_test", Engine: "mysql", Role: DbRoleAuxiliary},
+	}
+	if len(state.Databases) != len(want) {
+		t.Fatalf("Databases = %#v, want canonical testing plus auxiliary history", state.Databases)
+	}
+	for i := range want {
+		if state.Databases[i] != want[i] {
+			t.Fatalf("Databases[%d] = %#v, want %#v", i, state.Databases[i], want[i])
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, LocalStateFile))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(raw), "custom_rec: keep-too") {
+		t.Fatalf("rewritten state lost unknown canonical field:\n%s", raw)
 	}
 }
 
@@ -185,8 +227,17 @@ func TestWriteLocalState_PrunesDuplicateCanonicalRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLocalState() error = %v", err)
 	}
-	if len(state.Databases) != 1 || state.Databases[0].Name != "canonical_test" {
-		t.Fatalf("Databases = %#v, want one canonical testing record", state.Databases)
+	want := []OwnedDatabase{
+		{Name: "first_test", Engine: "mysql", Role: DbRoleTesting},
+		{Name: "canonical_test", Engine: "mysql", Role: DbRoleAuxiliary},
+	}
+	if len(state.Databases) != len(want) {
+		t.Fatalf("Databases = %#v, want one canonical testing record plus auxiliary history", state.Databases)
+	}
+	for i := range want {
+		if state.Databases[i] != want[i] {
+			t.Fatalf("Databases[%d] = %#v, want %#v", i, state.Databases[i], want[i])
+		}
 	}
 }
 
