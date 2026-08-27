@@ -190,6 +190,24 @@ func TestWriteLocalState_PrunesDuplicateCanonicalRoles(t *testing.T) {
 	}
 }
 
+func TestWriteLocalState_PrunesDuplicateCanonicalApplicationRoles(t *testing.T) {
+	dir := t.TempDir()
+	writeTestLocalState(t, dir, "databases:\n  - name: first_app\n    engine: mysql\n    role: application\n  - name: stale_app\n    engine: mysql\n    role: application\n")
+
+	if err := WriteLocalState(dir, LocalState{Databases: []OwnedDatabase{{
+		Name: "first_app", Engine: "mysql", Role: DbRoleApplication,
+	}}}); err != nil {
+		t.Fatalf("WriteLocalState() error = %v", err)
+	}
+	state, err := ReadLocalState(dir)
+	if err != nil {
+		t.Fatalf("ReadLocalState() error = %v", err)
+	}
+	if len(state.Databases) != 1 || state.Databases[0].Name != "first_app" || state.Databases[0].Role != DbRoleApplication {
+		t.Fatalf("Databases = %#v, want one canonical application record", state.Databases)
+	}
+}
+
 func TestWriteLocalState_PreservesUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	seed := "db_suffix: top_provider\ncustom_top: keep\ndatabases:\n  - name: app_old\n    engine: pgsql\n    role: application\n    custom_rec: keep-too\n  - name: weird\n    engine: pgsql\n    role: someday-role\n"

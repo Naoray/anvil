@@ -233,8 +233,19 @@ func mergeApplicationDatabase(records []any, update OwnedDatabase) ([]any, error
 	canonical := records[canonicalIndex].(map[string]any)
 	canonicalName, _ := canonical["name"].(string)
 	if canonicalName == update.Name {
-		setOwnedDatabaseFields(canonical, update)
-		return records, nil
+		next := make([]any, 0, len(records))
+		for index, raw := range records {
+			record := raw.(map[string]any)
+			role, _ := record["role"].(string)
+			if role == DbRoleApplication {
+				if index != canonicalIndex {
+					continue
+				}
+				setOwnedDatabaseFields(record, update)
+			}
+			next = append(next, record)
+		}
+		return next, nil
 	}
 
 	for _, raw := range records {
@@ -250,10 +261,10 @@ func mergeApplicationDatabase(records []any, update OwnedDatabase) ([]any, error
 		setOwnedDatabaseFields(record, OwnedDatabase{
 			Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
 		})
-		return records, nil
+		return removeDuplicateRole(records, DbRoleApplication, canonicalIndex), nil
 	}
 
-	return appendOwnedDatabase(records, OwnedDatabase{
+	return appendOwnedDatabase(removeDuplicateRole(records, DbRoleApplication, canonicalIndex), OwnedDatabase{
 		Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
 	}), nil
 }
@@ -309,6 +320,18 @@ func setOwnedDatabaseFields(record map[string]any, database OwnedDatabase) {
 	record["name"] = database.Name
 	record["engine"] = database.Engine
 	record["role"] = database.Role
+}
+
+func removeDuplicateRole(records []any, role string, keepIndex int) []any {
+	next := make([]any, 0, len(records))
+	for index, raw := range records {
+		record := raw.(map[string]any)
+		if recordRole, _ := record["role"].(string); recordRole == role && index != keepIndex {
+			continue
+		}
+		next = append(next, record)
+	}
+	return next
 }
 
 func validateMergedDatabaseNames(records []any) error {

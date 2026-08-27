@@ -404,7 +404,11 @@ databases:
 ```
 
 - `role: application` (the default) is the regular app database step; its
-  create persists an ownership record.
+  first created database is the canonical application record. Additional
+  distinct application databases are retained as cleanup-only `auxiliary`
+  records, so every database remains eligible for exact cleanup. `auxiliary`
+  is an internal ownership role and is not valid in a user-configured
+  `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
   Laravel's parallel-worker suffixes still fit MySQL's 64 and PostgreSQL's 63
   identifier limits), creates it empty — no migrations; your test runner
@@ -766,7 +770,8 @@ All steps support template variables that are replaced at runtime:
 - Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
-- Persists suffix to `.anvil.local` for cleanup
+- Persists the suffix and every created database to `.anvil.local` for exact
+  cleanup
 
 **Multiple databases with shared suffix:**
 
@@ -790,8 +795,9 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
   type: mysql  # matches db.create type
 ```
 
-- Reads `.anvil.local` ownership records and drops those exact databases, then
-  enumerates their Laravel parallel-worker databases
+- Reads `.anvil.local` ownership records and drops every exact database,
+  including cleanup-only `auxiliary` records, then enumerates their Laravel
+  parallel-worker databases
 - For pre-v1.8 worktrees without ownership records, falls back to suffix-based
   discovery
 - Runs automatically during `anvil remove`
