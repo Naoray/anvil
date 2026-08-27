@@ -374,8 +374,10 @@ func TestDbCreateConfig_RoleValidation(t *testing.T) {
 			t.Errorf("role %q rejected: %v", role, err)
 		}
 	}
-	if err := ValidateStepConfig(StepDbCreate, StepConfig{Role: "staging"}); err == nil || !strings.Contains(err.Error(), "invalid role") {
-		t.Fatalf("invalid role error = %v", err)
+	for _, role := range []string{"staging", DbRoleAuxiliary} {
+		if err := ValidateStepConfig(StepDbCreate, StepConfig{Role: role}); err == nil || !strings.Contains(err.Error(), "invalid role") {
+			t.Fatalf("invalid role %q error = %v", role, err)
+		}
 	}
 }
 
