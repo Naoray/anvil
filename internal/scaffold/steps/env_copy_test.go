@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/fs"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
@@ -237,4 +239,25 @@ func TestEnvCopyStep(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "MISSING_KEY")
 	})
+}
+
+func TestEnvCopyStep_PreservesDestinationWhenAtomicWriteFails(t *testing.T) {
+	sourceDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".env"), []byte("API_KEY=new_secret\n"), 0644))
+
+	filesystem := &fs.RealFS{}
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, ".env")
+	original := []byte("API_KEY=old_secret\n")
+	require.NoError(t, os.WriteFile(targetPath, original, 0600))
+	failingFS := &atomicWriteFailureFS{FS: filesystem, err: errors.New("injected atomic write failure")}
+
+	step := NewEnvCopyStepWithFS(config.StepConfig{Source: sourceDir, Key: "API_KEY"}, failingFS)
+	err := step.Run(&types.ScaffoldContext{WorktreePath: targetDir}, types.StepOptions{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "writing target file")
+	content, readErr := filesystem.ReadFile(targetPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, string(original), string(content))
 }

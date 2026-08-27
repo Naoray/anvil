@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,70 +67,6 @@ func TestBranchExists(t *testing.T) {
 
 	if BranchExists(gitDir, "nonexistent") {
 		t.Error("nonexistent branch should not exist")
-	}
-}
-
-func TestListBranches(t *testing.T) {
-	repoDir := createTestRepo(t)
-	gitDir := filepath.Join(repoDir, ".git")
-	tmpDir := filepath.Dir(repoDir)
-
-	featurePath := filepath.Join(tmpDir, "feature")
-	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
-		t.Fatalf("creating feature worktree: %v", err)
-	}
-
-	branches, err := ListBranches(gitDir)
-	if err != nil {
-		t.Fatalf("listing branches: %v", err)
-	}
-
-	featureFound := false
-	for _, b := range branches {
-		if b == "feature" {
-			featureFound = true
-			break
-		}
-	}
-
-	if !featureFound {
-		t.Error("feature branch should be in list")
-	}
-}
-
-func TestListAllBranches(t *testing.T) {
-	repoDir := createTestRepo(t)
-	gitDir := filepath.Join(repoDir, ".git")
-
-	branches, err := ListAllBranches(gitDir)
-	if err != nil {
-		t.Fatalf("listing all branches: %v", err)
-	}
-
-	found := false
-	for _, b := range branches {
-		if b == "main" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("main branch should be in list")
-	}
-}
-
-func TestListRemoteBranches(t *testing.T) {
-	repoDir := createTestRepo(t)
-	gitDir := filepath.Join(repoDir, ".git")
-
-	branches, err := ListRemoteBranches(gitDir)
-	if err != nil {
-		t.Fatalf("listing remote branches: %v", err)
-	}
-
-	if len(branches) != 0 {
-		t.Errorf("expected 0 remote branches, got %d", len(branches))
 	}
 }
 
@@ -230,6 +167,171 @@ func TestListWorktrees(t *testing.T) {
 
 	assert.True(t, branches["main"], "should have main worktree")
 	assert.True(t, branches["feature"], "should have feature worktree")
+}
+
+func TestPathsEqual_HandlesGitAndOSPathRepresentations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "feature worktree")
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatalf("creating worktree path: %v", err)
+	}
+
+	if !PathsEqual(path, filepath.ToSlash(path)) {
+		t.Errorf("expected OS path %q and Git path %q to identify the same worktree", path, filepath.ToSlash(path))
+	}
+	if PathsEqual(path, filepath.Join(filepath.Dir(path), "other worktree")) {
+		t.Error("different worktree paths should not compare equal")
+	}
+}
+
+func TestListWorktrees_RetainsDetachedAndLockedRecords(t *testing.T) {
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	featurePath := filepath.Join(t.TempDir(), "feature worktree")
+
+	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
+		t.Fatalf("creating feature worktree: %v", err)
+	}
+
+	cmd := exec.Command("git", "-C", featurePath, "checkout", "--detach")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detaching worktree: %v\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "-C", repoDir, "worktree", "lock", "--reason", "keep for review", featurePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("locking worktree: %v\n%s", err, output)
+	}
+	worktrees, err := ListWorktrees(gitDir)
+	if err != nil {
+		t.Fatalf("listing worktrees: %v", err)
+	}
+
+	var feature *Worktree
+	for i := range worktrees {
+		if PathsEqual(worktrees[i].Path, featurePath) {
+			feature = &worktrees[i]
+			break
+		}
+	}
+
+	if feature == nil {
+		t.Fatal("detached and locked worktree should be retained")
+	}
+	if !feature.Detached {
+		t.Error("worktree should be marked detached")
+	}
+	if !feature.Locked {
+		t.Error("worktree should be marked locked")
+	}
+	if feature.LockReason != "keep for review" {
+		t.Errorf("expected lock reason %q, got %q", "keep for review", feature.LockReason)
+	}
+}
+
+func TestParseWorktreePorcelain_RetainsStatesAndUnknownFields(t *testing.T) {
+	fixture := []byte(
+		"worktree /repo/main\x00HEAD abc\x00branch refs/heads/main\x00unknown ignored\x00branching ignored\x00barely ignored\x00lockedly ignored\x00worktreeish ignored\x00locked\x00\x00" +
+			"worktree /repo/detached worktree\x00HEAD def\x00detached\x00locked keep this\x00\x00" +
+			"worktree /repo/bare worktree\x00HEAD ghi\x00bare\x00unknown value\x00\x00",
+	)
+
+	worktrees, err := parseWorktreePorcelain(fixture)
+	if err != nil {
+		t.Fatalf("parsing fixture: %v", err)
+	}
+
+	if len(worktrees) != 3 {
+		t.Fatalf("expected 3 worktrees, got %d", len(worktrees))
+	}
+
+	if worktrees[0].Path != "/repo/main" || worktrees[0].Branch != "main" || !worktrees[0].Locked || worktrees[0].LockReason != "" {
+		t.Errorf("unexpected attached record: %+v", worktrees[0])
+	}
+	if worktrees[1].Path != "/repo/detached worktree" || !worktrees[1].Detached || !worktrees[1].Locked || worktrees[1].LockReason != "keep this" {
+		t.Errorf("unexpected detached record: %+v", worktrees[1])
+	}
+	if worktrees[2].Path != "/repo/bare worktree" || !worktrees[2].Bare || worktrees[2].Branch != "" {
+		t.Errorf("unexpected bare record: %+v", worktrees[2])
+	}
+}
+
+func TestParseWorktreePorcelain_RejectsMalformedRecords(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture string
+		want    string
+	}{
+		{
+			name:    "missing path",
+			fixture: "HEAD abc\x00branch refs/heads/main\x00\x00",
+			want:    "missing worktree path",
+		},
+		{
+			name:    "missing primary state",
+			fixture: "worktree /repo\x00HEAD abc\x00unknown ignored\x00\x00",
+			want:    "missing primary worktree state",
+		},
+		{
+			name:    "malformed branch",
+			fixture: "worktree /repo\x00branch main\x00\x00",
+			want:    "malformed branch attribute",
+		},
+		{
+			name:    "conflicting detached branch",
+			fixture: "worktree /repo\x00branch refs/heads/main\x00detached\x00\x00",
+			want:    "conflicts with detached or bare state",
+		},
+		{
+			name:    "malformed detached",
+			fixture: "worktree /repo\x00detached unexpected\x00\x00",
+			want:    "malformed detached attribute",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseWorktreePorcelain([]byte(tt.fixture))
+			if err == nil {
+				t.Fatal("expected malformed fixture to fail")
+			}
+			if !strings.Contains(err.Error(), "record 0") || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected record context containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestListWorktreesDetailed_RetainsDetachedWithoutMergeStatus(t *testing.T) {
+	repoDir := createTestRepo(t)
+	gitDir := filepath.Join(repoDir, ".git")
+	featurePath := filepath.Join(t.TempDir(), "detached worktree")
+
+	if err := CreateWorktree(gitDir, featurePath, "feature", "main"); err != nil {
+		t.Fatalf("creating feature worktree: %v", err)
+	}
+	cmd := exec.Command("git", "-C", featurePath, "checkout", "--detach")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("detaching worktree: %v\n%s", err, output)
+	}
+
+	worktrees, err := ListWorktreesDetailed(gitDir, repoDir, "main")
+	if err != nil {
+		t.Fatalf("listing detailed worktrees: %v", err)
+	}
+
+	var detached *Worktree
+	for i := range worktrees {
+		if worktrees[i].Detached {
+			detached = &worktrees[i]
+			break
+		}
+	}
+	if detached == nil {
+		t.Fatal("detached worktree should be retained in detailed listing")
+	}
+	if detached.IsMerged {
+		t.Error("detached worktree should not have merge status")
+	}
 }
 
 func TestRemoveWorktree(t *testing.T) {
@@ -613,6 +715,33 @@ func TestSortWorktrees_ByBranch(t *testing.T) {
 	for i, branch := range branches {
 		if branch != expected[i] {
 			t.Errorf("expected worktree %d to have branch %s, got %s", i, expected[i], branch)
+		}
+	}
+}
+
+func TestSortWorktrees_TieBreaksEmptyBranchesByPath(t *testing.T) {
+	worktrees := []Worktree{
+		{Path: "/worktrees/z-detached", Detached: true},
+		{Path: "/worktrees/a-bare", Bare: true},
+		{Path: "/worktrees/a-detached", Detached: true},
+		{Path: "/worktrees/z-bare", Bare: true},
+	}
+
+	sorted := SortWorktrees(worktrees, "branch", false)
+	paths := make([]string, len(sorted))
+	for i, worktree := range sorted {
+		paths[i] = worktree.Path
+	}
+
+	expected := []string{
+		"/worktrees/a-bare",
+		"/worktrees/a-detached",
+		"/worktrees/z-bare",
+		"/worktrees/z-detached",
+	}
+	for i, path := range expected {
+		if paths[i] != path {
+			t.Errorf("expected path %d to be %s, got %s", i, path, paths[i])
 		}
 	}
 }

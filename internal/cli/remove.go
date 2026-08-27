@@ -11,6 +11,7 @@ import (
 	"github.com/naoray/anvil/internal/config"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
@@ -58,12 +59,7 @@ func planRemoveCleanup(
 	messages := make([]string, 0, 2)
 	if len(state.Databases) > 0 {
 		names := make([]string, 0, len(state.Databases))
-		seen := make(map[string]struct{}, len(state.Databases))
 		for _, database := range state.Databases {
-			if _, exists := seen[database.Name]; exists {
-				continue
-			}
-			seen[database.Name] = struct{}{}
 			names = append(names, database.Name)
 		}
 		messages = append(messages, fmt.Sprintf(
@@ -82,6 +78,77 @@ func planRemoveCleanup(
 	return opts, messages, nil
 }
 
+type removeLifecycleOptions struct {
+	DryRun  bool
+	Verbose bool
+	Quiet   bool
+}
+
+type removeLifecycleDependencies struct {
+	readLocalState  func(string) (*config.LocalState, error)
+	scaffoldManager func(*ProjectContext) *scaffold.ScaffoldManager
+	resolvePreset   func(*ProjectContext, string, string) presets.ResolvedPreset
+	removeWorktree  func(string, string, bool) error
+	printInfo       func(string)
+}
+
+func planWorktreeCleanup(
+	worktreePath string,
+	keepDB, dryRun, force bool,
+	readLocalState func(string) (*config.LocalState, error),
+) (scaffold.CleanupOptions, []string, error) {
+	state, stateErr := readLocalState(worktreePath)
+	return planRemoveCleanup(state, stateErr, keepDB, dryRun, force)
+}
+
+func runRemoveLifecycle(
+	pc *ProjectContext,
+	worktree git.Worktree,
+	options removeLifecycleOptions,
+	cleanupOpts scaffold.CleanupOptions,
+	cleanupMessages []string,
+	deps removeLifecycleDependencies,
+) error {
+	cleanupOpts.DryRun = options.DryRun
+	cleanupOpts.Verbose = options.Verbose
+	cleanupOpts.Quiet = options.Quiet
+	for _, message := range cleanupMessages {
+		deps.printInfoMessage(message)
+	}
+
+	resolvedPreset := deps.resolvePreset(pc, "", worktree.Path)
+
+	if options.Verbose && resolvedPreset.Name() != "" {
+		deps.printInfoMessage(fmt.Sprintf("Running cleanup for preset: %s", resolvedPreset.Name()))
+	}
+
+	if resolvedPreset.Name() != "" {
+		siteName := worktreeSiteName(worktree.Path, worktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
+		if err := deps.scaffoldManager(pc).RunCleanupWithOptions(
+			worktree.Path,
+			worktree.Branch,
+			"",
+			siteName,
+			resolvedPreset.Name(),
+			resolvedPreset.CleanupSteps(),
+			pc.Config,
+			cleanupOpts,
+		); err != nil {
+			return fmt.Errorf("cleanup for worktree %q: %w", worktree.Branch, err)
+		}
+	}
+
+	if options.DryRun {
+		deps.printInfoMessage(fmt.Sprintf("[DRY RUN] Would remove %s at %s", worktree.Branch, worktree.Path))
+		return nil
+	}
+
+	if err := deps.removeWorktree(pc.GitDir, worktree.Path, true); err != nil {
+		return fmt.Errorf("removing worktree: %w", err)
+	}
+	return nil
+}
+
 type removeCommandDependencies struct {
 	openProject      func() (*ProjectContext, error)
 	getwd            func() (string, error)
@@ -92,7 +159,8 @@ type removeCommandDependencies struct {
 	deleteBranch     func(string, string, bool) error
 	readLocalState   func(string) (*config.LocalState, error)
 	scaffoldManager  func(*ProjectContext) *scaffold.ScaffoldManager
-	detectPreset     func(*ProjectContext, string) string
+	resolvePreset    func(*ProjectContext, string, string) presets.ResolvedPreset
+	printInfo        func(string)
 }
 
 func defaultRemoveCommandDependencies() removeCommandDependencies {
@@ -106,7 +174,9 @@ func defaultRemoveCommandDependencies() removeCommandDependencies {
 		deleteBranch:     git.DeleteBranch,
 		readLocalState:   config.ReadLocalState,
 		scaffoldManager:  func(pc *ProjectContext) *scaffold.ScaffoldManager { return pc.ScaffoldManager() },
-		detectPreset:     func(pc *ProjectContext, path string) string { return pc.PresetManager().Detect(path) },
+		resolvePreset: func(pc *ProjectContext, explicit, path string) presets.ResolvedPreset {
+			return pc.ResolvePreset(explicit, path)
+		},
 	}
 }
 
@@ -127,160 +197,174 @@ Cleanup steps may include:
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeWorktreeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pc, err := deps.openProject()
-			if err != nil {
-				return err
-			}
-
-			force := mustGetBool(cmd, "force")
-			dryRun := mustGetBool(cmd, "dry-run")
-			verbose := mustGetBool(cmd, "verbose")
-			quiet := mustGetBool(cmd, "quiet")
-			keepDB := mustGetBool(cmd, "keep-db")
-
-			currentWorktreePath, err := deps.getwd()
-			if err != nil {
-				return fmt.Errorf("getting current directory: %w", err)
-			}
-
-			defaultBranch, err := deps.getDefaultBranch(pc.GitDir)
-			if err != nil {
-				return fmt.Errorf("getting default branch: %w", err)
-			}
-
-			worktrees, err := deps.listWorktrees(pc.GitDir, currentWorktreePath, defaultBranch)
-			if err != nil {
-				return fmt.Errorf("listing worktrees: %w", err)
-			}
-
-			var targetWorktree *git.Worktree
-
-			if len(args) > 0 {
-				folderName := args[0]
-				for _, wt := range worktrees {
-					if filepath.Base(wt.Path) == folderName {
-						targetWorktree = &wt
-						break
-					}
-				}
-				if targetWorktree == nil {
-					return fmt.Errorf("worktree '%s' not found: %w", folderName, anvilerrors.ErrWorktreeNotFound)
-				}
-			} else if ui.IsInteractive() {
-				selected, err := ui.SelectWorktreeToRemove(worktrees)
-				if err != nil {
-					return fmt.Errorf("selecting worktree: %w", err)
-				}
-				targetWorktree = selected
-			} else {
-				return fmt.Errorf("worktree folder name required (run interactively or use --force to skip prompts)")
-			}
-
-			if targetWorktree.IsMain {
-				return fmt.Errorf("cannot remove main worktree")
-			}
-
-			state, stateErr := deps.readLocalState(targetWorktree.Path)
-			cleanupOpts, cleanupMessages, err := planRemoveCleanup(state, stateErr, keepDB, dryRun, force)
-			if err != nil {
-				return err
-			}
-			cleanupOpts.Verbose = verbose
-			cleanupOpts.Quiet = quiet
-			for _, message := range cleanupMessages {
-				ui.PrintInfo(message)
-			}
-
-			ui.PrintInfo(fmt.Sprintf("Removing %s at %s", targetWorktree.Branch, targetWorktree.Path))
-
-			deleteBranch := false
-			if !force {
-				if !ui.IsInteractive() {
-					return fmt.Errorf("worktree removal requires confirmation (use --force to skip)")
-				}
-
-				ui.PrintInfo("This will run cleanup steps.")
-				confirmed, err := ui.Confirm(fmt.Sprintf("Remove worktree '%s'?", targetWorktree.Branch))
-				if err != nil {
-					return fmt.Errorf("confirmation: %w", err)
-				}
-				if !confirmed {
-					ui.PrintInfo("Cancelled.")
-					return nil
-				}
-
-				if deps.branchExists(pc.GitDir, targetWorktree.Branch) {
-					deleteBranch, err = ui.Confirm(fmt.Sprintf("Also delete branch '%s'?", targetWorktree.Branch))
-					if err != nil {
-						return fmt.Errorf("branch deletion confirmation: %w", err)
-					}
-				}
-			} else {
-				deleteBranch = mustGetBool(cmd, "delete-branch")
-			}
-
-			ui.PrintStep("Removing worktree")
-
-			preset := pc.Config.Preset
-			if preset == "" {
-				preset = deps.detectPreset(pc, targetWorktree.Path)
-			}
-
-			if verbose && preset != "" {
-				ui.PrintInfo(fmt.Sprintf("Running cleanup for preset: %s", preset))
-			}
-
-			if preset != "" {
-				siteName := worktreeSiteName(targetWorktree.Path, targetWorktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
-				if err := deps.scaffoldManager(pc).RunCleanupWithOptions(
-					targetWorktree.Path,
-					targetWorktree.Branch,
-					"",
-					siteName,
-					preset,
-					pc.Config,
-					cleanupOpts,
-				); err != nil {
-					ui.PrintErrorWithHint("Cleanup failed", err.Error())
-				}
-			}
-
-			if !dryRun {
-				if err := deps.removeWorktree(pc.GitDir, targetWorktree.Path, true); err != nil {
-					return fmt.Errorf("removing worktree: %w", err)
-				}
-				ui.PrintSuccessPath("Removed", targetWorktree.Path)
-
-				if deleteBranch && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
-					if err := deps.deleteBranch(pc.GitDir, targetWorktree.Branch, true); err != nil {
-						ui.PrintErrorWithHint("Failed to delete branch", err.Error())
-					} else {
-						ui.PrintSuccess(fmt.Sprintf("Deleted branch '%s'", targetWorktree.Branch))
-					}
-				}
-
-				parentDir := filepath.Dir(targetWorktree.Path)
-				entries, err := os.ReadDir(parentDir)
-				if err == nil && len(entries) == 0 {
-					if err := os.Remove(parentDir); err != nil {
-						ui.PrintErrorWithHint(fmt.Sprintf("Could not remove empty directory %s", parentDir), err.Error())
-					}
-				}
-			} else {
-				ui.PrintInfo("[DRY RUN] Would remove worktree")
-				if deleteBranch {
-					ui.PrintInfo("[DRY RUN] Would delete branch")
-				}
-			}
-
-			ui.PrintDone("Worktree removed")
-			return nil
+			return runRemove(cmd, args, deps)
 		},
 	}
 	command.Flags().BoolP("force", "f", false, "Skip confirmation and cleanup prompts")
 	command.Flags().Bool("delete-branch", false, "Also delete the branch after removing worktree")
 	command.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
 	return command
+}
+
+func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies) error {
+	pc, err := deps.openProject()
+	if err != nil {
+		return err
+	}
+
+	force := mustGetBool(cmd, "force")
+	dryRun := mustGetBool(cmd, "dry-run")
+	verbose := mustGetBool(cmd, "verbose")
+	quiet := mustGetBool(cmd, "quiet")
+	keepDB := mustGetBool(cmd, "keep-db")
+
+	currentWorktreePath, err := deps.getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	defaultBranch, err := deps.getDefaultBranch(pc.GitDir)
+	if err != nil {
+		return fmt.Errorf("getting default branch: %w", err)
+	}
+
+	worktrees, err := deps.listWorktrees(pc.GitDir, currentWorktreePath, defaultBranch)
+	if err != nil {
+		return fmt.Errorf("listing worktrees: %w", err)
+	}
+
+	var targetWorktree *git.Worktree
+
+	if len(args) > 0 {
+		folderName := args[0]
+		for _, wt := range worktrees {
+			if filepath.Base(wt.Path) == folderName {
+				targetWorktree = &wt
+				break
+			}
+		}
+		if targetWorktree == nil {
+			return fmt.Errorf("worktree '%s' not found: %w", folderName, anvilerrors.ErrWorktreeNotFound)
+		}
+	} else if ui.IsInteractive() {
+		selected, err := ui.SelectWorktreeToRemove(worktrees)
+		if err != nil {
+			return fmt.Errorf("selecting worktree: %w", err)
+		}
+		targetWorktree = selected
+	} else {
+		return fmt.Errorf("worktree folder name required (run interactively or use --force to skip prompts)")
+	}
+
+	if targetWorktree.IsMain {
+		return fmt.Errorf("cannot remove main worktree")
+	}
+	if targetWorktree.Bare {
+		return fmt.Errorf("cannot remove bare worktree")
+	}
+	if targetWorktree.Locked {
+		if targetWorktree.LockReason == "" {
+			return fmt.Errorf("cannot remove locked worktree")
+		}
+		return fmt.Errorf("cannot remove locked worktree: %s", targetWorktree.LockReason)
+	}
+
+	cleanupOpts, cleanupMessages, err := planWorktreeCleanup(
+		targetWorktree.Path,
+		keepDB,
+		dryRun,
+		force,
+		deps.readLocalState,
+	)
+	if err != nil {
+		return err
+	}
+
+	ui.PrintInfo(fmt.Sprintf("Removing %s at %s", worktreeBranchLabel(*targetWorktree), targetWorktree.Path))
+
+	deleteBranch := false
+	if !force {
+		if !ui.IsInteractive() {
+			return fmt.Errorf("worktree removal requires confirmation (use --force to skip)")
+		}
+
+		ui.PrintInfo("This will run cleanup steps.")
+		confirmed, err := ui.Confirm(fmt.Sprintf("Remove worktree '%s'?", worktreeBranchLabel(*targetWorktree)))
+		if err != nil {
+			return fmt.Errorf("confirmation: %w", err)
+		}
+		if !confirmed {
+			ui.PrintInfo("Cancelled.")
+			return nil
+		}
+
+		if !targetWorktree.Detached && targetWorktree.Branch != "" && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
+			deleteBranch, err = ui.Confirm(fmt.Sprintf("Also delete branch '%s'?", targetWorktree.Branch))
+			if err != nil {
+				return fmt.Errorf("branch deletion confirmation: %w", err)
+			}
+		}
+	} else {
+		deleteBranch = mustGetBool(cmd, "delete-branch")
+	}
+
+	ui.PrintStep("Removing worktree")
+	if err := runRemoveLifecycle(
+		pc,
+		*targetWorktree,
+		removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
+		cleanupOpts,
+		cleanupMessages,
+		deps.lifecycleDependencies(),
+	); err != nil {
+		return err
+	}
+
+	if !dryRun {
+		ui.PrintSuccessPath("Removed", targetWorktree.Path)
+		if deleteBranch && !targetWorktree.Detached && targetWorktree.Branch != "" && deps.branchExists(pc.GitDir, targetWorktree.Branch) {
+			if err := deps.deleteBranch(pc.GitDir, targetWorktree.Branch, true); err != nil {
+				ui.PrintErrorWithHint("Failed to delete branch", err.Error())
+			} else {
+				ui.PrintSuccess(fmt.Sprintf("Deleted branch '%s'", targetWorktree.Branch))
+			}
+		}
+
+		parentDir := filepath.Dir(targetWorktree.Path)
+		entries, err := os.ReadDir(parentDir)
+		if err == nil && len(entries) == 0 {
+			if err := os.Remove(parentDir); err != nil {
+				ui.PrintErrorWithHint(fmt.Sprintf("Could not remove empty directory %s", parentDir), err.Error())
+			}
+		}
+	} else if deleteBranch && !targetWorktree.Detached && targetWorktree.Branch != "" {
+		ui.PrintInfo("[DRY RUN] Would delete branch")
+	}
+
+	if dryRun {
+		ui.PrintInfo("[DRY RUN] Worktree removal planned")
+	} else {
+		ui.PrintDone("Worktree removed")
+	}
+	return nil
+}
+
+func (deps removeCommandDependencies) lifecycleDependencies() removeLifecycleDependencies {
+	return removeLifecycleDependencies{
+		readLocalState:  deps.readLocalState,
+		scaffoldManager: deps.scaffoldManager,
+		resolvePreset:   deps.resolvePreset,
+		removeWorktree:  deps.removeWorktree,
+		printInfo:       deps.printInfo,
+	}
+}
+
+func (deps removeLifecycleDependencies) printInfoMessage(message string) {
+	if deps.printInfo != nil {
+		deps.printInfo(message)
+		return
+	}
+	ui.PrintInfo(message)
 }
 
 func init() {

@@ -3,7 +3,6 @@ package scaffold
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
@@ -26,7 +25,6 @@ type StepExecutor struct {
 	opts         types.StepOptions
 	executorOpts ExecutorOptions
 	results      []ExecutionResult
-	mu           sync.Mutex
 	completedCnt int
 	skippedCnt   int
 }
@@ -49,148 +47,33 @@ func NewStepExecutorWithOptions(
 	}
 }
 
+// Execute runs each configured step sequentially. A StepExecutor has one
+// owner; callers must not invoke Execute or Results concurrently.
 func (e *StepExecutor) Execute() error {
 	e.results = make([]ExecutionResult, 0, len(e.steps))
 	e.completedCnt = 0
 	e.skippedCnt = 0
 
-	// Count active steps for progress tracking
-	activeSteps := e.countActiveSteps()
-	currentStep := 0
+	// Eligibility is evaluated as each step reaches its turn, so earlier steps
+	// can change the context used by later conditions.
+	totalSteps := len(e.steps)
 
 	// Execute steps sequentially in the order they were provided
 	// Preset steps come first, followed by config steps
-	for _, step := range e.steps {
-		// Check if step is enabled
-		enabled := true
-		if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok {
-			enabled = stepConfig.IsEnabled()
-		}
-
-		if !enabled {
-			e.mu.Lock()
-			e.results = append(e.results, ExecutionResult{
-				Step:    step,
-				Skipped: true,
-			})
-			e.skippedCnt++
-			e.mu.Unlock()
+	for stepIndex, step := range e.steps {
+		// Progress uses the configured ordinal, including skipped steps.
+		currentStep := stepIndex + 1
+		eligible, skipReason := e.evaluateEligibility(step)
+		if !eligible {
+			e.recordResult(step, nil, true)
 			if e.opts.Verbose {
-				fmt.Printf("Skipping step (disabled): %s\n", step.Name())
+				fmt.Printf("Skipping step (%s): %s\n", skipReason, step.Name())
 			}
 			continue
 		}
 
-		// Check condition
-		if !step.Condition(e.ctx) {
-			e.mu.Lock()
-			e.results = append(e.results, ExecutionResult{
-				Step:    step,
-				Skipped: true,
-			})
-			e.skippedCnt++
-			e.mu.Unlock()
-			if e.opts.Verbose {
-				fmt.Printf("Skipping step (condition not met): %s\n", step.Name())
-			}
-			continue
-		}
-
-		// Increment current step counter
-		currentStep++
-
-		// Execute the step based on mode
-		if e.opts.Verbose {
-			// Verbose mode: print detailed output
-			fmt.Printf("[%d/%d] Executing step: %s\n", currentStep, activeSteps, step.Name())
-
-			if e.opts.DryRun && !e.executorOpts.DelegateDryRunToSteps {
-				fmt.Printf("[DRY-RUN] Would execute: %s\n", step.Name())
-				e.mu.Lock()
-				e.results = append(e.results, ExecutionResult{
-					Step: step,
-				})
-				e.completedCnt++
-				e.mu.Unlock()
-			} else {
-				if err := step.Run(e.ctx, e.opts); err != nil {
-					e.mu.Lock()
-					e.results = append(e.results, ExecutionResult{
-						Step:  step,
-						Error: err,
-					})
-					e.mu.Unlock()
-					return fmt.Errorf("step %s failed: %w", step.Name(), err)
-				}
-				e.mu.Lock()
-				e.results = append(e.results, ExecutionResult{
-					Step: step,
-				})
-				e.completedCnt++
-				e.mu.Unlock()
-				if !e.opts.DryRun {
-					fmt.Printf("✓ [%d/%d] %s completed\n", currentStep, activeSteps, step.Name())
-				}
-			}
-		} else if !e.opts.Quiet {
-			// Normal mode: use spinner
-			if e.opts.DryRun {
-				if e.executorOpts.DelegateDryRunToSteps {
-					if err := step.Run(e.ctx, e.opts); err != nil {
-						e.mu.Lock()
-						e.results = append(e.results, ExecutionResult{
-							Step:  step,
-							Error: err,
-						})
-						e.mu.Unlock()
-						return fmt.Errorf("step %s failed: %w", step.Name(), err)
-					}
-				} else {
-					desc := getStepDescription(step)
-					fmt.Printf("[DRY-RUN] [%d/%d] Would execute: %s\n", currentStep, activeSteps, desc)
-				}
-				e.mu.Lock()
-				e.results = append(e.results, ExecutionResult{
-					Step: step,
-				})
-				e.completedCnt++
-				e.mu.Unlock()
-			} else {
-				if err := e.executeWithSpinner(step, currentStep, activeSteps); err != nil {
-					e.mu.Lock()
-					e.results = append(e.results, ExecutionResult{
-						Step:  step,
-						Error: err,
-					})
-					e.mu.Unlock()
-					return fmt.Errorf("step %s failed: %w", step.Name(), err)
-				}
-				e.mu.Lock()
-				e.results = append(e.results, ExecutionResult{
-					Step: step,
-				})
-				e.completedCnt++
-				e.mu.Unlock()
-			}
-		} else {
-			// Quiet mode: silent execution
-			if !e.opts.DryRun || e.executorOpts.DelegateDryRunToSteps {
-				if err := step.Run(e.ctx, e.opts); err != nil {
-					e.mu.Lock()
-					e.results = append(e.results, ExecutionResult{
-						Step:  step,
-						Error: err,
-					})
-					e.mu.Unlock()
-					return fmt.Errorf("step %s failed: %w", step.Name(), err)
-				}
-			}
-			e.mu.Lock()
-			e.results = append(e.results, ExecutionResult{
-				Step: step,
-			})
-			e.completedCnt++
-			e.mu.Unlock()
+		if err := e.executeStep(step, currentStep, totalSteps); err != nil {
+			return err
 		}
 	}
 
@@ -204,6 +87,84 @@ func (e *StepExecutor) Execute() error {
 
 func (e *StepExecutor) Results() []ExecutionResult {
 	return e.results
+}
+
+func (e *StepExecutor) evaluateEligibility(step types.ScaffoldStep) (bool, string) {
+	if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok && !stepConfig.IsEnabled() {
+		return false, "disabled"
+	}
+	if !step.Condition(e.ctx) {
+		return false, "condition not met"
+	}
+	return true, ""
+}
+
+func (e *StepExecutor) executeStep(step types.ScaffoldStep, current, total int) error {
+	err := e.presentStep(step, current, total)
+	e.recordResult(step, err, false)
+	if err != nil {
+		return fmt.Errorf("step %s failed: %w", step.Name(), err)
+	}
+	return nil
+}
+
+func (e *StepExecutor) presentStep(step types.ScaffoldStep, current, total int) error {
+	if e.opts.Verbose {
+		return e.executeVerbose(step, current, total)
+	}
+	if !e.opts.Quiet {
+		return e.executeSpinner(step, current, total)
+	}
+	return e.executeQuiet(step)
+}
+
+func (e *StepExecutor) executeVerbose(step types.ScaffoldStep, current, total int) error {
+	fmt.Printf("[%d/%d] Executing step: %s\n", current, total, step.Name())
+
+	if e.opts.DryRun && !e.executorOpts.DelegateDryRunToSteps {
+		fmt.Printf("[DRY-RUN] Would execute: %s\n", step.Name())
+		return nil
+	}
+
+	if err := step.Run(e.ctx, e.opts); err != nil {
+		return err
+	}
+	if !e.opts.DryRun {
+		fmt.Printf("✓ [%d/%d] %s completed\n", current, total, step.Name())
+	}
+	return nil
+}
+
+func (e *StepExecutor) executeSpinner(step types.ScaffoldStep, current, total int) error {
+	if e.opts.DryRun {
+		if e.executorOpts.DelegateDryRunToSteps {
+			return step.Run(e.ctx, e.opts)
+		}
+		desc := getStepDescription(step)
+		fmt.Printf("[DRY-RUN] [%d/%d] Would execute: %s\n", current, total, desc)
+		return nil
+	}
+	return e.executeWithSpinner(step, current, total)
+}
+
+func (e *StepExecutor) executeQuiet(step types.ScaffoldStep) error {
+	if !e.opts.DryRun || e.executorOpts.DelegateDryRunToSteps {
+		return step.Run(e.ctx, e.opts)
+	}
+	return nil
+}
+
+func (e *StepExecutor) recordResult(step types.ScaffoldStep, err error, skipped bool) {
+	e.results = append(e.results, ExecutionResult{
+		Step:    step,
+		Error:   err,
+		Skipped: skipped,
+	})
+	if skipped {
+		e.skippedCnt++
+	} else if err == nil {
+		e.completedCnt++
+	}
 }
 
 // getStepDescription returns a friendly description for a step
@@ -277,22 +238,6 @@ func getStepDescription(step types.ScaffoldStep) string {
 	return fmt.Sprintf("%s (%s)", baseDesc, stepName)
 }
 
-// countActiveSteps counts steps that will actually run (not skipped)
-func (e *StepExecutor) countActiveSteps() int {
-	count := 0
-	for _, step := range e.steps {
-		enabled := true
-		if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok {
-			enabled = stepConfig.IsEnabled()
-		}
-
-		if enabled && step.Condition(e.ctx) {
-			count++
-		}
-	}
-	return count
-}
-
 // executeWithSpinner runs a step with a spinner showing progress
 func (e *StepExecutor) executeWithSpinner(step types.ScaffoldStep, current, total int) error {
 	desc := getStepDescription(step)
@@ -313,9 +258,6 @@ func (e *StepExecutor) executeWithSpinner(step types.ScaffoldStep, current, tota
 
 // printSummary prints a summary of execution results
 func (e *StepExecutor) printSummary() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if e.completedCnt > 0 || e.skippedCnt > 0 {
 		summary := fmt.Sprintf("%d step", e.completedCnt)
 		if e.completedCnt != 1 {

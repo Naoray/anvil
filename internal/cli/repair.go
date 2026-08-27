@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,10 +13,27 @@ import (
 	"github.com/naoray/anvil/internal/ui"
 )
 
-var repairCmd = &cobra.Command{
-	Use:   "repair",
-	Short: "Repair git configuration for existing anvil project",
-	Long: `Fixes fetch refspec and branch tracking configuration for an existing anvil project.
+type repairCommandDependencies struct {
+	openProject          func() (*ProjectContext, error)
+	repairFetchRefspec   func(*ProjectContext, bool, bool) error
+	repairBranchTracking func(*ProjectContext, bool, bool) error
+}
+
+func defaultRepairCommandDependencies() repairCommandDependencies {
+	return repairCommandDependencies{
+		openProject:          OpenProjectFromCWD,
+		repairFetchRefspec:   repairFetchRefspec,
+		repairBranchTracking: repairBranchTracking,
+	}
+}
+
+var repairCmd = newRepairCommand(defaultRepairCommandDependencies())
+
+func newRepairCommand(deps repairCommandDependencies) *cobra.Command {
+	command := &cobra.Command{
+		Use:   "repair",
+		Short: "Repair git configuration for existing anvil project",
+		Long: `Fixes fetch refspec and branch tracking configuration for an existing anvil project.
 
 Use this command if:
 - Fetch refspec was not configured
@@ -27,38 +45,44 @@ This will:
 2. Set up tracking for all local branches that don't have it (unless --refspec-only)
 
 This command is idempotent and safe to run multiple times.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		pc, err := OpenProjectFromCWD()
-		if err != nil {
-			return err
-		}
-
-		dryRun := mustGetBool(cmd, "dry-run")
-		verbose := mustGetBool(cmd, "verbose")
-		refspecOnly := mustGetBool(cmd, "refspec-only")
-		trackingOnly := mustGetBool(cmd, "tracking-only")
-
-		if refspecOnly && trackingOnly {
-			return fmt.Errorf("cannot use --refspec-only and --tracking-only together")
-		}
-
-		// Phase 1: Fix fetch refspec
-		if !trackingOnly {
-			if err := repairFetchRefspec(pc, dryRun, verbose); err != nil {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pc, err := deps.openProject()
+			if err != nil {
 				return err
 			}
-		}
 
-		// Phase 2: Fix branch tracking
-		if !refspecOnly {
-			if err := repairBranchTracking(pc, dryRun, verbose); err != nil {
-				return err
+			dryRun := mustGetBool(cmd, "dry-run")
+			verbose := mustGetBool(cmd, "verbose")
+			refspecOnly := mustGetBool(cmd, "refspec-only")
+			trackingOnly := mustGetBool(cmd, "tracking-only")
+
+			if refspecOnly && trackingOnly {
+				return fmt.Errorf("cannot use --refspec-only and --tracking-only together")
 			}
-		}
 
-		ui.PrintDone("Repair complete")
-		return nil
-	},
+			// Phase 1: Fix fetch refspec
+			if !trackingOnly {
+				if err := deps.repairFetchRefspec(pc, dryRun, verbose); err != nil {
+					return err
+				}
+			}
+
+			// Phase 2: Fix branch tracking
+			if !refspecOnly {
+				if err := deps.repairBranchTracking(pc, dryRun, verbose); err != nil {
+					return err
+				}
+			}
+
+			ui.PrintDone("Repair complete")
+			return nil
+		},
+	}
+	command.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+	command.Flags().Bool("refspec-only", false, "Only repair fetch refspec, skip branch tracking")
+	command.Flags().Bool("tracking-only", false, "Only repair branch tracking, skip fetch refspec")
+
+	return command
 }
 
 func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
@@ -88,16 +112,7 @@ func repairFetchRefspec(pc *ProjectContext, dryRun, verbose bool) error {
 			return fmt.Errorf("listing worktrees: %w", err)
 		}
 
-		for _, wt := range worktrees {
-			if wt.Branch == "(bare)" {
-				continue
-			}
-			url, err := git.GetRemoteURLFromWorktree(wt.Path)
-			if err == nil && url != "" {
-				remoteURL = url
-				break
-			}
-		}
+		remoteURL = remoteURLFromWorktrees(worktrees, git.GetRemoteURLFromWorktree)
 	}
 
 	// If still no URL, prompt user
@@ -203,8 +218,39 @@ func confirmOrEditURL(message, currentValue string) (bool, string, error) {
 	return false, "", nil
 }
 
+func remoteURLFromWorktrees(worktrees []git.Worktree, getRemoteURL func(string) (string, error)) string {
+	for _, wt := range worktrees {
+		if wt.Bare {
+			continue
+		}
+		url, err := getRemoteURL(wt.Path)
+		if err == nil && url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+type repairBranchTrackingDependencies struct {
+	getBranchRefs     func(string) ([]string, []string, error)
+	hasBranchTracking func(string, string) (bool, error)
+	setBranchUpstream func(string, string, string) error
+}
+
+func defaultRepairBranchTrackingDependencies() repairBranchTrackingDependencies {
+	return repairBranchTrackingDependencies{
+		getBranchRefs:     git.GetBranchRefs,
+		hasBranchTracking: git.HasBranchTracking,
+		setBranchUpstream: git.SetBranchUpstream,
+	}
+}
+
 func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
-	localBranches, remoteBranches, err := git.GetBranchRefs(pc.GitDir)
+	return repairBranchTrackingWithDependencies(pc, dryRun, verbose, defaultRepairBranchTrackingDependencies())
+}
+
+func repairBranchTrackingWithDependencies(pc *ProjectContext, dryRun, verbose bool, deps repairBranchTrackingDependencies) error {
+	localBranches, remoteBranches, err := deps.getBranchRefs(pc.GitDir)
 	if err != nil {
 		return fmt.Errorf("listing branches: %w", err)
 	}
@@ -220,12 +266,15 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 
 	fixed := 0
 	skipped := 0
+	var failures []error
 
 	for _, branch := range localBranches {
-		hasTracking, err := git.HasBranchTracking(pc.GitDir, branch)
+		hasTracking, err := deps.hasBranchTracking(pc.GitDir, branch)
 		if err != nil {
+			failure := fmt.Errorf("branch %q: checking tracking: %w", branch, err)
+			failures = append(failures, failure)
 			if verbose {
-				ui.PrintInfo(fmt.Sprintf("Could not check tracking for '%s': %v", branch, err))
+				ui.PrintWarning(failure.Error())
 			}
 			continue
 		}
@@ -252,8 +301,10 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 			continue
 		}
 
-		if err := git.SetBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
-			ui.PrintInfo(fmt.Sprintf("Could not set up tracking for '%s': %v", branch, err))
+		if err := deps.setBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
+			failure := fmt.Errorf("branch %q: setting upstream: %w", branch, err)
+			failures = append(failures, failure)
+			ui.PrintWarning(failure.Error())
 			continue
 		}
 
@@ -261,19 +312,17 @@ func repairBranchTracking(pc *ProjectContext, dryRun, verbose bool) error {
 		fixed++
 	}
 
-	if fixed == 0 && skipped > 0 {
-		ui.PrintInfo("All branches already have tracking configured")
-	} else if fixed == 0 {
-		ui.PrintInfo("No branches needed tracking configuration")
+	if len(failures) == 0 {
+		if fixed == 0 && skipped > 0 {
+			ui.PrintInfo("All branches already have tracking configured")
+		} else if fixed == 0 {
+			ui.PrintInfo("No branches needed tracking configuration")
+		}
 	}
 
-	return nil
+	return errors.Join(failures...)
 }
 
 func init() {
 	rootCmd.AddCommand(repairCmd)
-
-	repairCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
-	repairCmd.Flags().Bool("refspec-only", false, "Only repair fetch refspec, skip branch tracking")
-	repairCmd.Flags().Bool("tracking-only", false, "Only repair branch tracking, skip fetch refspec")
 }

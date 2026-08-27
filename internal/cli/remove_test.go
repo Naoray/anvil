@@ -16,6 +16,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
@@ -70,9 +71,13 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	}
 	var cleanupOutput bytes.Buffer
 	manager := scaffold.NewScaffoldManagerWithRegistry(&removeTestRegistry{client: client, output: &cleanupOutput})
-	manager.RegisterPreset(removeTestPreset{})
+	presetManager := presets.NewManager()
+	presetManager.Register(removeTestPreset{})
+	resolvedPreset := presetManager.Resolve("remove-test", "", worktreePath)
 	pc := &ProjectContext{GitDir: "git-dir", Config: &config.Config{Preset: "remove-test"}}
 	removeCalls := 0
+	resolveCalls := 0
+	var infoMessages []string
 	deps := removeCommandDependencies{
 		openProject:      func() (*ProjectContext, error) { return pc, nil },
 		getwd:            func() (string, error) { return "/main", nil },
@@ -88,7 +93,11 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 		deleteBranch:    func(string, string, bool) error { return nil },
 		readLocalState:  config.ReadLocalState,
 		scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
-		detectPreset:    func(*ProjectContext, string) string { return "remove-test" },
+		resolvePreset: func(*ProjectContext, string, string) presets.ResolvedPreset {
+			resolveCalls++
+			return resolvedPreset
+		},
+		printInfo: func(message string) { infoMessages = append(infoMessages, message) },
 	}
 
 	root := &cobra.Command{Use: "anvil"}
@@ -98,7 +107,11 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	root.AddCommand(newRemoveCommand(deps))
 	root.SetArgs([]string{"remove", filepath.Base(worktreePath), "--dry-run", "--force", "--quiet"})
 
-	require.NoError(t, root.Execute())
+	output := captureStdout(t, func() {
+		require.NoError(t, root.Execute())
+	})
+	assert.Contains(t, infoMessages, "[DRY RUN] Would remove agent/test at "+worktreePath)
+	assert.NotContains(t, output, "Worktree removed")
 	assert.Equal(t, "Would drop database: app_top_provider\n"+
 		"Would drop database: app_top_provider_test\n"+
 		"Would drop database: app_top_provider_test_1\n"+
@@ -107,6 +120,7 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	assert.Equal(t, []string{`app\_top\_provider\_test\_%`, `app\_top\_provider\_test\_test\_%`}, client.GetListCalls())
 	assert.Empty(t, client.GetDropCalls())
 	assert.Zero(t, removeCalls)
+	assert.Equal(t, 1, resolveCalls, "cleanup run should resolve its preset exactly once")
 	_, err = os.Stat(worktreePath)
 	require.NoError(t, err)
 	stateAfter, err := os.ReadFile(statePath)
@@ -118,7 +132,6 @@ func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
 	state := &config.LocalState{Databases: []config.OwnedDatabase{
 		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
 		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
-		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
 	}}
 
 	opts, messages, err := planRemoveCleanup(state, nil, true, false, false)
@@ -128,6 +141,48 @@ func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
 	assert.Equal(t, []string{
 		"Preserving databases: app_top_provider, app_top_provider_test (parallel worker databases are kept too; drop manually when done)",
 	}, messages)
+}
+
+func TestPlanRemoveCleanup_DuplicateOwnedStateHardStopsUnlessForce(t *testing.T) {
+	tests := []struct {
+		name  string
+		state *config.LocalState
+		want  string
+	}{
+		{
+			name: "duplicate role",
+			state: &config.LocalState{Databases: []config.OwnedDatabase{
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+				{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+				{Name: "worker_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+			}},
+			want: `duplicate database role "testing" in record 2; first seen in record 1`,
+		},
+		{
+			name: "duplicate name",
+			state: &config.LocalState{Databases: []config.OwnedDatabase{
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleTesting},
+			}},
+			want: `duplicate database name "app_top_provider" in record 1; first seen in record 0`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := planRemoveCleanup(tt.state, nil, false, false, false)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Contains(t, err.Error(), "--force")
+
+			opts, messages, err := planRemoveCleanup(tt.state, nil, false, false, true)
+			require.NoError(t, err)
+			assert.True(t, opts.SkipDatabaseCleanup)
+			require.Len(t, messages, 1)
+			assert.Contains(t, messages[0], "WARNING")
+			assert.Contains(t, messages[0], "databases will be left untouched and unrecorded")
+		})
+	}
 }
 
 func TestPlanRemoveCleanup_KeepDbLegacySuffixPattern(t *testing.T) {
@@ -246,6 +301,87 @@ func TestRemoveCmd_PreventsMainWorktreeDeletion(t *testing.T) {
 		_, err = os.Stat(featurePath)
 		assert.True(t, os.IsNotExist(err), "feature worktree should not exist after removal")
 	})
+}
+
+func TestRemoveCommand_RejectsBareAndLockedBeforeCleanup(t *testing.T) {
+	tests := []struct {
+		name string
+		wt   git.Worktree
+		want string
+	}{
+		{name: "bare", wt: git.Worktree{Path: "/worktrees/bare", Bare: true}, want: "cannot remove bare worktree"},
+		{name: "locked", wt: git.Worktree{Path: "/worktrees/locked", Branch: "feature-locked", Locked: true}, want: "cannot remove locked worktree"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanupCalls := 0
+			removeCalls := 0
+			deps := removeCommandDependencies{
+				openProject: func() (*ProjectContext, error) {
+					return &ProjectContext{GitDir: "git-dir", Config: &config.Config{}}, nil
+				},
+				getwd:            func() (string, error) { return "/main", nil },
+				getDefaultBranch: func(string) (string, error) { return "main", nil },
+				listWorktrees:    func(string, string, string) ([]git.Worktree, error) { return []git.Worktree{tt.wt}, nil },
+				branchExists:     func(string, string) bool { return false },
+				removeWorktree:   func(string, string, bool) error { removeCalls++; return nil },
+				deleteBranch:     func(string, string, bool) error { return nil },
+				readLocalState: func(string) (*config.LocalState, error) {
+					cleanupCalls++
+					return &config.LocalState{}, nil
+				},
+				scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return nil },
+				resolvePreset:   func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
+			}
+
+			root := &cobra.Command{Use: "anvil"}
+			root.PersistentFlags().Bool("dry-run", false, "")
+			root.PersistentFlags().Bool("verbose", false, "")
+			root.PersistentFlags().Bool("quiet", false, "")
+			root.AddCommand(newRemoveCommand(deps))
+			root.SetArgs([]string{"remove", filepath.Base(tt.wt.Path), "--force"})
+
+			err := root.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Zero(t, cleanupCalls, "state cleanup must not run for rejected records")
+			assert.Zero(t, removeCalls, "Git removal must not run for rejected records")
+		})
+	}
+}
+
+func TestRemoveCommand_DetachedWorktreeCannotDeleteBranch(t *testing.T) {
+	branchChecks := 0
+	deleteCalls := 0
+	removeCalls := 0
+	detached := git.Worktree{Path: "/worktrees/detached", Detached: true}
+	deps := removeCommandDependencies{
+		openProject: func() (*ProjectContext, error) {
+			return &ProjectContext{GitDir: "git-dir", Config: &config.Config{}}, nil
+		},
+		getwd:            func() (string, error) { return "/main", nil },
+		getDefaultBranch: func(string) (string, error) { return "main", nil },
+		listWorktrees:    func(string, string, string) ([]git.Worktree, error) { return []git.Worktree{detached}, nil },
+		branchExists:     func(string, string) bool { branchChecks++; return true },
+		removeWorktree:   func(string, string, bool) error { removeCalls++; return nil },
+		deleteBranch:     func(string, string, bool) error { deleteCalls++; return nil },
+		readLocalState:   func(string) (*config.LocalState, error) { return &config.LocalState{}, nil },
+		scaffoldManager:  func(*ProjectContext) *scaffold.ScaffoldManager { return nil },
+		resolvePreset:    func(*ProjectContext, string, string) presets.ResolvedPreset { return presets.ResolvedPreset{} },
+	}
+
+	root := &cobra.Command{Use: "anvil"}
+	root.PersistentFlags().Bool("dry-run", false, "")
+	root.PersistentFlags().Bool("verbose", false, "")
+	root.PersistentFlags().Bool("quiet", false, "")
+	root.AddCommand(newRemoveCommand(deps))
+	root.SetArgs([]string{"remove", "detached", "--force", "--delete-branch"})
+
+	require.NoError(t, root.Execute())
+	assert.Equal(t, 1, removeCalls)
+	assert.Zero(t, branchChecks, "detached removal must not inspect a branch")
+	assert.Zero(t, deleteCalls, "detached removal must not delete a branch")
 }
 
 func TestRemoveCmd_EmptyInputBehavior(t *testing.T) {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -20,7 +21,7 @@ The command will:
 1. Auto-stash changes (tracked modifications and untracked files) by default
 2. Fetch updates from the remote
 3. Rebase (default) or merge the current branch with upstream changes
-4. Restore stashed changes after successful sync
+4. Restore stashed changes after the sync attempt, including recoverable failures
 
 Note: Ignored files (node_modules, vendor, etc.) are not stashed for performance,
 as they are not modified by git during sync anyway.
@@ -29,7 +30,7 @@ Auto-stashing can be disabled with --no-auto-stash flag or by setting
 sync.auto_stash: false in anvil.yaml.
 
 Configuration can be set via flags, project config (anvil.yaml), or interactively.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		pc, err := OpenProjectFromCWD()
 		if err != nil {
 			return err
@@ -88,8 +89,8 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 			return fmt.Errorf("checking for changes: %w", err)
 		}
 
-		// Track whether we created a stash so we can pop it later
-		var stashCreated bool
+		// Track the exact stash we created so every later exit restores only it.
+		var stashOID string
 
 		if hasChanges && !autoStash {
 			// Auto-stash disabled but there are changes - warn the user
@@ -145,13 +146,10 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 		if shouldPrompt {
 			// Prompt for upstream if not set via flag or config
 			if upstreamFlag == "" && pc.Config.Sync.Upstream == "" {
-				localBranches, err := git.ListLocalBranches(pc.GitDir)
+				localBranches, remoteBranches, err := branchRefsForSelection(pc.GitDir)
 				if err != nil {
-					return fmt.Errorf("listing local branches: %w", err)
+					return err
 				}
-
-				// Best-effort: remote branches enhance UI selection but are not required
-				remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 				selected, err := ui.SelectUpstreamBranch(localBranches, remoteBranches, pc.DefaultBranch)
 				if err != nil {
@@ -199,10 +197,22 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 			}
 
 			if !dryRun {
-				if err := git.StashAll(pc.CWD, "anvil sync auto-stash"); err != nil {
+				createdOID, err := git.StashAll(pc.CWD, "anvil sync auto-stash")
+				if err != nil {
 					return fmt.Errorf("failed to stash changes: %w", err)
 				}
-				stashCreated = true
+				stashOID = createdOID
+				if stashOID != "" {
+					defer func() {
+						if restoreErr := finalizeAutoStash(pc.CWD, stashOID, quiet); restoreErr != nil {
+							if runErr == nil {
+								runErr = restoreErr
+							} else {
+								runErr = fmt.Errorf("%w; additionally, auto-stash restoration failed: %w", runErr, restoreErr)
+							}
+						}
+					}()
+				}
 				if !quiet {
 					ui.PrintSuccess("Changes stashed successfully")
 				}
@@ -247,43 +257,11 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 		}
 
 		if syncErr != nil {
-			// Leave stash intact on sync failure
-			if stashCreated && !quiet {
-				ui.PrintInfo("\nYour changes are preserved in the stash.")
-				ui.PrintInfo("After fixing the issue, run 'git stash pop' to restore them.")
-			}
 			return syncErr
 		}
 
 		if !quiet {
 			ui.PrintSuccess(fmt.Sprintf("Successfully synced with %s/%s using %s", remote, upstream, strategy))
-		}
-
-		// Pop the stash after successful sync
-		if stashCreated && !dryRun {
-			if verbose && !quiet {
-				ui.PrintInfo("Restoring stashed changes...")
-			}
-
-			popErr := git.PopStash(pc.CWD)
-			if popErr != nil {
-				// Check if it's a conflict error
-				if _, isConflict := popErr.(*git.StashConflictError); isConflict {
-					ui.PrintWarning("\nWarning: Could not automatically restore stashed changes due to conflicts")
-					ui.PrintInfo("\nYour changes have been safely preserved in the stash.")
-					ui.PrintInfo("To restore them, resolve conflicts and run:")
-					ui.PrintInfo("  git stash pop")
-					ui.PrintInfo("\nTo discard the stash:")
-					ui.PrintInfo("  git stash drop")
-				} else {
-					ui.PrintWarning(fmt.Sprintf("\nWarning: Failed to restore stashed changes: %v", popErr))
-					ui.PrintInfo("Your changes are still in the stash. Run 'git stash pop' to restore them manually.")
-				}
-			} else {
-				if !quiet {
-					ui.PrintSuccess("Stashed changes restored successfully")
-				}
-			}
 		}
 
 		// Save config if requested
@@ -316,6 +294,45 @@ Configuration can be set via flags, project config (anvil.yaml), or interactivel
 		ui.PrintDone(fmt.Sprintf("Branch '%s' is now in sync with '%s/%s'", currentBranch, remote, upstream))
 		return nil
 	},
+}
+
+func finalizeAutoStash(worktreePath string, stashOID string, quiet bool) error {
+	if !quiet {
+		ui.PrintInfo("Restoring stashed changes...")
+	}
+
+	if err := git.ApplyStash(worktreePath, stashOID); err != nil {
+		var conflictErr *git.StashConflictError
+		if errors.As(err, &conflictErr) {
+			ui.PrintWarning("\nWarning: Could not automatically restore stashed changes due to conflicts")
+			guidance := fmt.Sprintf("The conflicted worktree already contains the attempted application of auto-stash %s. Resolve and stage the conflicts, then verify the restored files. Locate the matching reflog selector with `%s`; after verification, drop only that entry with `git stash drop <matching-selector>`.", stashOID, matchingStashSelectorCommand(stashOID))
+			ui.PrintInfo(guidance)
+			return fmt.Errorf("failed to apply auto-stash %s; stash preserved for recovery: %w; %s", stashOID, err, guidance)
+		} else {
+			ui.PrintWarning(fmt.Sprintf("\nWarning: Failed to restore stashed changes: %v", err))
+			guidance := fmt.Sprintf("Your changes remain recoverable in auto-stash %s. Resolve the issue without discarding the conflicted or partially applied worktree, then locate the matching reflog selector with `%s` before dropping only that entry after verification.", stashOID, matchingStashSelectorCommand(stashOID))
+			ui.PrintInfo(guidance)
+			return fmt.Errorf("failed to apply auto-stash %s; stash preserved for recovery: %w; %s", stashOID, err, guidance)
+		}
+	}
+
+	if err := git.DropStash(worktreePath, stashOID); err != nil {
+		ui.PrintWarning(fmt.Sprintf("\nWarning: Changes were restored, but auto-stash %s could not be dropped: %v", stashOID, err))
+		guidance := fmt.Sprintf("Files are already restored. Check the exact auto-stash OID %s with `%s`. If it prints a selector, verify the restored files, then drop only that selector with `git stash drop <matching-selector>`. If it prints nothing, the reflog entry is already absent and no drop is needed. Keep OID %s as recovery evidence until you are satisfied.", stashOID, matchingStashSelectorCommand(stashOID), stashOID)
+		ui.PrintInfo(guidance)
+		return fmt.Errorf("auto-stash %s was applied but could not be dropped; files are already restored: %w; %s", stashOID, err, guidance)
+	}
+
+	if !quiet {
+		ui.PrintSuccess("Stashed changes restored successfully")
+	}
+	return nil
+}
+
+const stashReflogLookup = `git stash list --format="%H %gd"`
+
+func matchingStashSelectorCommand(stashOID string) string {
+	return fmt.Sprintf("%s | grep '^%s '", stashReflogLookup, stashOID)
 }
 
 func init() {

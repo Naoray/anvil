@@ -4,7 +4,11 @@
 package fs
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 )
 
 // FS defines the interface for file system operations.
@@ -16,6 +20,11 @@ type FS interface {
 
 	// WriteFile writes data to the file at path with the given permissions.
 	WriteFile(path string, data []byte, perm os.FileMode) error
+
+	// AtomicWriteFile replaces the file at path with data and the given permissions.
+	// Platforms without POSIX permission bits apply only the permissions they support.
+	// Implementations must leave an existing destination unchanged when preparation fails.
+	AtomicWriteFile(path string, data []byte, perm os.FileMode) error
 
 	// MkdirAll creates all directories in the path.
 	MkdirAll(path string, perm os.FileMode) error
@@ -34,11 +43,6 @@ type FS interface {
 
 	// Chmod changes the mode of the named file.
 	Chmod(path string, mode os.FileMode) error
-
-	// CreateTemp creates a temporary file in dir with the given pattern.
-	// Note: MockFS cannot fully support this as it returns *os.File.
-	// Code using CreateTemp should use the useRealFS pattern for testing.
-	CreateTemp(dir, pattern string) (*os.File, error)
 }
 
 // RealFS implements FS using the actual operating system.
@@ -53,6 +57,54 @@ func (r *RealFS) ReadFile(path string) ([]byte, error) {
 // WriteFile writes data to the file at path with permissions.
 func (r *RealFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(path, data, perm)
+}
+
+// AtomicWriteFile writes data to a temporary file beside path before replacing path.
+func (r *RealFS) AtomicWriteFile(path string, data []byte, perm os.FileMode) (retErr error) {
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temporary file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if cleanupErr := os.Remove(tmpPath); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+			retErr = fmt.Errorf("%w; removing temporary file: %v", retErr, cleanupErr)
+		}
+	}()
+
+	remaining := data
+	for len(remaining) > 0 {
+		written, writeErr := tmpFile.Write(remaining)
+		if writeErr != nil {
+			return closeTemporaryFileOnError(tmpFile, fmt.Errorf("writing temporary file: %w", writeErr))
+		}
+		if written <= 0 || written > len(remaining) {
+			return closeTemporaryFileOnError(tmpFile, fmt.Errorf("writing temporary file: %w", io.ErrShortWrite))
+		}
+		remaining = remaining[written:]
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temporary file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("setting temporary file permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("renaming temporary file: %w", err)
+	}
+
+	return nil
+}
+
+func closeTemporaryFileOnError(file *os.File, operationErr error) error {
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("%w (closing temporary file: %v)", operationErr, err)
+	}
+	return operationErr
 }
 
 // MkdirAll creates all directories in the path.
@@ -84,11 +136,6 @@ func (r *RealFS) Rename(oldpath, newpath string) error {
 // Chmod changes the mode of the named file.
 func (r *RealFS) Chmod(path string, mode os.FileMode) error {
 	return os.Chmod(path, mode)
-}
-
-// CreateTemp creates a temporary file in dir with the given pattern.
-func (r *RealFS) CreateTemp(dir, pattern string) (*os.File, error) {
-	return os.CreateTemp(dir, pattern)
 }
 
 // Default is the default RealFS instance for convenience.

@@ -54,14 +54,18 @@ func TestLoadProject_InvalidYAML(t *testing.T) {
 
 func TestLoadGlobal_ValidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
 
 	configContent := `default_branch: develop
 detected_tools:
   php: true
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "anvil.yaml"), []byte(configContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, ProjectConfigFile), []byte(configContent), 0644))
 
-	cfg, err := loadGlobalFromTestDir(tmpDir)
+	cfg, err := LoadGlobal()
 
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
@@ -71,11 +75,68 @@ detected_tools:
 
 func TestLoadGlobal_MissingConfig(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
-	cfg, err := loadGlobalFromTestDir(tmpDir)
+	cfg, err := LoadGlobal()
 
 	assert.Error(t, err)
 	assert.Nil(t, cfg)
+	assert.ErrorIs(t, err, ErrGlobalConfigNotFound)
+	var configFileNotFoundError viper.ConfigFileNotFoundError
+	assert.ErrorAs(t, err, &configFileNotFoundError)
+}
+
+func TestLoadOrCreateGlobalConfig_InvalidYAMLReturnsErrorWithoutWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	configPath := filepath.Join(configDir, ProjectConfigFile)
+	invalidContent := []byte("default_branch: [\n")
+	require.NoError(t, os.WriteFile(configPath, invalidContent, 0644))
+
+	cfg, err := LoadOrCreateGlobalConfig()
+
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.NotErrorIs(t, err, ErrGlobalConfigNotFound)
+	actualContent, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, invalidContent, actualContent)
+}
+
+func TestLoadOrCreateGlobalConfig_UnreadableConfigReturnsErrorWithoutWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "anvil")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	configPath := filepath.Join(configDir, ProjectConfigFile)
+	originalContent := []byte("default_branch: develop\n")
+	require.NoError(t, os.WriteFile(configPath, originalContent, 0600))
+	require.NoError(t, os.Chmod(configPath, 0000))
+	t.Cleanup(func() {
+		if err := os.Chmod(configPath, 0600); err != nil {
+			t.Errorf("restoring config permissions: %v", err)
+		}
+	})
+
+	if _, err := os.ReadFile(configPath); err == nil {
+		t.Skip("file permissions do not make files unreadable on this platform")
+	}
+
+	cfg, err := LoadOrCreateGlobalConfig()
+
+	assert.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.NotErrorIs(t, err, ErrGlobalConfigNotFound)
+	require.NoError(t, os.Chmod(configPath, 0600))
+	actualContent, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, originalContent, actualContent)
 }
 
 func TestGetGlobalConfigDir_XDGSet(t *testing.T) {
@@ -400,6 +461,86 @@ func TestGlobalConfig_FindLinkedProjectFromPath_ChoosesMostSpecificProject(t *te
 	assert.Equal(t, projectPath, project.Path)
 }
 
+func TestGlobalConfig_FindLinkedProjectFromPath_PathMatrix(t *testing.T) {
+	rootDir := t.TempDir()
+	projectPath := filepath.Join(rootDir, "project")
+	require.NoError(t, os.MkdirAll(projectPath, 0755))
+
+	cfg := &GlobalConfig{
+		Projects: map[string]*ProjectInfo{
+			"project": {Path: projectPath},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		wantName    string
+		wantProject bool
+	}{
+		{
+			name:        "base",
+			path:        projectPath,
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "ordinary descendant",
+			path:        filepath.Join(projectPath, "app"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "nested descendant",
+			path:        filepath.Join(projectPath, "app", "Models"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed project descendant",
+			path:        filepath.Join(projectPath, ".hidden-project"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "dot-prefixed nested descendant",
+			path:        filepath.Join(projectPath, "app", ".hidden-feature"),
+			wantName:    "project",
+			wantProject: true,
+		},
+		{
+			name:        "parent",
+			path:        filepath.Dir(projectPath),
+			wantProject: false,
+		},
+		{
+			name:        "sibling",
+			path:        filepath.Join(filepath.Dir(projectPath), "other"),
+			wantProject: false,
+		},
+		{
+			name:        "sibling-prefix with platform separator",
+			path:        filepath.Join(filepath.Dir(projectPath), filepath.Base(projectPath)+"-archive"),
+			wantProject: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantProject {
+				require.NoError(t, os.MkdirAll(tt.path, 0755))
+			}
+			name, project := cfg.FindLinkedProjectFromPath(tt.path)
+			if (project != nil) != tt.wantProject {
+				t.Fatalf("FindLinkedProjectFromPath() returned project = %v, want project = %v", project != nil, tt.wantProject)
+			}
+			if name != tt.wantName {
+				t.Errorf("FindLinkedProjectFromPath() name = %q, want %q", name, tt.wantName)
+			}
+		})
+	}
+}
+
 func TestGlobalConfig_GetWorktreeBaseExpanded(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
@@ -446,6 +587,7 @@ func TestLoadOrCreateGlobalConfig_NoExistingConfig(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, cfg)
 	assert.Equal(t, DefaultBranch, cfg.DefaultBranch)
+	assert.NotNil(t, cfg.DetectedTools)
 	assert.NotNil(t, cfg.Projects)
 }
 

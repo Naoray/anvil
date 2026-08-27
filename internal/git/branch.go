@@ -57,23 +57,21 @@ func GetBranchRefs(gitDir string) (local []string, remote []string, err error) {
 
 	// Get remote branches
 	cmd = exec.Command("git", "-C", gitDir, "for-each-ref",
-		"--format=%(refname:short)", "refs/remotes/")
+		"--format=%(refname)", "refs/remotes/")
 	output, err = cmd.Output()
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing remote branches: %w", err)
 	}
 
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if line != "" && !strings.HasSuffix(line, "/HEAD") {
-			remote = append(remote, line)
+		if line == "" {
+			continue
+		}
+		name := strings.TrimPrefix(line, "refs/remotes/")
+		if name != line && !strings.HasSuffix(name, "/HEAD") {
+			remote = append(remote, name)
 		}
 	}
 
 	return local, remote, nil
-}
-
-// ListLocalBranches returns all local branch names.
-func ListLocalBranches(gitDir string) ([]string, error) {
-	local, _, err := GetBranchRefs(gitDir)
-	return local, err
 }

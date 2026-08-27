@@ -110,6 +110,24 @@ func TestResolveExecDatabases_FromOwnedState(t *testing.T) {
 	assert.Equal(t, "demo_top_provider_test", testDb)
 }
 
+func TestResolveExecDatabases_IgnoresAuxiliaryRecords(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{
+			{Name: "demo_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+			{Name: "quotes_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+			{Name: "knowledge_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+			{Name: "demo_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		},
+	}))
+
+	appDb, testDb, err := resolveExecDatabases(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "demo_top_provider", appDb)
+	assert.Equal(t, "demo_top_provider_test", testDb)
+}
+
 func TestResolveExecDatabases_TestingOnlyStateOmitsAppDb(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
@@ -125,7 +143,7 @@ func TestResolveExecDatabases_TestingOnlyStateOmitsAppDb(t *testing.T) {
 	assert.Equal(t, "demo_top_provider_test", testDb)
 }
 
-func TestResolveExecDatabases_MultipleTestingEntriesError(t *testing.T) {
+func TestResolveExecDatabases_DuplicateTestingRecordsRefused(t *testing.T) {
 	dir := t.TempDir()
 	writeExecStateFile(t, dir, `db_suffix: top_provider
 databases:
@@ -139,10 +157,7 @@ databases:
 
 	_, _, err := resolveExecDatabases(dir)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "multiple testing databases")
-	assert.Contains(t, err.Error(), "demo_a_test")
-	assert.Contains(t, err.Error(), "demo_b_test")
-	assert.Contains(t, err.Error(), "remove the stale entries and retry")
+	assert.EqualError(t, err, `duplicate database role "testing" in record 1; first seen in record 0`)
 }
 
 func TestResolveExecDatabases_DuplicateApplicationRecordsRefused(t *testing.T) {
@@ -162,9 +177,24 @@ databases:
 
 	_, _, err := resolveExecDatabases(dir)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "multiple application databases")
-	assert.Contains(t, err.Error(), "demo_one")
-	assert.Contains(t, err.Error(), "demo_two")
+	assert.EqualError(t, err, `duplicate database role "application" in record 1; first seen in record 0`)
+}
+
+func TestResolveExecDatabases_DuplicateDatabaseNamesRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeExecStateFile(t, dir, `db_suffix: top_provider
+databases:
+  - name: demo_database
+    engine: mysql
+    role: application
+  - name: demo_database
+    engine: mysql
+    role: testing
+`)
+
+	_, _, err := resolveExecDatabases(dir)
+	require.Error(t, err)
+	assert.EqualError(t, err, `duplicate database name "demo_database" in record 1; first seen in record 0`)
 }
 
 func TestResolveExecDatabases_UnsupportedRoleRefused(t *testing.T) {

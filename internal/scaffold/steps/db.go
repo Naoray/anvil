@@ -41,6 +41,111 @@ func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.Dat
 	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
 }
 
+type databaseStepArgs struct {
+	database   string
+	prefix     string
+	connection DatabaseOptions
+}
+
+type databaseOperation uint8
+
+const (
+	databaseCreateOperation databaseOperation = iota
+	databaseDestroyOperation
+)
+
+func parseDatabaseArgs(args []string) (databaseStepArgs, error) {
+	var parsed databaseStepArgs
+	seen := make(map[string]struct{}, len(args))
+
+	for i := 0; i < len(args); i++ {
+		token := args[i]
+		if !strings.HasPrefix(token, "--") {
+			return databaseStepArgs{}, fmt.Errorf("invalid database argument %q: expected an option", token)
+		}
+
+		optionAndValue := token[2:]
+		option, value, hasValue := strings.Cut(optionAndValue, "=")
+		if option == "" {
+			return databaseStepArgs{}, fmt.Errorf("invalid database argument %q: option name is empty", token)
+		}
+		switch option {
+		case "database", "prefix", "username", "password", "host", "port":
+		default:
+			return databaseStepArgs{}, fmt.Errorf("invalid database argument %q: unknown option", token)
+		}
+		if _, exists := seen[option]; exists {
+			return databaseStepArgs{}, fmt.Errorf("invalid database argument %q: duplicate option --%s", token, option)
+		}
+		seen[option] = struct{}{}
+
+		if !hasValue {
+			if i+1 >= len(args) {
+				return databaseStepArgs{}, fmt.Errorf("database option %q is missing a value", token)
+			}
+			i++
+			value = args[i]
+			if strings.HasPrefix(value, "--") {
+				return databaseStepArgs{}, fmt.Errorf("database option %q cannot use option-looking value %q", token, value)
+			}
+		}
+		if value == "" && option != "password" {
+			return databaseStepArgs{}, fmt.Errorf("database option %q requires a non-empty value", token)
+		}
+
+		switch option {
+		case "database":
+			parsed.database = value
+		case "prefix":
+			parsed.prefix = value
+		case "username":
+			parsed.connection.Username = value
+		case "password":
+			parsed.connection.Password = value
+		case "host":
+			parsed.connection.Host = value
+		case "port":
+			parsed.connection.Port = value
+		}
+	}
+
+	return parsed, nil
+}
+
+func defaultDatabaseOptions(engine config.DatabaseEngine, operation databaseOperation) DatabaseOptions {
+	options := DatabaseOptions{
+		Host:     "127.0.0.1",
+		Username: "root",
+	}
+	if operation != databaseDestroyOperation {
+		return options
+	}
+
+	switch engine {
+	case config.DBEnginePgSQL:
+		options.Port = "5432"
+		options.Username = "postgres"
+	default:
+		options.Port = "3306"
+	}
+	return options
+}
+
+func (args databaseStepArgs) connectionOptions(engine config.DatabaseEngine, operation databaseOperation) DatabaseOptions {
+	options := defaultDatabaseOptions(engine, operation)
+	if args.connection.Host != "" {
+		options.Host = args.connection.Host
+	}
+	if args.connection.Port != "" {
+		options.Port = args.connection.Port
+	}
+	if args.connection.Username != "" {
+		options.Username = args.connection.Username
+	}
+	options.Password = args.connection.Password
+	return options
+}
+
 type DbCreateStep struct {
 	name          string
 	args          []string
@@ -78,6 +183,11 @@ func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) bool {
 }
 
 func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	databaseArgs, err := parseDatabaseArgs(s.args)
+	if err != nil {
+		return err
+	}
+
 	engine, err := detectDatabaseEngine(s.dbType, ctx)
 	if err != nil {
 		if opts.Verbose {
@@ -105,12 +215,7 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 			}
 			return nil
 		}
-		dbName := ""
-		for i, arg := range s.args {
-			if arg == "--database" && i+1 < len(s.args) {
-				dbName = s.args[i+1]
-			}
-		}
+		dbName := databaseArgs.database
 		if dbName == "" {
 			env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
 			dbName = env["DB_DATABASE"]
@@ -122,16 +227,14 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 	}
 
 	if role == config.DbRoleTesting {
-		return s.createTestDatabase(ctx, engine, opts)
+		return s.createTestDatabase(ctx, engine, databaseArgs, opts)
 	}
-	return s.createWithRetry(ctx, engine, opts)
+	return s.createWithRetry(ctx, engine, databaseArgs, opts)
 }
 
-func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext) string {
-	for i, arg := range s.args {
-		if arg == "--prefix" && i+1 < len(s.args) {
-			return s.args[i+1]
-		}
+func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext, databaseArgs databaseStepArgs) string {
+	if databaseArgs.prefix != "" {
+		return databaseArgs.prefix
 	}
 
 	siteName := ctx.SiteName
@@ -145,35 +248,24 @@ func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext) string {
 	return siteName
 }
 
-func (s *DbCreateStep) parseConnectionOptions() DatabaseOptions {
-	opts := DatabaseOptions{
-		Host:     "127.0.0.1",
-		Username: "root",
-	}
-
-	for i, arg := range s.args {
-		if arg == "--username" && i+1 < len(s.args) {
-			opts.Username = s.args[i+1]
-		}
-		if arg == "--password" && i+1 < len(s.args) {
-			opts.Password = s.args[i+1]
-		}
-		if arg == "--host" && i+1 < len(s.args) {
-			opts.Host = s.args[i+1]
-		}
-		if arg == "--port" && i+1 < len(s.args) {
-			opts.Port = s.args[i+1]
-		}
-	}
-
-	return opts
-}
-
 const maxDbCreateRetries = 5
 
-func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine config.DatabaseEngine, opts types.StepOptions) (runErr error) {
-	siteName := s.getPrefixOrSiteName(ctx)
-	dbOpts := s.parseConnectionOptions()
+type databaseCollisionDecision uint8
+
+const (
+	databaseCollisionKnown databaseCollisionDecision = iota
+	databaseCollisionAuthoritativeUnowned
+	databaseCollisionFreshUnknown
+)
+
+func (s *DbCreateStep) createWithRetry(
+	ctx *types.ScaffoldContext,
+	engine config.DatabaseEngine,
+	databaseArgs databaseStepArgs,
+	opts types.StepOptions,
+) (runErr error) {
+	siteName := s.getPrefixOrSiteName(ctx, databaseArgs)
+	dbOpts := databaseArgs.connectionOptions(engine, databaseCreateOperation)
 
 	client, err := s.clientFactory(string(engine), dbOpts)
 	if err != nil {
@@ -219,8 +311,17 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine config
 			return fmt.Errorf("failed to create database: %w", err)
 		}
 
-		if ctx.DbSuffixFromState() {
+		decision, err := s.classifyDatabaseCollision(ctx, dbName, engine, config.DbRoleApplication)
+		if err != nil {
+			return err
+		}
+		switch decision {
+		case databaseCollisionKnown:
 			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication)
+		case databaseCollisionAuthoritativeUnowned:
+			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
+		case databaseCollisionFreshUnknown:
+			// Fresh, record-free collisions retain the original suffix rotation contract.
 		}
 
 		if opts.Verbose {
@@ -233,7 +334,12 @@ func (s *DbCreateStep) createWithRetry(ctx *types.ScaffoldContext, engine config
 	return fmt.Errorf("failed to create database after %d attempts: %w", maxDbCreateRetries, lastErr)
 }
 
-func (s *DbCreateStep) createTestDatabase(ctx *types.ScaffoldContext, engine config.DatabaseEngine, opts types.StepOptions) (runErr error) {
+func (s *DbCreateStep) createTestDatabase(
+	ctx *types.ScaffoldContext,
+	engine config.DatabaseEngine,
+	databaseArgs databaseStepArgs,
+	opts types.StepOptions,
+) (runErr error) {
 	suffix := ctx.GetDbSuffix()
 	if suffix == "" {
 		if opts.Verbose {
@@ -242,8 +348,8 @@ func (s *DbCreateStep) createTestDatabase(ctx *types.ScaffoldContext, engine con
 		return nil
 	}
 
-	dbName := words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx), suffix)
-	client, err := s.clientFactory(string(engine), s.parseConnectionOptions())
+	dbName := words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), suffix)
+	client, err := s.clientFactory(string(engine), databaseArgs.connectionOptions(engine, databaseCreateOperation))
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
@@ -262,10 +368,58 @@ func (s *DbCreateStep) createTestDatabase(ctx *types.ScaffoldContext, engine con
 		return nil
 	}
 
-	if err := client.CreateDatabase(dbName); err != nil && !IsDatabaseExistsError(err) {
-		return fmt.Errorf("failed to create testing database: %w", err)
+	if err := client.CreateDatabase(dbName); err != nil {
+		if !IsDatabaseExistsError(err) {
+			return fmt.Errorf("failed to create testing database: %w", err)
+		}
+
+		decision, err := s.classifyDatabaseCollision(ctx, dbName, engine, config.DbRoleTesting)
+		if err != nil {
+			return err
+		}
+		if decision != databaseCollisionKnown {
+			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
+		}
 	}
 	return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleTesting)
+}
+
+func (s *DbCreateStep) classifyDatabaseCollision(
+	ctx *types.ScaffoldContext,
+	name string,
+	engine config.DatabaseEngine,
+	role string,
+) (databaseCollisionDecision, error) {
+	state, err := config.ReadLocalState(ctx.WorktreePath)
+	if err != nil {
+		return databaseCollisionAuthoritativeUnowned, fmt.Errorf("reading local state for database collision: %w", err)
+	}
+	if len(state.Databases) > 0 {
+		if err := config.ValidateOwnedDatabases(state.Databases); err != nil {
+			return databaseCollisionAuthoritativeUnowned, fmt.Errorf("validating owned database records: %w", err)
+		}
+
+		for _, database := range state.Databases {
+			if database.Name != name || database.Engine != string(engine) {
+				continue
+			}
+			if database.Role == role || database.Role == config.DbRoleAuxiliary {
+				return databaseCollisionKnown, nil
+			}
+		}
+		if ctx.DbSuffixFromLegacyState() {
+			return databaseCollisionKnown, nil
+		}
+		return databaseCollisionAuthoritativeUnowned, nil
+	}
+
+	if ctx.DbSuffixFromLegacyState() {
+		return databaseCollisionKnown, nil
+	}
+	if ctx.DbSuffixFromState() {
+		return databaseCollisionAuthoritativeUnowned, nil
+	}
+	return databaseCollisionFreshUnknown, nil
 }
 
 func (s *DbCreateStep) persistOwnedDatabase(ctx *types.ScaffoldContext, name string, engine config.DatabaseEngine, role string) error {
@@ -353,12 +507,17 @@ func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {
 }
 
 func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+	databaseArgs, err := parseDatabaseArgs(s.args)
+	if err != nil {
+		return err
+	}
+
 	localState, err := config.ReadLocalState(ctx.WorktreePath)
 	if err != nil {
 		return fmt.Errorf("reading local state for database cleanup: %w", err)
 	}
 	if len(localState.Databases) > 0 {
-		return s.destroyOwnedDatabases(localState.Databases, opts)
+		return s.destroyOwnedDatabases(localState.Databases, databaseArgs, opts)
 	}
 
 	suffix := ctx.GetDbSuffix()
@@ -386,38 +545,7 @@ func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 	if engine == config.DBEngineSQLite {
 		return nil
 	}
-	return s.destroyLegacyDatabases(engine, suffix, opts)
-}
-
-func (s *DbDestroyStep) parseConnectionOptions(engine config.DatabaseEngine) DatabaseOptions {
-	opts := DatabaseOptions{
-		Host: "127.0.0.1",
-	}
-
-	if engine == config.DBEnginePgSQL {
-		opts.Username = "postgres"
-		opts.Port = "5432"
-	} else {
-		opts.Username = "root"
-		opts.Port = "3306"
-	}
-
-	for i, arg := range s.args {
-		if arg == "--username" && i+1 < len(s.args) {
-			opts.Username = s.args[i+1]
-		}
-		if arg == "--password" && i+1 < len(s.args) {
-			opts.Password = s.args[i+1]
-		}
-		if arg == "--host" && i+1 < len(s.args) {
-			opts.Host = s.args[i+1]
-		}
-		if arg == "--port" && i+1 < len(s.args) {
-			opts.Port = s.args[i+1]
-		}
-	}
-
-	return opts
+	return s.destroyLegacyDatabases(engine, suffix, databaseArgs, opts)
 }
 
 type ownedTargetSelection struct {
@@ -439,24 +567,26 @@ func selectOwnedTargets(databases []config.OwnedDatabase) (ownedTargetSelection,
 		exact:    make([]string, 0, len(databases)),
 		families: append([]config.OwnedDatabase(nil), databases...),
 	}
-	seen := make(map[string]struct{}, len(databases))
 	for _, database := range databases {
-		if _, exists := seen[database.Name]; exists {
-			continue
-		}
-		seen[database.Name] = struct{}{}
 		selection.exact = append(selection.exact, database.Name)
 	}
 	return selection, nil
 }
 
-func (s *DbDestroyStep) destroyOwnedDatabases(databases []config.OwnedDatabase, opts types.StepOptions) (runErr error) {
+func (s *DbDestroyStep) destroyOwnedDatabases(
+	databases []config.OwnedDatabase,
+	databaseArgs databaseStepArgs,
+	opts types.StepOptions,
+) (runErr error) {
 	selection, err := selectOwnedTargets(databases)
 	if err != nil {
 		return err
 	}
 
-	client, err := s.clientFactory(string(selection.engine), s.parseConnectionOptions(selection.engine))
+	client, err := s.clientFactory(
+		string(selection.engine),
+		databaseArgs.connectionOptions(selection.engine, databaseDestroyOperation),
+	)
 	if err != nil {
 		if opts.DryRun {
 			return errors.Join(
@@ -518,8 +648,16 @@ func (s *DbDestroyStep) destroyOwnedDatabases(databases []config.OwnedDatabase, 
 	return errors.Join(runtimeErrors...)
 }
 
-func (s *DbDestroyStep) destroyLegacyDatabases(engine config.DatabaseEngine, suffix string, opts types.StepOptions) (runErr error) {
-	client, err := s.clientFactory(string(engine), s.parseConnectionOptions(engine))
+func (s *DbDestroyStep) destroyLegacyDatabases(
+	engine config.DatabaseEngine,
+	suffix string,
+	databaseArgs databaseStepArgs,
+	opts types.StepOptions,
+) (runErr error) {
+	client, err := s.clientFactory(
+		string(engine),
+		databaseArgs.connectionOptions(engine, databaseDestroyOperation),
+	)
 	if err != nil {
 		if opts.DryRun {
 			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)

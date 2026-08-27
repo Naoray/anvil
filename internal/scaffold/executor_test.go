@@ -1,19 +1,55 @@
 package scaffold
 
 import (
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = original
+	}()
+
+	fn()
+	require.NoError(t, writer.Close())
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	return string(output)
+}
+
 type mockStep struct {
 	name            string
 	conditionResult bool
+	conditionCalls  int
 	runError        error
 	runCalled       bool
 	runOptions      []types.StepOptions
+	conditionFunc   func(*types.ScaffoldContext) bool
+	runFunc         func(*types.ScaffoldContext, types.StepOptions) error
+}
+
+type enabledMockStep struct {
+	*mockStep
+	enabled      bool
+	enabledCalls int
+}
+
+func (s *enabledMockStep) IsEnabled() bool {
+	s.enabledCalls++
+	return s.enabled
 }
 
 func (s *mockStep) Name() string {
@@ -23,11 +59,286 @@ func (s *mockStep) Name() string {
 func (s *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
 	s.runCalled = true
 	s.runOptions = append(s.runOptions, opts)
+	if s.runFunc != nil {
+		return s.runFunc(ctx, opts)
+	}
 	return s.runError
 }
 
 func (s *mockStep) Condition(ctx *types.ScaffoldContext) bool {
+	s.conditionCalls++
+	if s.conditionFunc != nil {
+		return s.conditionFunc(ctx)
+	}
 	return s.conditionResult
+}
+
+func TestStepExecutor_Execute_EvaluatesConditionOnceAtExecutionTime(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	step := &enabledMockStep{
+		mockStep: &mockStep{name: "step1", conditionResult: true},
+		enabled:  true,
+	}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.Equal(t, 1, step.enabledCalls)
+	assert.Equal(t, 1, step.conditionCalls)
+}
+
+func TestStepExecutor_Execute_DisabledStepSkipsConditionLookup(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	step := &enabledMockStep{
+		mockStep: &mockStep{name: "disabled", conditionResult: true},
+		enabled:  false,
+	}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.Equal(t, 1, step.enabledCalls)
+	assert.Zero(t, step.conditionCalls)
+	assert.True(t, executor.Results()[0].Skipped)
+}
+
+func TestStepExecutor_Execute_EarlierStepCanEnableLaterCondition(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	first := &mockStep{
+		name:            "first",
+		conditionResult: true,
+		runFunc: func(ctx *types.ScaffoldContext, _ types.StepOptions) error {
+			ctx.SetVar("enabled", "true")
+			return nil
+		},
+	}
+	later := &mockStep{
+		name: "later",
+		conditionFunc: func(ctx *types.ScaffoldContext) bool {
+			return ctx.GetVar("enabled") == "true"
+		},
+	}
+
+	executor := NewStepExecutor([]types.ScaffoldStep{first, later}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	assert.True(t, later.runCalled)
+	assert.Equal(t, 1, later.conditionCalls)
+}
+
+func TestStepExecutor_Execute_PresentationModesShareResultAndCounterTransitions(t *testing.T) {
+	tests := []struct {
+		name string
+		opts types.StepOptions
+	}{
+		{name: "verbose", opts: types.StepOptions{Verbose: true}},
+		{name: "spinner", opts: types.StepOptions{}},
+		{name: "quiet", opts: types.StepOptions{Quiet: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+			first := &mockStep{name: "first", conditionResult: true}
+			skipped := &mockStep{name: "skipped", conditionResult: false}
+			last := &mockStep{name: "last", conditionResult: true}
+
+			executor := NewStepExecutor([]types.ScaffoldStep{first, skipped, last}, ctx, tt.opts)
+
+			assert.NoError(t, executor.Execute())
+			results := executor.Results()
+			if assert.Len(t, results, 3) {
+				assert.Same(t, first, results[0].Step)
+				assert.False(t, results[0].Skipped)
+				assert.Same(t, skipped, results[1].Step)
+				assert.True(t, results[1].Skipped)
+				assert.Same(t, last, results[2].Step)
+				assert.False(t, results[2].Skipped)
+			}
+			assert.Equal(t, 2, executor.completedCnt)
+			assert.Equal(t, 1, executor.skippedCnt)
+		})
+	}
+}
+
+func TestStepExecutor_Execute_DryRunPresentationModesShareTransitions(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     types.StepOptions
+		delegate bool
+	}{
+		{name: "verbose", opts: types.StepOptions{DryRun: true, Verbose: true}},
+		{name: "spinner", opts: types.StepOptions{DryRun: true}},
+		{name: "quiet", opts: types.StepOptions{DryRun: true, Quiet: true}},
+		{name: "verbose delegated", opts: types.StepOptions{DryRun: true, Verbose: true}, delegate: true},
+		{name: "spinner delegated", opts: types.StepOptions{DryRun: true}, delegate: true},
+		{name: "quiet delegated", opts: types.StepOptions{DryRun: true, Quiet: true}, delegate: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+			run := &mockStep{name: "run", conditionResult: true}
+			skipped := &mockStep{name: "skipped", conditionResult: false}
+
+			executor := NewStepExecutorWithOptions(
+				[]types.ScaffoldStep{run, skipped}, ctx, tt.opts,
+				ExecutorOptions{DelegateDryRunToSteps: tt.delegate},
+			)
+
+			assert.NoError(t, executor.Execute())
+			results := executor.Results()
+			if assert.Len(t, results, 2) {
+				assert.Same(t, run, results[0].Step)
+				assert.False(t, results[0].Skipped)
+				assert.Same(t, skipped, results[1].Step)
+				assert.True(t, results[1].Skipped)
+			}
+			assert.Equal(t, 1, executor.completedCnt)
+			assert.Equal(t, 1, executor.skippedCnt)
+			assert.Equal(t, tt.delegate, run.runCalled)
+		})
+	}
+}
+
+func TestStepExecutor_Execute_PresentationModesRecordFailuresThroughSameTransition(t *testing.T) {
+	tests := []struct {
+		name string
+		opts types.StepOptions
+	}{
+		{name: "verbose", opts: types.StepOptions{Verbose: true}},
+		{name: "spinner", opts: types.StepOptions{}},
+		{name: "quiet", opts: types.StepOptions{Quiet: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+			step := &mockStep{name: "fails", conditionResult: true, runError: assert.AnError}
+
+			executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, tt.opts)
+
+			err := executor.Execute()
+			assert.ErrorIs(t, err, assert.AnError)
+			results := executor.Results()
+			if assert.Len(t, results, 1) {
+				assert.Same(t, step, results[0].Step)
+				assert.ErrorIs(t, results[0].Error, assert.AnError)
+				assert.False(t, results[0].Skipped)
+			}
+			assert.Zero(t, executor.completedCnt)
+			assert.Zero(t, executor.skippedCnt)
+		})
+	}
+}
+
+func TestStepExecutor_Results_PreservesExecutorOwnedSlice(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	step := &mockStep{name: "step", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{step}, ctx, types.StepOptions{Quiet: true})
+
+	assert.NoError(t, executor.Execute())
+	results := executor.Results()
+	assert.Len(t, results, 1)
+
+	results[0].Skipped = true
+	assert.True(t, executor.Results()[0].Skipped)
+}
+
+func TestStepExecutor_Execute_VerboseProgressUsesConfiguredStepOrdinals(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	skipped := &mockStep{name: "skipped", conditionResult: false}
+	executed := &mockStep{name: "executed", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{skipped, executed}, ctx, types.StepOptions{Verbose: true})
+
+	var err error
+	output := captureStdout(t, func() {
+		err = executor.Execute()
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, output, "[2/2] Executing step: executed")
+	assert.Contains(t, output, "✓ [2/2] executed completed")
+	assert.NotContains(t, output, "[1/2] Executing step: executed")
+}
+
+func TestStepExecutor_Execute_VerboseProgressUsesConfiguredOrdinalsForSkipPositions(t *testing.T) {
+	tests := []struct {
+		name           string
+		steps          []*mockStep
+		expectedOutput []string
+	}{
+		{
+			name: "skipped first",
+			steps: []*mockStep{
+				{name: "skipped", conditionResult: false},
+				{name: "last", conditionResult: true},
+			},
+			expectedOutput: []string{"[2/2] Executing step: last", "✓ [2/2] last completed"},
+		},
+		{
+			name: "skipped middle",
+			steps: []*mockStep{
+				{name: "first", conditionResult: true},
+				{name: "skipped", conditionResult: false},
+				{name: "last", conditionResult: true},
+			},
+			expectedOutput: []string{
+				"[1/3] Executing step: first",
+				"✓ [1/3] first completed",
+				"[3/3] Executing step: last",
+				"✓ [3/3] last completed",
+			},
+		},
+		{
+			name: "skipped last",
+			steps: []*mockStep{
+				{name: "first", conditionResult: true},
+				{name: "skipped", conditionResult: false},
+			},
+			expectedOutput: []string{"[1/2] Executing step: first", "✓ [1/2] first completed"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+			steps := make([]types.ScaffoldStep, len(tt.steps))
+			for i, step := range tt.steps {
+				steps[i] = step
+			}
+			executor := NewStepExecutor(steps, ctx, types.StepOptions{Verbose: true})
+
+			var err error
+			output := captureStdout(t, func() {
+				err = executor.Execute()
+			})
+
+			assert.NoError(t, err)
+			for _, expected := range tt.expectedOutput {
+				assert.Contains(t, output, expected)
+			}
+		})
+	}
+}
+
+func TestStepExecutor_Execute_VerboseDryRunProgressUsesConfiguredOrdinals(t *testing.T) {
+	ctx := &types.ScaffoldContext{WorktreePath: "/tmp", Branch: "test"}
+	skipped := &mockStep{name: "skipped", conditionResult: false}
+	executed := &mockStep{name: "executed", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{skipped, executed}, ctx, types.StepOptions{DryRun: true, Verbose: true})
+
+	var err error
+	output := captureStdout(t, func() {
+		err = executor.Execute()
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, output, "[2/2] Executing step: executed")
+	assert.Contains(t, output, "[DRY-RUN] Would execute: executed")
+	assert.False(t, executed.runCalled)
+	assert.Equal(t, 1, executor.completedCnt)
+	assert.Equal(t, 1, executor.skippedCnt)
 }
 
 func TestStepExecutor_Execute_AllStepsPass(t *testing.T) {

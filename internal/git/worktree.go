@@ -1,11 +1,13 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -14,11 +16,15 @@ import (
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Path      string
-	Branch    string
-	IsMain    bool
-	IsCurrent bool
-	IsMerged  bool
+	Path       string
+	Branch     string
+	Bare       bool
+	Detached   bool
+	Locked     bool
+	LockReason string
+	IsMain     bool
+	IsCurrent  bool
+	IsMerged   bool
 }
 
 // CreateWorktree creates a new worktree from a git directory
@@ -81,40 +87,174 @@ func RemoveWorktree(gitDir, worktreePath string, force bool) error {
 func ListWorktrees(gitDir string) ([]Worktree, error) {
 	repoPath := GetRepoPath(gitDir)
 
-	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain")
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "list", "--porcelain", "-z")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
-	var worktrees []Worktree
-	var currentPath string
-	var currentBranch string
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			currentPath = strings.TrimPrefix(line, "worktree ")
-			currentPath = strings.TrimSpace(currentPath)
-		} else if strings.HasPrefix(line, "branch refs/heads/") {
-			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
-			currentBranch = strings.TrimSpace(currentBranch)
-			if currentPath != "" && currentBranch != "" {
-				worktrees = append(worktrees, Worktree{
-					Path:   currentPath,
-					Branch: currentBranch,
-				})
-				currentPath = ""
-				currentBranch = "" //nolint:ineffassign // reset for clarity
-			}
-		}
+	worktrees, err := parseWorktreePorcelain(output)
+	if err != nil {
+		return nil, fmt.Errorf("parsing worktree records: %w", err)
 	}
 
 	return worktrees, nil
+}
+
+func parseWorktreePorcelain(output []byte) ([]Worktree, error) {
+	var records [][]string
+	var fields []string
+	for _, rawField := range bytes.Split(output, []byte{0}) {
+		if len(rawField) == 0 {
+			if len(fields) > 0 {
+				records = append(records, fields)
+				fields = nil
+			}
+			continue
+		}
+		fields = append(fields, string(rawField))
+	}
+	if len(fields) > 0 {
+		records = append(records, fields)
+	}
+
+	worktrees := make([]Worktree, 0, len(records))
+	for recordIndex, record := range records {
+		worktree, err := parseWorktreeRecord(recordIndex, record)
+		if err != nil {
+			return nil, err
+		}
+		worktrees = append(worktrees, worktree)
+	}
+
+	return worktrees, nil
+}
+
+func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
+	var worktree Worktree
+	var hasPath bool
+	var hasBranch bool
+	var hasDetached bool
+	var hasBare bool
+	var hasLocked bool
+
+	for _, field := range fields {
+		switch {
+		case strings.HasPrefix(field, "worktree "):
+			if hasPath {
+				return Worktree{}, fmt.Errorf("record %d: duplicate worktree path", recordIndex)
+			}
+			path := strings.TrimPrefix(field, "worktree ")
+			if path == "" {
+				return Worktree{}, fmt.Errorf("record %d: worktree path is empty", recordIndex)
+			}
+			worktree.Path = path
+			hasPath = true
+		case field == "worktree":
+			return Worktree{}, fmt.Errorf("record %d: malformed worktree attribute %q", recordIndex, field)
+		case strings.HasPrefix(field, "HEAD "):
+			if strings.TrimPrefix(field, "HEAD ") == "" {
+				return Worktree{}, fmt.Errorf("record %d: HEAD value is empty", recordIndex)
+			}
+		case field == "HEAD":
+			return Worktree{}, fmt.Errorf("record %d: malformed HEAD attribute", recordIndex)
+		case strings.HasPrefix(field, "branch "):
+			if hasBranch {
+				return Worktree{}, fmt.Errorf("record %d: duplicate branch attribute", recordIndex)
+			}
+			branchRef := strings.TrimPrefix(field, "branch ")
+			if !strings.HasPrefix(branchRef, "refs/heads/") || strings.TrimPrefix(branchRef, "refs/heads/") == "" {
+				return Worktree{}, fmt.Errorf("record %d: malformed branch attribute %q", recordIndex, field)
+			}
+			worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
+			hasBranch = true
+		case field == "branch":
+			return Worktree{}, fmt.Errorf("record %d: malformed branch attribute %q", recordIndex, field)
+		case field == "detached":
+			if hasDetached {
+				return Worktree{}, fmt.Errorf("record %d: duplicate detached attribute", recordIndex)
+			}
+			worktree.Detached = true
+			hasDetached = true
+		case strings.HasPrefix(field, "detached "):
+			return Worktree{}, fmt.Errorf("record %d: malformed detached attribute %q", recordIndex, field)
+		case field == "bare":
+			if hasBare {
+				return Worktree{}, fmt.Errorf("record %d: duplicate bare attribute", recordIndex)
+			}
+			worktree.Bare = true
+			hasBare = true
+		case strings.HasPrefix(field, "bare "):
+			return Worktree{}, fmt.Errorf("record %d: malformed bare attribute %q", recordIndex, field)
+		case field == "locked", strings.HasPrefix(field, "locked "):
+			if hasLocked {
+				return Worktree{}, fmt.Errorf("record %d: duplicate locked attribute", recordIndex)
+			}
+			worktree.Locked = true
+			if field != "locked" {
+				worktree.LockReason = strings.TrimPrefix(field, "locked ")
+			}
+			hasLocked = true
+		}
+	}
+
+	if !hasPath {
+		return Worktree{}, fmt.Errorf("record %d: missing worktree path", recordIndex)
+	}
+	if hasBranch && (worktree.Detached || worktree.Bare) {
+		return Worktree{}, fmt.Errorf("record %d: branch conflicts with detached or bare state", recordIndex)
+	}
+	if worktree.Detached && worktree.Bare {
+		return Worktree{}, fmt.Errorf("record %d: detached state conflicts with bare state", recordIndex)
+	}
+	primaryStates := 0
+	if hasBranch {
+		primaryStates++
+	}
+	if worktree.Detached {
+		primaryStates++
+	}
+	if worktree.Bare {
+		primaryStates++
+	}
+	if primaryStates == 0 {
+		return Worktree{}, fmt.Errorf("record %d: missing primary worktree state", recordIndex)
+	}
+	if primaryStates != 1 {
+		return Worktree{}, fmt.Errorf("record %d: conflicting primary worktree states", recordIndex)
+	}
+
+	return worktree, nil
+}
+
+// PathsEqual reports whether two Git or OS worktree paths identify the same path.
+// Git for Windows may use slash-separated paths while the OS uses backslashes.
+func PathsEqual(first, second string) bool {
+	if first == "" || second == "" {
+		return first == second
+	}
+
+	firstPath, firstOK := worktreePathIdentity(first)
+	secondPath, secondOK := worktreePathIdentity(second)
+	if !firstOK || !secondOK {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(firstPath, secondPath)
+	}
+	return firstPath == secondPath
+}
+
+func worktreePathIdentity(path string) (string, bool) {
+	path = filepath.FromSlash(path)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if evalPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = evalPath
+	}
+	return filepath.Clean(filepath.FromSlash(absPath)), true
 }
 
 // ListWorktreesDetailed lists all worktrees with additional metadata
@@ -124,17 +264,15 @@ func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([
 		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
-	// Best-effort symlink resolution; falls back to raw path comparison
-	currentWorktreePathEval, _ := filepath.EvalSymlinks(currentWorktreePath)
-
 	mergeStatusCache := make(map[string]bool)
 
 	for i := range worktrees {
 		wt := &worktrees[i]
 		wt.IsMain = wt.Branch == defaultBranch
-		// Best-effort symlink resolution; falls back to raw path comparison
-		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
-		wt.IsCurrent = wtPathEval == currentWorktreePathEval
+		wt.IsCurrent = PathsEqual(wt.Path, currentWorktreePath)
+		if wt.Branch == "" || wt.Bare || wt.Detached {
+			continue
+		}
 		if wt.Branch != defaultBranch {
 			cacheKey1 := wt.Branch + "->" + defaultBranch
 			featureInDefault, ok := mergeStatusCache[cacheKey1]
@@ -191,6 +329,9 @@ func SortWorktrees(worktrees []Worktree, by string, reverse bool) []Worktree {
 			nameI := filepath.Base(sorted[i].Path)
 			nameJ := filepath.Base(sorted[j].Path)
 			cmp = strings.Compare(nameI, nameJ)
+		}
+		if cmp == 0 {
+			cmp = strings.Compare(sorted[i].Path, sorted[j].Path)
 		}
 		if reverse {
 			cmp = -cmp
@@ -271,80 +412,6 @@ func DeleteBranch(gitDir, branch string, force bool) error {
 		return fmt.Errorf("deleting branch: %w\n%s", err, string(output))
 	}
 	return nil
-}
-
-// ListBranches lists all local branches in the repository (excluding current branch)
-func ListBranches(gitDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", gitDir, "branch", "--list")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("listing branches: %w", err)
-	}
-
-	var branches []string
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "*") {
-			continue
-		}
-		if strings.HasPrefix(line, "+") {
-			line = strings.TrimPrefix(line, "+ ")
-			line = strings.TrimSpace(line)
-		}
-		if line != "" {
-			branches = append(branches, line)
-		}
-	}
-	return branches, nil
-}
-
-// ListAllBranches lists all branches including current branch
-func ListAllBranches(gitDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", gitDir, "branch", "--list")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("listing all branches: %w", err)
-	}
-
-	var branches []string
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "*") {
-			line = strings.TrimPrefix(line, "* ")
-		}
-		if strings.HasPrefix(line, "+") {
-			line = strings.TrimPrefix(line, "+ ")
-		}
-		line = strings.TrimSpace(line)
-		if line != "" {
-			branches = append(branches, line)
-		}
-	}
-	return branches, nil
-}
-
-// ListRemoteBranches lists all remote branches in the repository
-func ListRemoteBranches(gitDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", gitDir, "branch", "-r", "--list")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("listing remote branches: %w", err)
-	}
-
-	var branches []string
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			branches = append(branches, line)
-		}
-	}
-	return branches, nil
 }
 
 // FindGitDir finds the .git directory from a path

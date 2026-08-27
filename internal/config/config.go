@@ -25,6 +25,9 @@ const (
 
 const DefaultBranch = "main"
 
+// ErrGlobalConfigNotFound identifies a missing global configuration file.
+var ErrGlobalConfigNotFound = errors.New("global config not found")
+
 // SiteDriver identifies the local PHP development environment used to serve sites.
 type SiteDriver string
 
@@ -317,7 +320,7 @@ func LoadGlobal() (*GlobalConfig, error) {
 	if err := v.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
-			return nil, fmt.Errorf("global anvil.yaml not found in %s", configDir)
+			return nil, fmt.Errorf("%w in %s: %w", ErrGlobalConfigNotFound, configDir, err)
 		}
 		return nil, fmt.Errorf("reading global config: %w", err)
 	}
@@ -676,7 +679,10 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 func LoadOrCreateGlobalConfig() (*GlobalConfig, error) {
 	config, err := LoadGlobal()
 	if err != nil {
-		// Config doesn't exist, return empty config
+		if !errors.Is(err, ErrGlobalConfigNotFound) {
+			return nil, err
+		}
+
 		return &GlobalConfig{
 			DefaultBranch: DefaultBranch,
 			DetectedTools: make(map[string]bool),
@@ -866,8 +872,8 @@ func isSubPath(parent, child string) bool {
 	if err != nil {
 		return false
 	}
-	// If the relative path doesn't start with "..", it's a subpath
-	return len(rel) > 0 && rel[0] != '.'
+	// Reject only the base path and paths that leave the parent directory.
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // AddProject adds a project to the global config

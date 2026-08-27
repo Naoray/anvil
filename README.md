@@ -92,7 +92,7 @@ anvil completion fish   # installs to fish completions dir
 anvil completion zsh --print
 ```
 
-For **zsh** with Homebrew, the completion file is written to `$(brew --prefix)/share/zsh/site-functions/_anvil`. For user-local installs, it goes to `~/.zsh/completions/_anvil`. Add the directory to your `fpath` if needed:
+After installation, restart your shell to activate the completion. Existing zsh shells may need a manual refresh, and Anvil leaves zsh completion cache files untouched. For **zsh** with Homebrew, the completion file is written to `$(brew --prefix)/share/zsh/site-functions/_anvil`. For user-local installs, it goes to `~/.zsh/completions/_anvil`. Add the directory to your `fpath` if needed, then run `autoload -Uz compinit && compinit`:
 
 ```zsh
 # ~/.zshrc
@@ -403,8 +403,12 @@ databases:
     role: testing
 ```
 
-- `role: application` (the default) is the regular app database step; its
-  create persists an ownership record.
+- `role: application` (the default) and `role: testing` each use the
+  first-created database for that role as the canonical record used by
+  `anvil exec`. Additional distinct application or testing databases are
+  retained as cleanup-only `auxiliary` records, so every database remains
+  eligible for exact cleanup. `auxiliary` is an internal ownership role and
+  is not valid in a user-configured `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
   Laravel's parallel-worker suffixes still fit MySQL's 64 and PostgreSQL's 63
   identifier limits), creates it empty — no migrations; your test runner
@@ -763,10 +767,11 @@ All steps support template variables that are replaced at runtime:
 ```
 
 - Generates unique name: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}`
-- Suffix is generated once per `init` or `work` invocation and shared across all `db.create` steps
+- Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Auto-detects engine from `DB_CONNECTION` in `.env`
 - Retries up to 5 times on collision
-- Persists suffix to `.anvil.local` for cleanup
+- Persists the suffix and every created database to `.anvil.local` for exact
+  cleanup
 
 **Multiple databases with shared suffix:**
 
@@ -783,15 +788,21 @@ scaffold:
 
 Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine` (same suffix, different prefixes)
 
-**`db.destroy`** - Clean up databases matching suffix pattern
+**`db.destroy`** - Clean up owned databases and their parallel-worker databases
 
 ```yaml
 - name: db.destroy
   type: mysql  # matches db.create type
 ```
 
-- Drops all databases matching the suffix pattern
+- Reads `.anvil.local` ownership records and drops every exact database,
+  including cleanup-only `auxiliary` records, then enumerates their Laravel
+  parallel-worker databases
+- For pre-v1.8 worktrees without ownership records, falls back to suffix-based
+  discovery
 - Runs automatically during `anvil remove`
+- See [Test Database Isolation](#test-database-isolation) for the canonical
+  ownership-first cleanup path and its fail-closed safety gate
 
 #### Environment Steps
 
@@ -1084,16 +1095,18 @@ This creates: `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 
 **Database Naming**
 - Automatically generates unique, readable database names
-- Suffix is generated once per `init` or `work` invocation
+- Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Format: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}` (e.g., `myapp_swift_runner`, `app_cool_engine`)
 - Multiple `db.create` steps share the same suffix, allowing consistent database naming
 - Handles collisions with automatic retries
 - Enforces PostgreSQL/MySQL length limits
 
 **Database Cleanup**
-- Automatically drops databases when worktree is removed
-- Uses pattern matching to find all databases with same suffix
-- Integrates with `anvil remove` command
+- Uses `.anvil.local` ownership records to drop exact databases and enumerate
+  their parallel-worker databases
+- Limits suffix matching to the pre-v1.8/no-record legacy fallback
+- Integrates with `anvil remove`; see [Test Database Isolation](#test-database-isolation)
+  for the canonical cleanup behavior and fail-closed ownership gate
 
 **Template Variables**
 - All template syntax uses Go's `text/template`

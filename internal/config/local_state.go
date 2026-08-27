@@ -14,6 +14,7 @@ import (
 const (
 	DbRoleApplication = "application"
 	DbRoleTesting     = "testing"
+	DbRoleAuxiliary   = "auxiliary"
 )
 
 var databaseIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
@@ -43,18 +44,33 @@ func ValidateOwnedDatabases(databases []OwnedDatabase) error {
 	var validationErrors []error
 	seenEngines := make(map[string]struct{})
 	engineOrder := make([]string, 0, 2)
+	seenNames := make(map[string]int, len(databases))
+	seenRoles := make(map[string]int, 2)
 
 	for index, database := range databases {
 		if !IsValidDatabaseIdentifier(database.Name) {
 			validationErrors = append(validationErrors,
 				fmt.Errorf("invalid database name %q in record %d", database.Name, index))
 		}
-
+		if firstIndex, exists := seenNames[database.Name]; exists {
+			validationErrors = append(validationErrors,
+				fmt.Errorf("duplicate database name %q in record %d; first seen in record %d", database.Name, index, firstIndex))
+		} else {
+			seenNames[database.Name] = index
+		}
 		switch database.Role {
-		case DbRoleApplication, DbRoleTesting:
+		case DbRoleApplication, DbRoleTesting, DbRoleAuxiliary:
+			if firstIndex, exists := seenRoles[database.Role]; exists {
+				if database.Role != DbRoleAuxiliary {
+					validationErrors = append(validationErrors,
+						fmt.Errorf("duplicate database role %q in record %d; first seen in record %d", database.Role, index, firstIndex))
+				}
+			} else {
+				seenRoles[database.Role] = index
+			}
 		default:
 			validationErrors = append(validationErrors,
-				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing", database.Role, database.Name))
+				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing, auxiliary", database.Role, database.Name))
 		}
 
 		switch DatabaseEngine(database.Engine) {
@@ -101,8 +117,10 @@ func ReadLocalState(worktreePath string) (*LocalState, error) {
 	return &state, nil
 }
 
-// WriteLocalState merges worktree-local state into .anvil.local. Canonical
-// database records replace by role while unknown YAML fields are preserved.
+// WriteLocalState merges worktree-local state into .anvil.local. The first
+// record for each canonical role remains canonical, while distinct records
+// are retained as auxiliary cleanup records. Unknown YAML fields are
+// preserved.
 func WriteLocalState(worktreePath string, data LocalState) error {
 	configPath := filepath.Join(worktreePath, LocalStateFile)
 
@@ -169,31 +187,163 @@ func mergeOwnedDatabases(existingRaw any, updates []OwnedDatabase) ([]any, error
 	}
 
 	for _, update := range updates {
-		updated := false
-		next := make([]any, 0, len(records)+1)
-		for _, raw := range records {
-			record := raw.(map[string]any)
-			role, _ := record["role"].(string)
-			if role != update.Role {
-				next = append(next, record)
-				continue
-			}
-			if updated {
-				continue
-			}
-			record["name"] = update.Name
-			record["engine"] = update.Engine
-			record["role"] = update.Role
-			next = append(next, record)
-			updated = true
+		var err error
+		switch update.Role {
+		case DbRoleApplication, DbRoleTesting:
+			records, err = mergeCanonicalDatabase(records, update)
+		case DbRoleAuxiliary:
+			records, err = mergeAuxiliaryDatabase(records, update)
+		default:
+			records = mergeDatabaseByRole(records, update)
 		}
-		if !updated {
-			next = append(next, map[string]any{
-				"name": update.Name, "engine": update.Engine, "role": update.Role,
-			})
+		if err != nil {
+			return nil, err
 		}
-		records = next
+		if err := validateMergedDatabaseNames(records); err != nil {
+			return nil, err
+		}
 	}
 
 	return records, nil
+}
+
+func mergeCanonicalDatabase(records []any, update OwnedDatabase) ([]any, error) {
+	canonicalIndex := -1
+	for index, raw := range records {
+		record := raw.(map[string]any)
+		role, _ := record["role"].(string)
+		if role == update.Role {
+			canonicalIndex = index
+			break
+		}
+	}
+
+	if canonicalIndex == -1 {
+		for _, raw := range records {
+			record := raw.(map[string]any)
+			name, _ := record["name"].(string)
+			role, _ := record["role"].(string)
+			if name == update.Name && role == DbRoleAuxiliary {
+				setOwnedDatabaseFields(record, update)
+				return records, nil
+			}
+		}
+		return appendOwnedDatabase(records, update), nil
+	}
+
+	canonical := records[canonicalIndex].(map[string]any)
+	canonicalName, _ := canonical["name"].(string)
+	if canonicalName == update.Name {
+		next := make([]any, 0, len(records))
+		for index, raw := range records {
+			record := raw.(map[string]any)
+			role, _ := record["role"].(string)
+			if role == update.Role {
+				if index != canonicalIndex {
+					continue
+				}
+				setOwnedDatabaseFields(record, update)
+			}
+			next = append(next, record)
+		}
+		return next, nil
+	}
+
+	for _, raw := range records {
+		record := raw.(map[string]any)
+		name, _ := record["name"].(string)
+		role, _ := record["role"].(string)
+		if name != update.Name {
+			continue
+		}
+		if role != DbRoleAuxiliary {
+			return nil, fmt.Errorf("duplicate database name %q already belongs to role %q", update.Name, role)
+		}
+		setOwnedDatabaseFields(record, OwnedDatabase{
+			Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
+		})
+		return removeDuplicateRole(records, update.Role, canonicalIndex), nil
+	}
+
+	return appendOwnedDatabase(removeDuplicateRole(records, update.Role, canonicalIndex), OwnedDatabase{
+		Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
+	}), nil
+}
+
+func mergeAuxiliaryDatabase(records []any, update OwnedDatabase) ([]any, error) {
+	for _, raw := range records {
+		record := raw.(map[string]any)
+		name, _ := record["name"].(string)
+		if name != update.Name {
+			continue
+		}
+		role, _ := record["role"].(string)
+		if role != DbRoleAuxiliary {
+			return nil, fmt.Errorf("duplicate database name %q already belongs to role %q", update.Name, role)
+		}
+		setOwnedDatabaseFields(record, update)
+		return records, nil
+	}
+
+	return appendOwnedDatabase(records, update), nil
+}
+
+func mergeDatabaseByRole(records []any, update OwnedDatabase) []any {
+	updated := false
+	next := make([]any, 0, len(records)+1)
+	for _, raw := range records {
+		record := raw.(map[string]any)
+		role, _ := record["role"].(string)
+		if role != update.Role {
+			next = append(next, record)
+			continue
+		}
+		if updated {
+			continue
+		}
+		setOwnedDatabaseFields(record, update)
+		next = append(next, record)
+		updated = true
+	}
+	if !updated {
+		return appendOwnedDatabase(next, update)
+	}
+	return next
+}
+
+func appendOwnedDatabase(records []any, database OwnedDatabase) []any {
+	return append(records, map[string]any{
+		"name": database.Name, "engine": database.Engine, "role": database.Role,
+	})
+}
+
+func setOwnedDatabaseFields(record map[string]any, database OwnedDatabase) {
+	record["name"] = database.Name
+	record["engine"] = database.Engine
+	record["role"] = database.Role
+}
+
+func removeDuplicateRole(records []any, role string, keepIndex int) []any {
+	next := make([]any, 0, len(records))
+	for index, raw := range records {
+		record := raw.(map[string]any)
+		if recordRole, _ := record["role"].(string); recordRole == role && index != keepIndex {
+			continue
+		}
+		next = append(next, record)
+	}
+	return next
+}
+
+func validateMergedDatabaseNames(records []any) error {
+	seen := make(map[string]int, len(records))
+	for index, raw := range records {
+		record := raw.(map[string]any)
+		name, _ := record["name"].(string)
+		if firstIndex, exists := seen[name]; exists {
+			return fmt.Errorf("duplicate database name %q in merged local state at record %d; first seen in record %d", name, index, firstIndex)
+		}
+		seen[name] = index
+	}
+	return nil
 }

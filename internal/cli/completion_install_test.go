@@ -3,12 +3,36 @@
 package cli
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 )
 
 func TestCompletionInstallPath(t *testing.T) {
+	t.Run("zsh uses writable brew site-functions directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("HOMEBREW_PREFIX", tmpDir)
+		dir := filepath.Join(tmpDir, "share", "zsh", "site-functions")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("create brew completion directory: %v", err)
+		}
+
+		path, err := completionInstallPath("zsh")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := filepath.Join(dir, "_anvil")
+		if path != expected {
+			t.Errorf("expected %q, got %q", expected, path)
+		}
+	})
+
 	t.Run("zsh falls back to user dir when brew prefix not set", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		t.Setenv("HOME", tmpDir)
@@ -110,48 +134,6 @@ func TestDetectShell(t *testing.T) {
 	})
 }
 
-func TestRebuildZshCompletionCache(t *testing.T) {
-	t.Run("removes .zcompdump when it exists", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		t.Setenv("HOME", tmpDir)
-
-		dump := filepath.Join(tmpDir, ".zcompdump")
-		if err := os.WriteFile(dump, []byte("cache"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		rebuildZshCompletionCache()
-
-		if _, err := os.Stat(dump); !os.IsNotExist(err) {
-			t.Error("expected .zcompdump to be removed")
-		}
-	})
-
-	t.Run("removes versioned .zcompdump-* files", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		t.Setenv("HOME", tmpDir)
-
-		versioned := filepath.Join(tmpDir, ".zcompdump-testhost-5.9")
-		if err := os.WriteFile(versioned, []byte("cache"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		rebuildZshCompletionCache()
-
-		if _, err := os.Stat(versioned); !os.IsNotExist(err) {
-			t.Error("expected versioned .zcompdump to be removed")
-		}
-	})
-
-	t.Run("does not error when no dump files exist", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		t.Setenv("HOME", tmpDir)
-
-		// Should not panic or error
-		rebuildZshCompletionCache()
-	})
-}
-
 func TestInstallCompletionWritesFile(t *testing.T) {
 	t.Run("writes completion script to target path", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -174,4 +156,155 @@ func TestInstallCompletionWritesFile(t *testing.T) {
 			t.Error("completion file is empty")
 		}
 	})
+}
+
+func TestInstallCompletionWritesSupportedShellFiles(t *testing.T) {
+	for _, shell := range []string{"zsh", "bash", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			targetPath := filepath.Join(t.TempDir(), shell)
+			if err := installCompletionToPath(rootCmd, shell, targetPath); err != nil {
+				t.Fatalf("installCompletionToPath failed: %v", err)
+			}
+
+			content, err := os.ReadFile(targetPath)
+			if err != nil {
+				t.Fatalf("read installed completion file: %v", err)
+			}
+			if len(content) == 0 {
+				t.Error("completion file is empty")
+			}
+		})
+	}
+}
+
+func TestInstallCompletionPreservesZshCaches(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("HOMEBREW_PREFIX", "")
+	t.Setenv("TERM", "dumb")
+
+	caches := map[string][]byte{
+		filepath.Join(tmpDir, ".zcompdump"):          []byte("default zsh cache"),
+		filepath.Join(tmpDir, ".zcompdump-host-5.9"): []byte("versioned zsh cache"),
+	}
+	for path, contents := range caches {
+		if err := os.WriteFile(path, contents, 0644); err != nil {
+			t.Fatalf("write cache sentinel %q: %v", path, err)
+		}
+	}
+
+	oldStdin := os.Stdin
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdin pipe: %v", err)
+	}
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		reportCleanupError(t, "close completion installer stdin reader", reader.Close())
+		reportCleanupError(t, "close completion installer stdin writer", writer.Close())
+	})
+	if _, err := writer.WriteString("y\n"); err != nil {
+		t.Fatalf("confirm completion installation: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdin pipe: %v", err)
+	}
+
+	var installErr error
+	output := captureStderr(t, func() {
+		installErr = installCompletion(rootCmd, "zsh")
+	})
+	if installErr != nil {
+		t.Fatalf("installCompletion failed: %v", installErr)
+	}
+
+	for _, want := range []string{
+		"Restart your shell",
+		"fpath",
+		"autoload -Uz compinit && compinit",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected install output to contain %q, got %q", want, output)
+		}
+	}
+	if strings.Contains(output, "Cleared zsh completion cache") {
+		t.Errorf("install output claims zsh cache was cleared: %q", output)
+	}
+
+	targetPath := filepath.Join(tmpDir, ".zsh", "completions", "_anvil")
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Fatalf("expected owned completion file at %q: %v", targetPath, err)
+	}
+	for path, want := range caches {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read cache sentinel %q: %v", path, err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("cache sentinel %q changed: got %q, want %q", path, got, want)
+		}
+	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+
+	stderrFD := int(os.Stderr.Fd())
+	originalFD, err := syscall.Dup(stderrFD)
+	if err != nil {
+		reportCleanupError(t, "close stderr reader after duplicating stderr", reader.Close())
+		reportCleanupError(t, "close stderr writer after duplicating stderr", writer.Close())
+		t.Fatalf("duplicate stderr: %v", err)
+	}
+	if err := syscall.Dup2(int(writer.Fd()), stderrFD); err != nil {
+		reportCleanupError(t, "close duplicated stderr after redirect failure", syscall.Close(originalFD))
+		reportCleanupError(t, "close stderr reader after redirect failure", reader.Close())
+		reportCleanupError(t, "close stderr writer after redirect failure", writer.Close())
+		t.Fatalf("redirect stderr: %v", err)
+	}
+
+	restored := false
+	restoreStderr := func() error {
+		if restored {
+			return nil
+		}
+		if err := syscall.Dup2(originalFD, stderrFD); err != nil {
+			return err
+		}
+		restored = true
+		return nil
+	}
+
+	defer func() {
+		reportCleanupError(t, "restore stderr during capture cleanup", restoreStderr())
+		reportCleanupError(t, "close duplicated stderr", syscall.Close(originalFD))
+		reportCleanupError(t, "close captured stderr reader", reader.Close())
+		reportCleanupError(t, "close captured stderr writer", writer.Close())
+	}()
+
+	fn()
+	reportCleanupError(t, "close captured stderr writer", writer.Close())
+	if err := restoreStderr(); err != nil {
+		t.Fatalf("restore stderr: %v", err)
+	}
+
+	captured, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(captured)
+}
+
+func reportCleanupError(t *testing.T, operation string, err error) {
+	t.Helper()
+	if err == nil || errors.Is(err, os.ErrClosed) {
+		return
+	}
+	t.Errorf("%s: %v", operation, err)
 }

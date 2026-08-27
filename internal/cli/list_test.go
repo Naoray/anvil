@@ -3,16 +3,86 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/naoray/anvil/internal/git"
 )
+
+var errCommandRun = errors.New("command run")
+
+func executeCommandForFlagValidation(t *testing.T, command *cobra.Command, args []string, flags ...string) error {
+	t.Helper()
+
+	originalRunE := command.RunE
+	originalPersistentPreRunE := rootCmd.PersistentPreRunE
+	originalSilenceUsage := rootCmd.SilenceUsage
+	originalValues := make(map[string]string, len(flags))
+	originalChanged := make(map[string]bool, len(flags))
+	for _, name := range flags {
+		flag := command.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("flag %q is not defined on %s", name, command.Name())
+		}
+		originalValues[name] = flag.Value.String()
+		originalChanged[name] = flag.Changed
+	}
+
+	command.RunE = func(*cobra.Command, []string) error {
+		return errCommandRun
+	}
+	rootCmd.PersistentPreRunE = nil
+	rootCmd.SilenceUsage = true
+	rootCmd.SetArgs(args)
+
+	defer func() {
+		command.RunE = originalRunE
+		rootCmd.PersistentPreRunE = originalPersistentPreRunE
+		rootCmd.SilenceUsage = originalSilenceUsage
+		rootCmd.SetArgs(nil)
+		for name, value := range originalValues {
+			flag := command.Flags().Lookup(name)
+			if err := flag.Value.Set(value); err != nil {
+				t.Errorf("resetting %s flag: %v", name, err)
+			}
+			flag.Changed = originalChanged[name]
+		}
+	}()
+
+	return rootCmd.Execute()
+}
+
+func TestListCommand_RejectsJSONAndPorcelainTogether(t *testing.T) {
+	err := executeCommandForFlagValidation(t, listCmd, []string{"list", "--json", "--porcelain"}, "json", "porcelain")
+
+	assert.EqualError(t, err, "if any flags in the group [json porcelain] are set none of the others can be; [json porcelain] were all set")
+}
+
+func TestListCommand_AcceptsEachOutputMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "table", args: []string{"list"}},
+		{name: "json", args: []string{"list", "--json"}},
+		{name: "porcelain", args: []string{"list", "--porcelain"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := executeCommandForFlagValidation(t, listCmd, tt.args, "json", "porcelain")
+
+			assert.ErrorIs(t, err, errCommandRun)
+		})
+	}
+}
 
 // createTestRepo creates a regular git repo and returns (gitDir, repoDir)
 func createTestRepo(t *testing.T) (string, string) {
@@ -236,6 +306,46 @@ func TestPrintPorcelain_Empty(t *testing.T) {
 		t.Fatalf("printPorcelain failed: %v", err)
 	}
 	assert.Equal(t, "", buf.String(), "empty worktree list should produce empty output")
+}
+
+func TestPrintOutputs_ExposeWorktreeStates(t *testing.T) {
+	worktrees := []git.Worktree{
+		{Path: "/test/bare worktree", Bare: true},
+		{Path: "/test/detached worktree", Detached: true},
+		{Path: "/test/locked worktree", Branch: "feature/locked", Locked: true, LockReason: "keep for review"},
+	}
+
+	var tableOutput bytes.Buffer
+	if err := printTable(&tableOutput, worktrees); err != nil {
+		t.Fatalf("printTable failed: %v", err)
+	}
+	for _, expected := range []string{"bare", "detached", "locked", "keep for review"} {
+		if !strings.Contains(tableOutput.String(), expected) {
+			t.Errorf("table output should contain %q, got: %s", expected, tableOutput.String())
+		}
+	}
+
+	var jsonOutput bytes.Buffer
+	if err := printJSON(&jsonOutput, worktrees); err != nil {
+		t.Fatalf("printJSON failed: %v", err)
+	}
+	var result []map[string]any
+	if err := json.Unmarshal(jsonOutput.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\n%s", err, jsonOutput.String())
+	}
+	if result[0]["isBare"] != true || result[1]["isDetached"] != true || result[2]["isLocked"] != true || result[2]["lockReason"] != "keep for review" {
+		t.Errorf("JSON output should expose worktree states, got: %s", jsonOutput.String())
+	}
+
+	var porcelainOutput bytes.Buffer
+	if err := printPorcelain(&porcelainOutput, worktrees); err != nil {
+		t.Fatalf("printPorcelain failed: %v", err)
+	}
+	for _, expected := range []string{"bare", "detached", "locked", "keep%20for%20review"} {
+		if !strings.Contains(porcelainOutput.String(), expected) {
+			t.Errorf("porcelain output should contain %q, got: %s", expected, porcelainOutput.String())
+		}
+	}
 }
 
 func TestPrintJSON_Empty(t *testing.T) {

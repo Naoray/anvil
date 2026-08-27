@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
-	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
 
@@ -27,7 +26,16 @@ func NewManager(siteDrivers ...config.SiteDriver) *Manager {
 }
 
 func (m *Manager) Register(preset Preset) {
-	m.presets[preset.Name()] = preset
+	if preset == nil {
+		panic("cannot register a nil preset")
+	}
+
+	name := preset.Name()
+	if _, exists := m.presets[name]; exists {
+		panic(fmt.Sprintf("preset %q is already registered", name))
+	}
+
+	m.presets[name] = preset
 	m.presetOrder = append(m.presetOrder, preset)
 }
 
@@ -45,13 +53,6 @@ func builtInPresets(siteDriver config.SiteDriver) []Preset {
 		NewLaravelSharedDB(siteDriver), // shared-database Laravel app (config-only, no auto-detect)
 		NewLaravel(siteDriver),
 		NewPHP(),
-	}
-}
-
-// RegisterAllWithScaffold registers all built-in presets with a scaffold manager
-func RegisterAllWithScaffold(m *scaffold.ScaffoldManager, siteDrivers ...config.SiteDriver) {
-	for _, p := range builtInPresets(resolveSiteDriver(siteDrivers)) {
-		m.RegisterPreset(p)
 	}
 }
 
@@ -75,10 +76,29 @@ func (m *Manager) Suggest(path string) string {
 	return "php"
 }
 
+// Resolve selects one preset definition for a run. Explicit selection wins
+// over project configuration, which wins over filesystem detection.
+func (m *Manager) Resolve(explicit, configured, path string) ResolvedPreset {
+	name := explicit
+	if name == "" {
+		name = configured
+	}
+	if name == "" {
+		name = m.Detect(path)
+	}
+
+	resolved := ResolvedPreset{name: name}
+	if preset, ok := m.Get(name); ok {
+		resolved.defaultSteps = preset.DefaultSteps()
+		resolved.cleanupSteps = preset.CleanupSteps()
+	}
+	return resolved
+}
+
 func (m *Manager) Available() []string {
-	names := make([]string, 0, len(m.presets))
-	for name := range m.presets {
-		names = append(names, name)
+	names := make([]string, 0, len(m.presetOrder))
+	for _, preset := range m.presetOrder {
+		names = append(names, preset.Name())
 	}
 	return names
 }

@@ -40,13 +40,10 @@ available branches or entering a new branch name.`,
 		if len(args) > 0 {
 			branch = args[0]
 		} else if ui.IsInteractive() {
-			localBranches, err := git.ListAllBranches(pc.GitDir)
+			localBranches, remoteBranches, err := branchRefsForSelection(pc.GitDir)
 			if err != nil {
-				return fmt.Errorf("listing local branches: %w", err)
+				return err
 			}
-
-			// Best-effort: remote branches enhance UI selection but are not required
-			remoteBranches, _ := git.ListRemoteBranches(pc.GitDir)
 
 			selected, err := ui.SelectBranchInteractive(pc.GitDir, localBranches, remoteBranches)
 			if err != nil {
@@ -122,19 +119,27 @@ available branches or entering a new branch name.`,
 				ui.PrintInfo("Scaffold skipped (run 'anvil scaffold' to set up later)")
 			}
 		} else if !dryRun {
-			preset := pc.Config.Preset
-			if preset == "" {
-				preset = pc.PresetManager().Detect(absWorktreePath)
-			}
+			resolvedPreset := pc.ResolvePreset("", absWorktreePath)
 
-			if verbose && preset != "" {
-				ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", preset))
+			if verbose && resolvedPreset.Name() != "" {
+				ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", resolvedPreset.Name()))
 			}
 
 			repoName := filepath.Base(filepath.Dir(absWorktreePath))
 			siteName := worktreeSiteName(absWorktreePath, branch, pc.DefaultBranch, pc.Config.SiteName)
 
-			if err := pc.ScaffoldManager().RunScaffold(absWorktreePath, branch, repoName, siteName, preset, pc.Config, false, verbose, quiet); err != nil {
+			if err := pc.ScaffoldManager().RunScaffold(
+				absWorktreePath,
+				branch,
+				repoName,
+				siteName,
+				resolvedPreset.Name(),
+				resolvedPreset.DefaultSteps(),
+				pc.Config,
+				false,
+				verbose,
+				quiet,
+			); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			}
 
@@ -149,6 +154,14 @@ available branches or entering a new branch name.`,
 		ui.PrintDone(fmt.Sprintf("Worktree ready at %s", absWorktreePath))
 		return nil
 	},
+}
+
+func branchRefsForSelection(gitDir string) (local, remote []string, err error) {
+	local, remote, err = git.GetBranchRefs(gitDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing branches: %w", err)
+	}
+	return local, remote, nil
 }
 
 // stripRemotePrefix removes the remote prefix from a branch name

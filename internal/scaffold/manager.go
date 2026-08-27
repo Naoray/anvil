@@ -16,9 +16,7 @@ import (
 )
 
 type ScaffoldManager struct {
-	presets     map[string]Preset
-	presetOrder []string
-	registry    StepRegistry
+	registry StepRegistry
 }
 
 type CleanupOptions struct {
@@ -32,82 +30,38 @@ type CleanupOptions struct {
 // This abstraction allows for dependency injection and testing.
 type StepRegistry interface {
 	Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error)
-	ListRegistered() []string
 }
 
-type Preset interface {
-	Name() string
-	Detect(path string) bool
-	DefaultSteps() []config.StepConfig
-	CleanupSteps() []config.CleanupStep
-}
-
-// NewScaffoldManager creates a new scaffold manager using the global step registry.
-// Deprecated: Use NewScaffoldManagerWithRegistry instead for explicit dependency injection.
+// NewScaffoldManager creates a new scaffold manager with a fresh default registry.
 func NewScaffoldManager() *ScaffoldManager {
-	return NewScaffoldManagerWithRegistry(nil)
+	registry := steps.NewRegistry()
+	registry.RegisterDefaults()
+	return NewScaffoldManagerWithRegistry(registry)
 }
 
 // NewScaffoldManagerWithRegistry creates a new scaffold manager with the given step registry.
-// If registry is nil, the global registry is used for backward compatibility.
 func NewScaffoldManagerWithRegistry(registry StepRegistry) *ScaffoldManager {
 	if registry == nil {
-		registry = &globalStepRegistryAdapter{}
+		panic("scaffold manager requires an explicit step registry")
 	}
 	return &ScaffoldManager{
-		presets:     make(map[string]Preset),
-		presetOrder: make([]string, 0),
-		registry:    registry,
+		registry: registry,
 	}
 }
 
-// globalStepRegistryAdapter adapts the global step functions to the StepRegistry interface.
-// This provides backward compatibility during the migration to explicit registry.
-type globalStepRegistryAdapter struct{}
-
-func (a *globalStepRegistryAdapter) Create(name string, cfg config.StepConfig) (types.ScaffoldStep, error) {
-	return steps.Create(name, cfg)
-}
-
-func (a *globalStepRegistryAdapter) ListRegistered() []string {
-	return steps.ListRegistered()
-}
-
-func (m *ScaffoldManager) RegisterPreset(preset Preset) {
-	m.presets[preset.Name()] = preset
-	m.presetOrder = append(m.presetOrder, preset.Name())
-}
-
-func (m *ScaffoldManager) GetPreset(name string) (Preset, bool) {
-	preset, ok := m.presets[name]
-	return preset, ok
-}
-
-func (m *ScaffoldManager) DetectPreset(path string) string {
-	for _, name := range m.presetOrder {
-		if preset, ok := m.presets[name]; ok && preset.Detect(path) {
-			return preset.Name()
-		}
-	}
-	return ""
-}
-
-func (m *ScaffoldManager) GetStepsForWorktree(cfg *config.Config, worktreePath, branch string) ([]types.ScaffoldStep, error) {
+func (m *ScaffoldManager) GetStepsForWorktree(
+	cfg *config.Config,
+	worktreePath, branch, presetName string,
+	defaultSteps []config.StepConfig,
+) ([]types.ScaffoldStep, error) {
 	var stepsList []types.ScaffoldStep
 
-	presetName := cfg.Preset
-	if presetName == "" {
-		presetName = m.DetectPreset(worktreePath)
-	}
-
-	if preset, ok := m.GetPreset(presetName); ok {
-		for _, stepConfig := range preset.DefaultSteps() {
-			step, err := m.registry.Create(stepConfig.Name, stepConfig)
-			if err != nil {
-				return nil, fmt.Errorf("creating step %q: %w", stepConfig.Name, err)
-			}
-			stepsList = append(stepsList, step)
+	for _, stepConfig := range defaultSteps {
+		step, err := m.registry.Create(stepConfig.Name, stepConfig)
+		if err != nil {
+			return nil, fmt.Errorf("creating step %q: %w", stepConfig.Name, err)
 		}
+		stepsList = append(stepsList, step)
 	}
 
 	if cfg.Scaffold.Override {
@@ -127,23 +81,20 @@ func (m *ScaffoldManager) GetStepsForWorktree(cfg *config.Config, worktreePath, 
 	return stepsList, nil
 }
 
-func (m *ScaffoldManager) GetCleanupSteps(cfg *config.Config, worktreePath, branch string) ([]types.ScaffoldStep, error) {
+func (m *ScaffoldManager) GetCleanupSteps(
+	cfg *config.Config,
+	worktreePath, branch, presetName string,
+	cleanupSteps []config.CleanupStep,
+) ([]types.ScaffoldStep, error) {
 	var stepsList []types.ScaffoldStep
 
-	presetName := cfg.Preset
-	if presetName == "" {
-		presetName = m.DetectPreset(worktreePath)
-	}
-
-	if preset, ok := m.GetPreset(presetName); ok {
-		for _, cleanupConfig := range preset.CleanupSteps() {
-			stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
-			step, err := m.registry.Create(cleanupConfig.Name, stepConfig)
-			if err != nil {
-				return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
-			}
-			stepsList = append(stepsList, step)
+	for _, cleanupConfig := range cleanupSteps {
+		stepConfig := m.cleanupConfigToStepConfig(cleanupConfig)
+		step, err := m.registry.Create(cleanupConfig.Name, stepConfig)
+		if err != nil {
+			return nil, fmt.Errorf("creating cleanup step %q: %w", cleanupConfig.Name, err)
 		}
+		stepsList = append(stepsList, step)
 	}
 
 	for _, cleanupConfig := range cfg.Cleanup.Steps {
@@ -190,7 +141,12 @@ func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]ty
 	return stepsList, nil
 }
 
-func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
+func (m *ScaffoldManager) RunScaffold(
+	worktreePath, branch, repoName, siteName, preset string,
+	defaultSteps []config.StepConfig,
+	cfg *config.Config,
+	dryRun, verbose, quiet bool,
+) error {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
 
 	// Run pre-flight checks with spinner
@@ -209,7 +165,7 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 		return err
 	}
 
-	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch)
+	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch, preset, defaultSteps)
 	if err != nil {
 		return fmt.Errorf("getting scaffold steps: %w", err)
 	}
@@ -225,8 +181,11 @@ func (m *ScaffoldManager) RunScaffold(worktreePath, branch, repoName, siteName, 
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {
+	migrated := false
 	if !dryRun {
-		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
+		var err error
+		migrated, err = config.MigrateDbSuffixToLocal(worktreePath)
+		if err != nil {
 			return fmt.Errorf("migrating db_suffix: %w", err)
 		}
 	}
@@ -238,6 +197,9 @@ func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun boo
 	if localState.DbSuffix != "" {
 		ctx.SetDbSuffix(localState.DbSuffix)
 		ctx.SetDbSuffixLoadedFromState()
+		if migrated && len(localState.Databases) == 0 {
+			ctx.SetDbSuffixLoadedFromLegacyState()
+		}
 		return nil
 	}
 
@@ -252,13 +214,19 @@ func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun boo
 	return nil
 }
 
-func (m *ScaffoldManager) RunCleanup(worktreePath, branch, repoName, siteName, preset string, cfg *config.Config, dryRun, verbose, quiet bool) error {
+func (m *ScaffoldManager) RunCleanup(
+	worktreePath, branch, repoName, siteName, preset string,
+	cleanupSteps []config.CleanupStep,
+	cfg *config.Config,
+	dryRun, verbose, quiet bool,
+) error {
 	return m.RunCleanupWithOptions(
 		worktreePath,
 		branch,
 		repoName,
 		siteName,
 		preset,
+		cleanupSteps,
 		cfg,
 		CleanupOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
 	)
@@ -266,12 +234,13 @@ func (m *ScaffoldManager) RunCleanup(worktreePath, branch, repoName, siteName, p
 
 func (m *ScaffoldManager) RunCleanupWithOptions(
 	worktreePath, branch, repoName, siteName, preset string,
+	cleanupSteps []config.CleanupStep,
 	cfg *config.Config,
 	cleanupOpts CleanupOptions,
 ) error {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
 
-	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch)
+	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch, preset, cleanupSteps)
 	if err != nil {
 		return fmt.Errorf("getting cleanup steps: %w", err)
 	}

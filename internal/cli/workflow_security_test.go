@@ -63,3 +63,8 @@ func TestWorkflowRunScriptsContainNoGitHubExpressions(t *testing.T) {
 		})
 	}
 }
+
+func TestRepositoryHasNoParallelGoReleaserSpecification(t *testing.T) {
+	_, err := os.Stat(filepath.Join("..", "..", ".goreleaser.yml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}

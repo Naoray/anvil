@@ -137,7 +137,9 @@ func TestLaravelPreset_HerdCompatibility(t *testing.T) {
 func TestLaravelPreset_PHPStanCacheStepIsNoOpWithoutBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 	cacheStepConfig := laravelPHPStanCacheStepConfig(t)
-	cacheStep, err := scaffoldsteps.Create(cacheStepConfig.Name, cacheStepConfig)
+	registry := scaffoldsteps.NewRegistry()
+	registry.RegisterDefaults()
+	cacheStep, err := registry.Create(cacheStepConfig.Name, cacheStepConfig)
 	require.NoError(t, err)
 
 	ctx := &types.ScaffoldContext{WorktreePath: tmpDir}
@@ -162,6 +164,8 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 
 	commander := &phpstanInvocationCommander{t: t, worktreePath: tmpDir}
 	commandExecutor := anvil_exec.NewCommandExecutor(commander)
+	registry := scaffoldsteps.NewRegistry()
+	registry.RegisterDefaults()
 
 	var relevantSteps []types.ScaffoldStep
 	for _, stepConfig := range NewLaravel().DefaultSteps() {
@@ -174,7 +178,7 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 			continue
 		}
 
-		step, err := scaffoldsteps.Create(stepConfig.Name, stepConfig)
+		step, err := registry.Create(stepConfig.Name, stepConfig)
 		require.NoError(t, err)
 		relevantSteps = append(relevantSteps, step)
 	}
@@ -202,7 +206,13 @@ func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testin
 type phpstanInvocationCommander struct {
 	t            *testing.T
 	worktreePath string
-	call         *anvil_exec.CommandCall
+	call         *commandCall
+}
+
+type commandCall struct {
+	Dir     string
+	Command string
+	Args    []string
 }
 
 func (c *phpstanInvocationCommander) Run(_ context.Context, dir string, command string, args ...string) ([]byte, error) {
@@ -214,7 +224,7 @@ func (c *phpstanInvocationCommander) Run(_ context.Context, dir string, command 
 	require.Contains(c.t, string(envContent), "APP_KEY=generated-key")
 	require.Contains(c.t, string(envContent), "DB_DATABASE=feature_test")
 
-	c.call = &anvil_exec.CommandCall{
+	c.call = &commandCall{
 		Dir:     dir,
 		Command: command,
 		Args:    append([]string(nil), args...),
@@ -262,12 +272,14 @@ func TestLaravelSharedDBPreset_DefaultStepsAreConstructible(t *testing.T) {
 	registry := scaffoldsteps.NewRegistry()
 	registry.RegisterDefaults()
 	manager := scaffold.NewScaffoldManagerWithRegistry(registry)
-	manager.RegisterPreset(NewLaravelSharedDB())
+	resolved := NewManager().Resolve("laravel-shared-db", "", "")
 
 	steps, err := manager.GetStepsForWorktree(
 		&config.Config{Preset: "laravel-shared-db"},
 		t.TempDir(),
 		"feature/yerd",
+		resolved.Name(),
+		resolved.DefaultSteps(),
 	)
 	require.NoError(t, err)
 	require.Len(t, steps, 9)
@@ -375,4 +387,72 @@ func TestManager_Available(t *testing.T) {
 	assert.Contains(t, available, "laravel")
 	assert.Contains(t, available, "php")
 	assert.Contains(t, available, "laravel-shared-db")
+}
+
+func TestManager_RegisterRejectsDuplicateNames(t *testing.T) {
+	m := NewManager()
+
+	assert.Panics(t, func() {
+		m.Register(NewPHP())
+	})
+}
+
+func TestManager_AvailablePreservesDetectionOrder(t *testing.T) {
+	assert.Equal(t, []string{"laravel-shared-db", "laravel", "php"}, NewManager().Available())
+}
+
+func TestManager_ResolveConfiguredPresetBeforeDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "composer.json"), []byte(`{"name": "test/app"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "artisan"), []byte("#!/usr/bin/env php"), 0644))
+
+	resolved := NewManager().Resolve("", "php", tmpDir)
+
+	assert.Equal(t, "php", resolved.Name())
+}
+
+func TestManager_ResolvePreservesUnknownConfiguredName(t *testing.T) {
+	resolved := NewManager().Resolve("", "unknown", t.TempDir())
+
+	assert.Equal(t, "unknown", resolved.Name())
+	assert.Nil(t, resolved.DefaultSteps())
+	assert.Nil(t, resolved.CleanupSteps())
+}
+
+func TestManager_ResolveDoesNotAutoDetectLaravelSharedDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "composer.json"), []byte(`{"name": "test/app"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "artisan"), []byte("#!/usr/bin/env php"), 0644))
+
+	resolved := NewManager().Resolve("", "", tmpDir)
+
+	assert.Equal(t, "laravel", resolved.Name())
+}
+
+func TestResolvedPreset_ReturnsIndependentStepCopies(t *testing.T) {
+	manager := NewManager()
+	resolved := manager.Resolve("laravel", "", "")
+
+	defaultSteps := resolved.DefaultSteps()
+	defaultSteps[0].Args[0] = "changed"
+	defaultSteps[0].Condition["file_exists"] = "changed"
+	cleanupSteps := resolved.CleanupSteps()
+	cleanupSteps[0].Args[0] = "changed"
+
+	fresh := manager.Resolve("laravel", "", "")
+	assert.Equal(t, []string{"install"}, fresh.DefaultSteps()[0].Args)
+	assert.Equal(t, "composer.lock", fresh.DefaultSteps()[0].Condition["file_exists"])
+	assert.Equal(t, []string{"unlink", "{{ .SiteName }}"}, fresh.CleanupSteps()[0].Args)
+}
+
+func TestManager_ResolveExplicitPresetOverridesConfiguredAndDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "composer.json"), []byte(`{"name": "test/app"}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "artisan"), []byte("#!/usr/bin/env php"), 0644))
+
+	resolved := NewManager().Resolve("php", "laravel", tmpDir)
+
+	assert.Equal(t, "php", resolved.Name())
+	assert.Len(t, resolved.DefaultSteps(), 2)
+	assert.Nil(t, resolved.CleanupSteps())
 }

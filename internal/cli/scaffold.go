@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -63,7 +64,7 @@ Examples:
 				if err != nil {
 					continue
 				}
-				if wtAbsPath == absResolved {
+				if git.PathsEqual(wtAbsPath, absResolved) {
 					selectedWorktree = &wt
 					break
 				}
@@ -73,22 +74,9 @@ Examples:
 				return fmt.Errorf("worktree not found: %s", resolvedPath)
 			}
 		} else if pc.IsInWorktree() {
-			for _, wt := range worktrees {
-				wtAbsPath, err := filepath.Abs(wt.Path)
-				if err != nil {
-					continue
-				}
-				projectRootAbsPath, err := filepath.Abs(pc.ProjectPath)
-				if err != nil {
-					continue
-				}
-
-				if filepath.Dir(wtAbsPath) == projectRootAbsPath {
-					if wt.IsCurrent {
-						selectedWorktree = &wt
-						break
-					}
-				}
+			selectedWorktree, err = selectWorktreeByContainment(worktrees, pc.CWD)
+			if err != nil {
+				return fmt.Errorf("finding current worktree: %w", err)
 			}
 
 			if selectedWorktree == nil {
@@ -124,19 +112,27 @@ Examples:
 		ui.PrintStep(fmt.Sprintf("Scaffolding worktree: %s", selectedWorktree.Branch))
 		ui.PrintInfo(fmt.Sprintf("Path: %s", selectedWorktree.Path))
 
-		preset := pc.Config.Preset
-		if preset == "" {
-			preset = pc.PresetManager().Detect(selectedWorktree.Path)
-		}
+		resolvedPreset := pc.ResolvePreset("", selectedWorktree.Path)
 
-		if verbose && preset != "" {
-			ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", preset))
+		if verbose && resolvedPreset.Name() != "" {
+			ui.PrintInfo(fmt.Sprintf("Running scaffold for preset: %s", resolvedPreset.Name()))
 		}
 
 		repoName := filepath.Base(pc.ProjectPath)
 		siteName := worktreeSiteName(selectedWorktree.Path, selectedWorktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 
-		if err := pc.ScaffoldManager().RunScaffold(selectedWorktree.Path, selectedWorktree.Branch, repoName, siteName, preset, pc.Config, dryRun, verbose, quiet); err != nil {
+		if err := pc.ScaffoldManager().RunScaffold(
+			selectedWorktree.Path,
+			selectedWorktree.Branch,
+			repoName,
+			siteName,
+			resolvedPreset.Name(),
+			resolvedPreset.DefaultSteps(),
+			pc.Config,
+			dryRun,
+			verbose,
+			quiet,
+		); err != nil {
 			ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
 			return err
 		}
@@ -144,6 +140,49 @@ Examples:
 		ui.PrintDone(fmt.Sprintf("Scaffold complete: %s", selectedWorktree.Branch))
 		return nil
 	},
+}
+
+func selectWorktreeByContainment(worktrees []git.Worktree, cwd string) (*git.Worktree, error) {
+	canonicalCWD, err := canonicalScaffoldPath(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalizing current directory: %w", err)
+	}
+
+	var selected *git.Worktree
+	selectedRoot := ""
+	for i := range worktrees {
+		canonicalRoot, err := canonicalScaffoldPath(worktrees[i].Path)
+		if err != nil {
+			continue
+		}
+
+		rel, err := filepath.Rel(canonicalRoot, canonicalCWD)
+		if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+
+		if selected == nil || len(canonicalRoot) > len(selectedRoot) ||
+			(len(canonicalRoot) == len(selectedRoot) && canonicalRoot < selectedRoot) {
+			selected = &worktrees[i]
+			selectedRoot = canonicalRoot
+		}
+	}
+
+	return selected, nil
+}
+
+func canonicalScaffoldPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	evalPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return evalPath, nil
+	}
+
+	return absPath, nil
 }
 
 func init() {

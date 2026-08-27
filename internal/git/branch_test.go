@@ -1,6 +1,7 @@
 package git
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -92,14 +93,73 @@ func TestGetBranchRefs(t *testing.T) {
 	assert.Empty(t, remote)
 }
 
-func TestListLocalBranches(t *testing.T) {
+func TestGetBranchRefs_PreservesBranchInventory(t *testing.T) {
 	repoDir := createTestRepo(t)
 	gitDir := filepath.Join(repoDir, ".git")
+	commit := runGitOutput(t, repoDir, "rev-parse", "HEAD")
 
-	// Get local branches
-	branches, err := ListLocalBranches(gitDir)
+	for _, branch := range []string{"feature/nested/z", "feature/checked-out", "release"} {
+		runGit(t, repoDir, "branch", branch)
+	}
+
+	runGit(t, repoDir, "remote", "add", "origin", "https://example.test/origin.git")
+	runGit(t, repoDir, "remote", "add", "upstream", "https://example.test/upstream.git")
+	for _, ref := range []string{
+		"refs/remotes/origin/main",
+		"refs/remotes/origin/feature/nested/z",
+		"refs/remotes/upstream/main",
+		"refs/remotes/upstream/release",
+	} {
+		runGit(t, repoDir, "update-ref", ref, commit)
+	}
+	runGit(t, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	runGit(t, repoDir, "symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main")
+
+	checkedOutPath := filepath.Join(t.TempDir(), "checked-out")
+	if err := CreateWorktree(gitDir, checkedOutPath, "feature/checked-out", "main"); err != nil {
+		t.Fatalf("creating checked-out worktree: %v", err)
+	}
+
+	local, remote, err := GetBranchRefs(gitDir)
 	assert.NoError(t, err)
+	assert.Equal(t, []string{"feature/checked-out", "feature/nested/z", "main", "release"}, local)
+	assert.Equal(t, []string{
+		"origin/feature/nested/z",
+		"origin/main",
+		"upstream/main",
+		"upstream/release",
+	}, remote)
+}
 
-	// Should have at least main branch
-	assert.Contains(t, branches, "main")
+func TestGetBranchRefs_EmptyInventory(t *testing.T) {
+	repoDir := filepath.Join(t.TempDir(), "empty")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("creating repository directory: %v", err)
+	}
+	runGit(t, repoDir, "init", "-b", "main")
+
+	local, remote, err := GetBranchRefs(filepath.Join(repoDir, ".git"))
+	assert.NoError(t, err)
+	assert.Empty(t, local)
+	assert.Empty(t, remote)
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(output))
 }

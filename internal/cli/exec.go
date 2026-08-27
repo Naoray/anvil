@@ -142,23 +142,20 @@ func resolveExecDatabases(worktreeRoot string) (string, string, error) {
 		return "", "", err
 	}
 
-	var appNames, testNames []string
+	appDb := ""
+	testDb := ""
 	for _, database := range state.Databases {
 		switch database.Role {
 		case config.DbRoleApplication:
-			appNames = append(appNames, database.Name)
+			appDb = database.Name
 		case config.DbRoleTesting:
-			testNames = append(testNames, database.Name)
+			testDb = database.Name
+		case config.DbRoleAuxiliary:
+			// Auxiliary records are cleanup-only and never select exec databases.
 		}
 	}
 
-	if len(testNames) > 1 {
-		return "", "", fmt.Errorf("multiple testing databases recorded in .anvil.local (%s); remove the stale entries and retry.", strings.Join(testNames, ", ")) //nolint:staticcheck // ST1005: locked user-facing CLI contract wording
-	}
-	if len(appNames) > 1 {
-		return "", "", fmt.Errorf("multiple application databases recorded in .anvil.local (%s); remove the stale entries and retry.", strings.Join(appNames, ", ")) //nolint:staticcheck // ST1005: locked user-facing CLI contract wording
-	}
-	if len(testNames) == 0 {
+	if testDb == "" {
 		message := legacyExecHint
 		if dbName := envValues["DB_DATABASE"]; dbName != "" && state.DbSuffix != "" && !strings.HasSuffix(dbName, "_"+state.DbSuffix) {
 			message += "\n" + sharedDbExecHint
@@ -166,11 +163,7 @@ func resolveExecDatabases(worktreeRoot string) (string, string, error) {
 		return "", "", errors.New(message) //nolint:staticcheck // ST1005: locked user-facing CLI contract wording
 	}
 
-	appDb := ""
-	if len(appNames) == 1 {
-		appDb = appNames[0]
-	}
-	return appDb, testNames[0], nil
+	return appDb, testDb, nil
 }
 
 // buildExecEnv returns environ with the managed database variables replaced by
