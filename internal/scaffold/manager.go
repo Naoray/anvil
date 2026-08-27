@@ -181,8 +181,11 @@ func (m *ScaffoldManager) RunScaffold(
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {
+	migrated := false
 	if !dryRun {
-		if _, err := config.MigrateDbSuffixToLocal(worktreePath); err != nil {
+		var err error
+		migrated, err = config.MigrateDbSuffixToLocal(worktreePath)
+		if err != nil {
 			return fmt.Errorf("migrating db_suffix: %w", err)
 		}
 	}
@@ -194,6 +197,9 @@ func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun boo
 	if localState.DbSuffix != "" {
 		ctx.SetDbSuffix(localState.DbSuffix)
 		ctx.SetDbSuffixLoadedFromState()
+		if migrated && len(localState.Databases) == 0 {
+			ctx.SetDbSuffixLoadedFromLegacyState()
+		}
 		return nil
 	}
 

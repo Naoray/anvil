@@ -478,6 +478,12 @@ func TestDbCreateStep_TestingRoleExistsIsSuccessNoRotationPGContract(t *testing.
 	dir := t.TempDir()
 	client := NewMockDatabaseClient()
 	client.AddDatabase("dashboard_top_provider_test")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{{
+			Name: "dashboard_top_provider_test", Engine: "pgsql", Role: config.DbRoleTesting,
+		}},
+	}))
 	step := NewDbCreateStepWithFactory(config.StepConfig{
 		Type: "pgsql",
 		Role: config.DbRoleTesting,
@@ -646,6 +652,12 @@ func TestCreateWithRetry_ExistsOnPersistedSuffixIdempotentNoRotationPGContract(t
 	dir := t.TempDir()
 	client := NewMockDatabaseClient()
 	client.AddDatabase("dashboard_top_provider")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{{
+			Name: "dashboard_top_provider", Engine: "pgsql", Role: config.DbRoleApplication,
+		}},
+	}))
 	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "pgsql"}, MockClientFactory(client))
 	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
 	ctx.SetDbSuffix("top_provider")
@@ -658,6 +670,39 @@ func TestCreateWithRetry_ExistsOnPersistedSuffixIdempotentNoRotationPGContract(t
 	require.NoError(t, err)
 	require.Len(t, state.Databases, 1)
 	assert.Equal(t, "dashboard_top_provider", state.Databases[0].Name)
+}
+
+func TestCreateWithRetry_ExistsOnPersistedSuffixUnrecordedApplicationPrefixRotates(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	client.AddDatabase("quotes_top_provider")
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{{
+			Name: "dashboard_top_provider", Engine: "pgsql", Role: config.DbRoleApplication,
+		}},
+	}))
+	step := NewDbCreateStepWithFactory(config.StepConfig{
+		Type: "pgsql",
+		Args: []string{"--prefix", "quotes"},
+	}, MockClientFactory(client))
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+	ctx.SetDbSuffixLoadedFromState()
+
+	require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	assert.Equal(t, []string{
+		"quotes_top_provider",
+		"quotes_" + ctx.GetDbSuffix(),
+	}, client.GetCreateCalls())
+	assert.NotEqual(t, "top_provider", ctx.GetDbSuffix())
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []config.OwnedDatabase{
+		{Name: "dashboard_top_provider", Engine: "pgsql", Role: config.DbRoleApplication},
+		{Name: "quotes_" + ctx.GetDbSuffix(), Engine: "pgsql", Role: config.DbRoleAuxiliary},
+	}, state.Databases)
 }
 
 func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {

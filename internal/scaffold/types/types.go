@@ -16,18 +16,19 @@ import (
 )
 
 type ScaffoldContext struct {
-	WorktreePath      string
-	Branch            string
-	RepoName          string
-	SiteName          string
-	Preset            string
-	Env               map[string]string
-	Path              string
-	RepoPath          string
-	DbSuffix          string
-	Vars              map[string]string
-	dbSuffixFromState bool
-	mu                sync.RWMutex
+	WorktreePath            string
+	Branch                  string
+	RepoName                string
+	SiteName                string
+	Preset                  string
+	Env                     map[string]string
+	Path                    string
+	RepoPath                string
+	DbSuffix                string
+	Vars                    map[string]string
+	dbSuffixFromState       bool
+	dbSuffixFromLegacyState bool
+	mu                      sync.RWMutex
 }
 
 type StepOptions struct {
@@ -365,6 +366,18 @@ func (ctx *ScaffoldContext) DbSuffixFromState() bool {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 	return ctx.dbSuffixFromState
+}
+
+func (ctx *ScaffoldContext) SetDbSuffixLoadedFromLegacyState() {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.dbSuffixFromLegacyState = true
+}
+
+func (ctx *ScaffoldContext) DbSuffixFromLegacyState() bool {
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	return ctx.dbSuffixFromLegacyState
 }
 
 func (ctx *ScaffoldContext) SnapshotForTemplate() map[string]string {

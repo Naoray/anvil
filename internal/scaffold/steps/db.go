@@ -303,7 +303,11 @@ func (s *DbCreateStep) createWithRetry(
 			return fmt.Errorf("failed to create database: %w", err)
 		}
 
-		if ctx.DbSuffixFromState() {
+		known, err := s.knownDatabaseCollision(ctx, dbName, engine, config.DbRoleApplication)
+		if err != nil {
+			return err
+		}
+		if known {
 			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication)
 		}
 
@@ -351,10 +355,45 @@ func (s *DbCreateStep) createTestDatabase(
 		return nil
 	}
 
-	if err := client.CreateDatabase(dbName); err != nil && !IsDatabaseExistsError(err) {
-		return fmt.Errorf("failed to create testing database: %w", err)
+	if err := client.CreateDatabase(dbName); err != nil {
+		if !IsDatabaseExistsError(err) {
+			return fmt.Errorf("failed to create testing database: %w", err)
+		}
+
+		known, err := s.knownDatabaseCollision(ctx, dbName, engine, config.DbRoleTesting)
+		if err != nil {
+			return err
+		}
+		if !known {
+			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
+		}
 	}
 	return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleTesting)
+}
+
+func (s *DbCreateStep) knownDatabaseCollision(
+	ctx *types.ScaffoldContext,
+	name string,
+	engine config.DatabaseEngine,
+	role string,
+) (bool, error) {
+	state, err := config.ReadLocalState(ctx.WorktreePath)
+	if err != nil {
+		return false, fmt.Errorf("reading local state for database collision: %w", err)
+	}
+	if len(state.Databases) == 0 {
+		return ctx.DbSuffixFromLegacyState(), nil
+	}
+
+	for _, database := range state.Databases {
+		if database.Name != name || database.Engine != string(engine) {
+			continue
+		}
+		if database.Role == role || database.Role == config.DbRoleAuxiliary {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *DbCreateStep) persistOwnedDatabase(ctx *types.ScaffoldContext, name string, engine config.DatabaseEngine, role string) error {
