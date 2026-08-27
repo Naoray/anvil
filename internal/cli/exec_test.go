@@ -110,6 +110,24 @@ func TestResolveExecDatabases_FromOwnedState(t *testing.T) {
 	assert.Equal(t, "demo_top_provider_test", testDb)
 }
 
+func TestResolveExecDatabases_IgnoresAuxiliaryRecords(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
+		DbSuffix: "top_provider",
+		Databases: []config.OwnedDatabase{
+			{Name: "demo_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+			{Name: "quotes_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+			{Name: "knowledge_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+			{Name: "demo_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		},
+	}))
+
+	appDb, testDb, err := resolveExecDatabases(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "demo_top_provider", appDb)
+	assert.Equal(t, "demo_top_provider_test", testDb)
+}
+
 func TestResolveExecDatabases_TestingOnlyStateOmitsAppDb(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, config.WriteLocalState(dir, config.LocalState{

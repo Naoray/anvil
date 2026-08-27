@@ -539,6 +539,64 @@ func TestDbCreateStep_ApplicationRolePersistsOwnedDatabase(t *testing.T) {
 	}, state.Databases[0])
 }
 
+func TestDbCreateStep_MultipleApplicationRolesPersistCanonicalAndAuxiliaryDatabases(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+	ctx.SetDbSuffix("top_provider")
+
+	for _, prefix := range []string{"app", "quotes", "knowledge"} {
+		step := NewDbCreateStepWithFactory(config.StepConfig{
+			Type: "mysql",
+			Args: []string{"--prefix", prefix},
+		}, MockClientFactory(client))
+		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+	}
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	want := []config.OwnedDatabase{
+		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: "quotes_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+		{Name: "knowledge_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+	}
+	assert.Equal(t, want, state.Databases)
+}
+
+func TestDbCreateStep_MultipleApplicationRolesAreIdempotentOnRescaffold(t *testing.T) {
+	dir := t.TempDir()
+	client := NewMockDatabaseClient()
+	for run := 0; run < 2; run++ {
+		ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
+		if run == 0 {
+			ctx.SetDbSuffix("top_provider")
+		} else {
+			state, err := config.ReadLocalState(dir)
+			require.NoError(t, err)
+			ctx.SetDbSuffix(state.DbSuffix)
+			ctx.SetDbSuffixLoadedFromState()
+		}
+		for _, prefix := range []string{"app", "quotes", "knowledge"} {
+			step := NewDbCreateStepWithFactory(config.StepConfig{
+				Type: "mysql",
+				Args: []string{"--prefix", prefix},
+			}, MockClientFactory(client))
+			require.NoError(t, step.Run(ctx, types.StepOptions{}))
+		}
+	}
+
+	state, err := config.ReadLocalState(dir)
+	require.NoError(t, err)
+	require.Len(t, state.Databases, 3)
+	assert.Equal(t, config.DbRoleApplication, state.Databases[0].Role)
+	assert.Equal(t, "app_top_provider", state.Databases[0].Name)
+	assert.Equal(t, []string{"quotes_top_provider", "knowledge_top_provider"}, []string{
+		state.Databases[1].Name, state.Databases[2].Name,
+	})
+	assert.Equal(t, config.DbRoleAuxiliary, state.Databases[1].Role)
+	assert.Equal(t, config.DbRoleAuxiliary, state.Databases[2].Role)
+}
+
 func TestDbCreateStep_BothRolesPersistenceFailureIsHardError(t *testing.T) {
 	for _, role := range []string{config.DbRoleApplication, config.DbRoleTesting} {
 		t.Run(role, func(t *testing.T) {

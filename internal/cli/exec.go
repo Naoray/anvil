@@ -150,6 +150,8 @@ func resolveExecDatabases(worktreeRoot string) (string, string, error) {
 			appDb = database.Name
 		case config.DbRoleTesting:
 			testDb = database.Name
+		case config.DbRoleAuxiliary:
+			// Auxiliary records are cleanup-only and never select exec databases.
 		}
 	}
 

@@ -135,6 +135,49 @@ func TestDbDestroyStep_OwnedStateDropsExactAndBothWorkerFamilies(t *testing.T) {
 	assert.True(t, client.HasDatabase("dashboard_atop_provider"))
 }
 
+func TestDbDestroyStep_OwnedStateDropsCanonicalAndAuxiliaryFamilies(t *testing.T) {
+	dir := t.TempDir()
+	app := "app_top_provider"
+	quotes := "quotes_top_provider"
+	knowledge := "knowledge_top_provider"
+	testDB := "dashboard_top_provider_test"
+	writeOwnedState(t, dir, []config.OwnedDatabase{
+		{Name: app, Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: quotes, Engine: "mysql", Role: config.DbRoleAuxiliary},
+		{Name: knowledge, Engine: "mysql", Role: config.DbRoleAuxiliary},
+		{Name: testDB, Engine: "mysql", Role: config.DbRoleTesting},
+	})
+
+	client := NewMockDatabaseClient()
+	for _, name := range []string{
+		app, quotes, knowledge, testDB,
+		app + "_test_1",
+		quotes + "_test_1",
+		knowledge + "_test_1",
+		testDB + "_test_1",
+		"unrelated_top_provider_test_1",
+	} {
+		client.AddDatabase(name)
+	}
+	step := NewDbDestroyStepWithFactory(config.StepConfig{}, MockClientFactory(client))
+	require.NoError(t, step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{}))
+
+	assert.Equal(t, []string{
+		app, quotes, knowledge, testDB,
+		app + "_test_1",
+		quotes + "_test_1",
+		knowledge + "_test_1",
+		testDB + "_test_1",
+	}, client.GetDropCalls())
+	assert.Equal(t, []string{
+		EscapeLikePattern(app) + `\_test\_%`,
+		EscapeLikePattern(quotes) + `\_test\_%`,
+		EscapeLikePattern(knowledge) + `\_test\_%`,
+		EscapeLikePattern(testDB) + `\_test\_%`,
+	}, client.GetListCalls())
+	assert.True(t, client.HasDatabase("unrelated_top_provider_test_1"))
+}
+
 func TestDbDestroyStep_WorkerCandidatesPrefixRevalidated(t *testing.T) {
 	dir := t.TempDir()
 	app := "app_top_provider"
