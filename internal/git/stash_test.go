@@ -25,6 +25,13 @@ func setupStashTestRepo(t *testing.T) string {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
 
+	// Keep stash restoration byte-exact across platforms.
+	cmd = exec.Command("git", "-C", tmpDir, "config", "core.autocrlf", "false")
+	if err := cmd.Run(); err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("Failed to disable Git line-ending conversion: %v", err)
+	}
+
 	// Configure git user for commits
 	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
 	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
