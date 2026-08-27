@@ -64,7 +64,7 @@ Examples:
 				if err != nil {
 					continue
 				}
-				if wtAbsPath == absResolved {
+				if git.PathsEqual(wtAbsPath, absResolved) {
 					selectedWorktree = &wt
 					break
 				}

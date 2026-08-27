@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -226,6 +227,36 @@ func parseWorktreeRecord(recordIndex int, fields []string) (Worktree, error) {
 	return worktree, nil
 }
 
+// PathsEqual reports whether two Git or OS worktree paths identify the same path.
+// Git for Windows may use slash-separated paths while the OS uses backslashes.
+func PathsEqual(first, second string) bool {
+	if first == "" || second == "" {
+		return first == second
+	}
+
+	firstPath, firstOK := worktreePathIdentity(first)
+	secondPath, secondOK := worktreePathIdentity(second)
+	if !firstOK || !secondOK {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(firstPath, secondPath)
+	}
+	return firstPath == secondPath
+}
+
+func worktreePathIdentity(path string) (string, bool) {
+	path = filepath.FromSlash(path)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if evalPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = evalPath
+	}
+	return filepath.Clean(filepath.FromSlash(absPath)), true
+}
+
 // ListWorktreesDetailed lists all worktrees with additional metadata
 func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([]Worktree, error) {
 	worktrees, err := ListWorktrees(gitDir)
@@ -233,17 +264,12 @@ func ListWorktreesDetailed(gitDir, currentWorktreePath, defaultBranch string) ([
 		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
-	// Best-effort symlink resolution; falls back to raw path comparison
-	currentWorktreePathEval, _ := filepath.EvalSymlinks(currentWorktreePath)
-
 	mergeStatusCache := make(map[string]bool)
 
 	for i := range worktrees {
 		wt := &worktrees[i]
 		wt.IsMain = wt.Branch == defaultBranch
-		// Best-effort symlink resolution; falls back to raw path comparison
-		wtPathEval, _ := filepath.EvalSymlinks(wt.Path)
-		wt.IsCurrent = wtPathEval == currentWorktreePathEval
+		wt.IsCurrent = PathsEqual(wt.Path, currentWorktreePath)
 		if wt.Branch == "" || wt.Bare || wt.Detached {
 			continue
 		}

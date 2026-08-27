@@ -105,24 +105,6 @@ func resolveDefaultBranchWorktree(defaultBranch string, worktrees []git.Worktree
 	)
 }
 
-func samePath(first, second string) bool {
-	firstAbs, err := filepath.Abs(first)
-	if err != nil {
-		return false
-	}
-	secondAbs, err := filepath.Abs(second)
-	if err != nil {
-		return false
-	}
-	if filepath.Clean(firstAbs) == filepath.Clean(secondAbs) {
-		return true
-	}
-
-	firstEval, firstErr := filepath.EvalSymlinks(firstAbs)
-	secondEval, secondErr := filepath.EvalSymlinks(secondAbs)
-	return firstErr == nil && secondErr == nil && firstEval == secondEval
-}
-
 func runPullConfigForProject(
 	pc *ProjectContext,
 	force, dryRun, verbose bool,
@@ -141,7 +123,7 @@ func runPullConfigForProject(
 	srcConfig := filepath.Join(srcWorktree.Path, config.ProjectConfigFile)
 	dstConfig := filepath.Join(pc.ProjectPath, config.ProjectConfigFile)
 
-	if samePath(srcWorktree.Path, pc.ProjectPath) {
+	if git.PathsEqual(srcWorktree.Path, pc.ProjectPath) {
 		deps.printInfo(fmt.Sprintf("Source and destination are the same path (%s); nothing to do", dstConfig))
 		return nil
 	}

@@ -169,6 +169,20 @@ func TestListWorktrees(t *testing.T) {
 	assert.True(t, branches["feature"], "should have feature worktree")
 }
 
+func TestPathsEqual_HandlesGitAndOSPathRepresentations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "feature worktree")
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatalf("creating worktree path: %v", err)
+	}
+
+	if !PathsEqual(path, filepath.ToSlash(path)) {
+		t.Errorf("expected OS path %q and Git path %q to identify the same worktree", path, filepath.ToSlash(path))
+	}
+	if PathsEqual(path, filepath.Join(filepath.Dir(path), "other worktree")) {
+		t.Error("different worktree paths should not compare equal")
+	}
+}
+
 func TestListWorktrees_RetainsDetachedAndLockedRecords(t *testing.T) {
 	repoDir := createTestRepo(t)
 	gitDir := filepath.Join(repoDir, ".git")
@@ -194,11 +208,7 @@ func TestListWorktrees_RetainsDetachedAndLockedRecords(t *testing.T) {
 
 	var feature *Worktree
 	for i := range worktrees {
-		featurePathEval, evalErr := filepath.EvalSymlinks(featurePath)
-		if evalErr != nil {
-			t.Fatalf("resolving feature worktree path: %v", evalErr)
-		}
-		if worktrees[i].Path == featurePathEval {
+		if PathsEqual(worktrees[i].Path, featurePath) {
 			feature = &worktrees[i]
 			break
 		}
