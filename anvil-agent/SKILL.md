@@ -61,6 +61,34 @@ yerd unlink <site>  # cleanup
 
 Yerd is not flag-compatible with Herd. Do not translate `herd link --secure` by replacing only the binary name. Anvil uses the same derived site name for scaffold and cleanup, including the default branch.
 
+When `site_driver: yerd` is selected, Anvil also delegates server-backed
+database operations to Yerd while retaining its own worktree naming and
+ownership records:
+
+```bash
+yerd service start <mysql|mariadb|postgres>  # when installed but stopped
+yerd db create <service> <database>
+yerd db list <service>
+yerd db drop <service> <database>            # cleanup
+```
+
+A missing required Yerd service fails scaffolding. Direct host, port,
+username, and password overrides are not valid on the Yerd path.
+
+When `site_driver: herd` is selected, Anvil prepares the matching Herd SQL
+service and uses Herd-provided database binaries for the logical database
+lifecycle:
+
+```bash
+herd services:start <mysql|mariadb|postgresql>
+mysql|mariadb ...  # create, list, and drop
+createdb|psql|dropdb ...  # PostgreSQL lifecycle
+```
+
+Herd connection values come from the worktree `.env` or explicit database
+step arguments. Passwords are passed through process environment variables,
+not command arguments. Anvil does not embed MySQL or PostgreSQL clients.
+
 ## Test Database Isolation
 
 The Laravel preset creates and records an application database plus an empty testing database:

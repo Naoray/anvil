@@ -22,10 +22,19 @@ func TestSkillContentIsEmbedded(t *testing.T) {
 		[]byte("yerd link"),
 		[]byte("yerd secure"),
 		[]byte("yerd unlink"),
+		[]byte("yerd service start"),
+		[]byte("yerd db create"),
+		[]byte("yerd db drop"),
+		[]byte("site_driver: herd"),
+		[]byte("herd services:start"),
+		[]byte("Herd-provided database binaries"),
 	}
 	for _, fragment := range requiredGuidance {
 		if !bytes.Contains(Content, fragment) {
 			t.Fatalf("expected embedded skill content to include %q", fragment)
 		}
+	}
+	if bytes.Contains(Content, []byte("direct SQL")) {
+		t.Fatal("embedded skill must not recommend direct SQL clients for Herd")
 	}
 }

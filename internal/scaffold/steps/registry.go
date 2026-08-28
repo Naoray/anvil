@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/naoray/anvil/internal/config"
+	anvilexec "github.com/naoray/anvil/internal/exec"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
@@ -59,6 +60,20 @@ func (r *Registry) ListRegistered() []string {
 
 // RegisterDefaults registers all built-in steps.
 func (r *Registry) RegisterDefaults() {
+	r.registerDefaults(NewYerdDatabaseClientFactory(nil))
+}
+
+// RegisterDefaultsForSiteDriver registers built-in steps with the database
+// lifecycle used by the selected local site driver.
+func (r *Registry) RegisterDefaultsForSiteDriver(siteDriver config.SiteDriver, commander anvilexec.Commander) {
+	databaseFactory := NewYerdDatabaseClientFactory(commander)
+	if siteDriver == config.SiteDriverHerd {
+		databaseFactory = NewHerdDatabaseClientFactory(commander)
+	}
+	r.registerDefaults(databaseFactory)
+}
+
+func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
 	// Binary steps
 	for _, b := range binaries {
 		name := b.name
@@ -95,10 +110,10 @@ func (r *Registry) RegisterDefaults() {
 
 	// Database steps use config-owned validation as well.
 	r.Register(config.StepDbCreate, func(cfg config.StepConfig) types.ScaffoldStep {
-		return NewDbCreateStep(cfg)
+		return NewDbCreateStepWithFactory(cfg, databaseFactory)
 	})
 	r.Register(config.StepDbDestroy, func(cfg config.StepConfig) types.ScaffoldStep {
-		return NewDbDestroyStep(cfg)
+		return NewDbDestroyStepWithFactory(cfg, databaseFactory)
 	})
 }
 

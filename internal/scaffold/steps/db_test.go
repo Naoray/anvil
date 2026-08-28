@@ -1,14 +1,12 @@
 package steps
 
 import (
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -106,6 +104,26 @@ func TestDbCreateStep(t *testing.T) {
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
 		assert.NoError(t, err)
 		assert.NotEmpty(t, ctx.GetDbSuffix(), "DbSuffix should be set after db.create")
+	})
+
+	t.Run("auto-detects mariadb managed service with legacy mysql ownership", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		envFile := filepath.Join(tmpDir, ".env")
+		require.NoError(t, os.WriteFile(envFile, []byte("DB_CONNECTION=mariadb\n"), 0644))
+
+		mockClient := NewMockDatabaseClient()
+		var gotEngine string
+		var gotOptions DatabaseOptions
+		step := NewDbCreateStepWithFactory(config.StepConfig{}, func(engine string, options DatabaseOptions) (DatabaseClient, error) {
+			gotEngine = engine
+			gotOptions = options
+			return mockClient, nil
+		})
+		ctx := &types.ScaffoldContext{WorktreePath: tmpDir, SiteName: "testapp"}
+
+		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+		assert.Equal(t, "mysql", gotEngine)
+		assert.Equal(t, "mariadb", gotOptions.Service)
 	})
 
 	t.Run("uses explicit type config over env detection", func(t *testing.T) {
@@ -913,31 +931,21 @@ func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {
 
 func TestDbCreateStep_MySQLFreshCollisionRetriesWithoutPersistingCollidingDatabase(t *testing.T) {
 	dir := t.TempDir()
-	connector := &execErrorConnector{
-		errors: []error{
-			&mysql.MySQLError{Number: 1007, Message: "create rejected"},
-			nil,
-		},
-	}
-	db := sql.OpenDB(connector)
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("Close() error = %v", err)
-		}
-	})
+	client := NewMockDatabaseClient()
+	client.SetExistsOnFirstNCalls(1)
 	factory := func(engine string, _ DatabaseOptions) (DatabaseClient, error) {
 		if engine != "mysql" {
 			t.Fatalf("client factory engine = %q, want mysql", engine)
 		}
-		return &MySQLClient{db: db}, nil
+		return client, nil
 	}
 	step := NewDbCreateStepWithFactory(config.StepConfig{Type: "mysql"}, factory)
 	ctx := &types.ScaffoldContext{WorktreePath: dir, SiteName: "Dashboard"}
 	ctx.SetDbSuffix("collision")
 
 	require.NoError(t, step.Run(ctx, types.StepOptions{}))
-	require.Len(t, connector.queries, 2)
-	assert.Equal(t, "CREATE DATABASE `dashboard_collision`", connector.queries[0])
+	require.Len(t, client.GetCreateCalls(), 2)
+	assert.Equal(t, "dashboard_collision", client.GetCreateCalls()[0])
 	assert.NotEqual(t, "collision", ctx.GetDbSuffix())
 
 	state, err := config.ReadLocalState(dir)
@@ -1246,10 +1254,12 @@ func TestDbCreateStep_EqualFormArguments(t *testing.T) {
 	require.NoError(t, step.Run(ctx, types.StepOptions{}))
 	assert.Equal(t, []string{"custom_test_suffix"}, client.GetCreateCalls())
 	assert.Equal(t, DatabaseOptions{
-		Host:     "db.example",
-		Port:     "15432",
-		Username: "anvil",
-		Password: "secret",
+		Host:         "db.example",
+		Port:         "15432",
+		Username:     "anvil",
+		Password:     "secret",
+		PasswordSet:  true,
+		WorktreePath: dir,
 	}, gotOptions)
 }
 
@@ -1334,6 +1344,7 @@ func TestDbCreateStep_ExplicitEmptyPasswordIsValid(t *testing.T) {
 
 	require.NoError(t, step.Run(ctx, types.StepOptions{}))
 	assert.Empty(t, gotOptions.Password)
+	assert.True(t, gotOptions.PasswordSet)
 }
 
 func TestParseDatabaseArgs_SupportsEveryOptionSyntax(t *testing.T) {
@@ -1341,10 +1352,11 @@ func TestParseDatabaseArgs_SupportsEveryOptionSyntax(t *testing.T) {
 		database: "database/custom.sqlite",
 		prefix:   "custom",
 		connection: DatabaseOptions{
-			Host:     "db.example",
-			Port:     "15432",
-			Username: "anvil",
-			Password: "secret",
+			Host:        "db.example",
+			Port:        "15432",
+			Username:    "anvil",
+			Password:    "secret",
+			PasswordSet: true,
 		},
 	}
 
@@ -1417,10 +1429,12 @@ func TestDbDestroyStep_EqualFormArguments(t *testing.T) {
 
 	require.NoError(t, step.Run(&types.ScaffoldContext{WorktreePath: dir}, types.StepOptions{}))
 	assert.Equal(t, DatabaseOptions{
-		Host:     "db.example",
-		Port:     "15432",
-		Username: "anvil",
-		Password: "secret",
+		Host:         "db.example",
+		Port:         "15432",
+		Username:     "anvil",
+		Password:     "secret",
+		PasswordSet:  true,
+		WorktreePath: dir,
 	}, gotOptions)
 	assert.Equal(t, []string{"site_test_suffix"}, client.GetDropCalls())
 }
@@ -1439,7 +1453,7 @@ func TestDbDestroyStep_InvalidArgumentsFailBeforeLocalStateRead(t *testing.T) {
 	assert.ErrorContains(t, err, "unknown option")
 }
 
-func TestDatabaseSteps_CharacterizeClientFactoryDefaults(t *testing.T) {
+func TestDatabaseSteps_DoNotInjectConnectionDefaults(t *testing.T) {
 	tests := []struct {
 		name        string
 		create      bool
@@ -1447,42 +1461,28 @@ func TestDatabaseSteps_CharacterizeClientFactoryDefaults(t *testing.T) {
 		wantOptions DatabaseOptions
 	}{
 		{
-			name:   "create mysql",
-			create: true,
-			engine: config.DBEngineMySQL,
-			wantOptions: DatabaseOptions{
-				Host:     "127.0.0.1",
-				Username: "root",
-			},
+			name:        "create mysql",
+			create:      true,
+			engine:      config.DBEngineMySQL,
+			wantOptions: DatabaseOptions{},
 		},
 		{
-			name:   "create pgsql",
-			create: true,
-			engine: config.DBEnginePgSQL,
-			wantOptions: DatabaseOptions{
-				Host:     "127.0.0.1",
-				Username: "root",
-			},
+			name:        "create pgsql",
+			create:      true,
+			engine:      config.DBEnginePgSQL,
+			wantOptions: DatabaseOptions{},
 		},
 		{
-			name:   "destroy mysql",
-			create: false,
-			engine: config.DBEngineMySQL,
-			wantOptions: DatabaseOptions{
-				Host:     "127.0.0.1",
-				Port:     "3306",
-				Username: "root",
-			},
+			name:        "destroy mysql",
+			create:      false,
+			engine:      config.DBEngineMySQL,
+			wantOptions: DatabaseOptions{},
 		},
 		{
-			name:   "destroy pgsql",
-			create: false,
-			engine: config.DBEnginePgSQL,
-			wantOptions: DatabaseOptions{
-				Host:     "127.0.0.1",
-				Port:     "5432",
-				Username: "postgres",
-			},
+			name:        "destroy pgsql",
+			create:      false,
+			engine:      config.DBEnginePgSQL,
+			wantOptions: DatabaseOptions{},
 		},
 	}
 
@@ -1511,6 +1511,7 @@ func TestDatabaseSteps_CharacterizeClientFactoryDefaults(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			tt.wantOptions.WorktreePath = dir
 			assert.Equal(t, tt.wantOptions, gotOptions)
 		})
 	}

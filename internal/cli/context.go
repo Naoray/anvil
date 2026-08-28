@@ -210,7 +210,7 @@ func (pc *ProjectContext) ResolvePreset(explicit, path string) presets.ResolvedP
 func (pc *ProjectContext) initManagers() {
 	siteDriver := pc.GlobalConfig.ResolveSiteDriver(nil)
 	stepRegistry := steps.NewRegistry()
-	stepRegistry.RegisterDefaults()
+	stepRegistry.RegisterDefaultsForSiteDriver(siteDriver, nil)
 
 	pc.presetManager = presets.NewManager(siteDriver)
 	pc.scaffoldManager = scaffold.NewScaffoldManagerWithRegistry(stepRegistry)

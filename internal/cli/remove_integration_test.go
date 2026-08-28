@@ -2,16 +2,13 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,55 +58,21 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 
 // TestRemoveBinary_DryRunLiveEnumerationNoMutation is the B1-mandated
 // binary-level test: `remove --dry-run` through the shipped binary must
-// execute DbDestroyStep.Run live (proven by the cannot-enumerate note, which
-// only prints when the step attempts the worker-family listing), print the
-// exact owned names, exit successfully, and mutate nothing.
-//
-// The fixture pins db.destroy to a controlled loopback listener that accepts
-// and immediately closes every connection. This makes the cannot-enumerate
-// branch deterministic without consulting ambient PostgreSQL state.
+// execute DbDestroyStep.Run live through Herd-managed service binaries, print
+// the exact owned names, exit successfully, avoid dropdb, and mutate nothing.
 func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
 	bin := getAnvilBinary(t)
 	base := t.TempDir()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	accepted := make(chan struct{}, 1)
-	serveDone := make(chan error, 1)
-	t.Cleanup(func() {
-		if closeErr := listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
-			t.Errorf("closing fixture listener: %v", closeErr)
-		}
-		select {
-		case serveErr := <-serveDone:
-			if serveErr != nil {
-				t.Errorf("serving fixture listener: %v", serveErr)
-			}
-		case <-time.After(time.Second):
-			t.Error("fixture listener did not stop")
-		}
-	})
-	go func() {
-		for {
-			conn, acceptErr := listener.Accept()
-			if acceptErr != nil {
-				if errors.Is(acceptErr, net.ErrClosed) {
-					serveDone <- nil
-				} else {
-					serveDone <- acceptErr
-				}
-				return
-			}
-			select {
-			case accepted <- struct{}{}:
-			default:
-			}
-			if closeErr := conn.Close(); closeErr != nil {
-				serveDone <- closeErr
-				return
-			}
-		}
-	}()
-	port := listener.Addr().(*net.TCPAddr).Port
+	fakeBin := filepath.Join(base, "bin")
+	require.NoError(t, os.MkdirAll(fakeBin, 0o755))
+	commandLog := filepath.Join(base, "commands.log")
+	writeExecutable := func(name, contents string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(fakeBin, name), []byte(contents), 0o755))
+	}
+	writeExecutable("herd", "#!/bin/sh\nprintf 'herd %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\n")
+	writeExecutable("psql", "#!/bin/sh\nprintf 'psql %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\nprintf '%s\\n' demo_pg_fixture demo_pg_fixture_test demo_pg_fixture_test_1 other\n")
+	writeExecutable("dropdb", "#!/bin/sh\nprintf 'dropdb %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\nexit 99\n")
 
 	repoDir := filepath.Join(base, "projects", "demo")
 	require.NoError(t, os.MkdirAll(repoDir, 0o755))
@@ -138,6 +101,7 @@ func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
 	globalConfig := fmt.Sprintf(`default_branch: main
 worktree_base: %q
 setup_complete: true
+site_driver: herd
 projects:
   demo:
     path: %q
@@ -147,12 +111,7 @@ projects:
     cleanup:
       steps:
         - name: db.destroy
-          args:
-            - --host
-            - 127.0.0.1
-            - --port
-            - %q
-`, worktreeBase, repoDir, strconv.Itoa(port))
+`, worktreeBase, repoDir)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(configHome, "anvil", config.ProjectConfigFile),
 		[]byte(globalConfig), 0o644))
@@ -161,7 +120,11 @@ projects:
 
 	cmd := exec.Command(bin, "remove", "feature-x", "--dry-run", "--force")
 	cmd.Dir = repoDir
-	cmd.Env = subprocessEnv(t, "XDG_CONFIG_HOME="+configHome)
+	cmd.Env = subprocessEnv(t,
+		"XDG_CONFIG_HOME="+configHome,
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"ANVIL_TEST_COMMAND_LOG="+commandLog,
+	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -169,20 +132,15 @@ projects:
 	runErr := cmd.Run()
 	require.NoError(t, runErr,
 		"remove --dry-run must exit successfully\nstdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	select {
-	case <-accepted:
-	case <-time.After(time.Second):
-		t.Fatal("controlled database endpoint was not contacted")
-	}
 	combined := stdout.String() + stderr.String()
 
 	assert.Contains(t, combined, "Would drop database: "+appDb+"\n")
 	assert.Contains(t, combined, "Would drop database: "+testDb+"\n")
-	// This note is printed only after DbDestroyStep.Run attempted the live
-	// worker-family listing through the shipped binary — the B1 evidence that
-	// dry-run reaches the selector; drops are structurally impossible because
-	// the server is unreachable.
-	assert.Contains(t, combined, "cannot enumerate parallel-worker databases:")
+	commands, err := os.ReadFile(commandLog)
+	require.NoError(t, err)
+	assert.Contains(t, string(commands), "herd services:start postgresql\n")
+	assert.Equal(t, 2, strings.Count(string(commands), "psql "))
+	assert.NotContains(t, string(commands), "dropdb ")
 
 	require.DirExists(t, worktreeDir, "dry-run must not remove the worktree")
 	after := snapshotTree(t, worktreeDir)

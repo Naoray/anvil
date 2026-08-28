@@ -87,9 +87,10 @@ const (
 type DatabaseEngine string
 
 const (
-	DBEngineMySQL  DatabaseEngine = "mysql"
-	DBEnginePgSQL  DatabaseEngine = "pgsql"
-	DBEngineSQLite DatabaseEngine = "sqlite"
+	DBEngineMySQL   DatabaseEngine = "mysql"
+	DBEngineMariaDB DatabaseEngine = "mariadb"
+	DBEnginePgSQL   DatabaseEngine = "pgsql"
+	DBEngineSQLite  DatabaseEngine = "sqlite"
 )
 
 // Step name constants for scaffold step types.

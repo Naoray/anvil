@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Yerd-managed database services** — Yerd site-driver scaffolds now use Yerd to inspect and start installed SQL services, then create, list, and drop worktree databases through Yerd's CLI.
+- **Herd-managed database services** — Herd site-driver scaffolds now start the selected Herd SQL service and use Herd-provided database binaries for worktree database creation, listing, and cleanup.
+- **MariaDB database engine** — `DB_CONNECTION=mariadb` and `type: mariadb` retain their own service identity instead of being treated as MySQL.
+
+### Changed
+
+- **Site-driver-owned database lifecycle** — both Yerd and Herd selections prepare their managed SQL services before Anvil creates, enumerates, or removes isolated worktree databases.
+
+### Removed
+
+- **Embedded SQL clients** — removed Anvil's Go MySQL and PostgreSQL drivers; database server lifecycle now flows through Yerd or Herd-managed service binaries.
+
 ## [v1.10.0](https://github.com/naoray/anvil/compare/v1.9.1...v1.10.0) - 2026-08-27
 
 ### Added

@@ -206,9 +206,9 @@ APP_NAME=myapp
 		assert.Equal(t, "swift_runner", suffix, "DbSuffix should be read from local state")
 		assert.Equal(t, []string{"mysql"}, factoryEngines)
 		assert.Equal(t, []steps.DatabaseOptions{{
-			Host:     "hermetic.invalid",
-			Port:     "invalid",
-			Username: "root",
+			Host:         "hermetic.invalid",
+			Port:         "invalid",
+			WorktreePath: tmpDir,
 		}}, factoryOptions)
 		assert.Equal(t, []string{`%\_swift\_runner`}, mockClient.GetListCalls())
 		assert.Equal(t, []string{"myapp_swift_runner"}, mockClient.GetDropCalls())

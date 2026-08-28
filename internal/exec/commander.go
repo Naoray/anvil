@@ -6,7 +6,9 @@ package exec
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -18,6 +20,18 @@ type Commander interface {
 	Run(ctx context.Context, dir string, command string, args ...string) ([]byte, error)
 }
 
+// EnvironmentCommander executes commands with additional environment values.
+// Secrets can use this boundary without being exposed in process arguments.
+type EnvironmentCommander interface {
+	RunWithEnv(
+		ctx context.Context,
+		dir string,
+		environment map[string]string,
+		command string,
+		args ...string,
+	) ([]byte, error)
+}
+
 // RealCommander executes commands using the real operating system.
 // This is the production implementation that actually runs commands.
 type RealCommander struct{}
@@ -27,6 +41,28 @@ type RealCommander struct{}
 func (c *RealCommander) Run(ctx context.Context, dir string, command string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+// RunWithEnv executes a command with values added to the inherited environment.
+func (c *RealCommander) RunWithEnv(
+	ctx context.Context,
+	dir string,
+	environment map[string]string,
+	command string,
+	args ...string,
+) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	keys := make([]string, 0, len(environment))
+	for key := range environment {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		cmd.Env = append(cmd.Env, key+"="+environment[key])
+	}
 	return cmd.CombinedOutput()
 }
 
@@ -57,6 +93,30 @@ func (e *CommandExecutor) RunBinary(ctx context.Context, dir string, binary stri
 	allArgs := append(binaryParts[1:], args...)
 
 	return e.commander.Run(ctx, dir, command, allArgs...)
+}
+
+// RunBinaryWithEnv executes a binary with additional environment values.
+func (e *CommandExecutor) RunBinaryWithEnv(
+	ctx context.Context,
+	dir string,
+	environment map[string]string,
+	binary string,
+	args []string,
+) ([]byte, error) {
+	if len(environment) == 0 {
+		return e.RunBinary(ctx, dir, binary, args)
+	}
+	binaryParts := strings.Fields(binary)
+	if len(binaryParts) == 0 {
+		return nil, fmt.Errorf("empty binary command")
+	}
+	commander, ok := e.commander.(EnvironmentCommander)
+	if !ok {
+		return nil, fmt.Errorf("command executor does not support environment values")
+	}
+	command := binaryParts[0]
+	allArgs := append(binaryParts[1:], args...)
+	return commander.RunWithEnv(ctx, dir, environment, command, allArgs...)
 }
 
 // RunBash executes a command through bash -c.

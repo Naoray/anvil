@@ -403,6 +403,13 @@ databases:
     role: testing
 ```
 
+Anvil delegates server-backed database operations to the selected site driver.
+With `site_driver: yerd`, Yerd owns service status plus database creation,
+listing, and removal. With `site_driver: herd`, Anvil starts the selected Herd
+service and uses the database binaries provided by Herd for logical database
+creation, listing, and removal. Anvil has no embedded SQL clients; it still
+owns worktree-safe naming, collision checks, and `.anvil.local` records.
+
 - `role: application` (the default) and `role: testing` each use the
   first-created database for that role as the canonical record used by
   `anvil exec`. Additional distinct application or testing databases are
@@ -410,9 +417,9 @@ databases:
   eligible for exact cleanup. `auxiliary` is an internal ownership role and
   is not valid in a user-configured `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
-  Laravel's parallel-worker suffixes still fit MySQL's 64 and PostgreSQL's 63
-  identifier limits), creates it empty — no migrations; your test runner
-  handles schema per run — and re-scaffolds idempotently.
+  Laravel's parallel-worker suffixes still fit MySQL/MariaDB's 64 and
+  PostgreSQL's 63 identifier limits), creates it empty — no migrations; your
+  test runner handles schema per run — and re-scaffolds idempotently.
 - Custom scaffold steps can reference the name via `{{ .TestDatabaseName }}`.
 
 ### `anvil exec`
@@ -504,7 +511,7 @@ is given — databases are then left untouched and unrecorded.
   worktree, or configure a scaffold override containing ONLY a `db.create`
   step with `role: testing` and run that. `anvil exec` never creates or
   modifies databases or `.anvil.local`.
-- One database server connection per worktree (MySQL or PostgreSQL).
+- One database server connection per worktree (MySQL, MariaDB, or PostgreSQL).
   SQLite worktrees are per-worktree files and already isolated, so
   `anvil exec` is not needed there.
 
@@ -518,7 +525,10 @@ The local PHP site driver is selected globally in `~/.config/anvil/anvil.yaml`:
 site_driver: yerd
 ```
 
-Supported values are `yerd` and `herd`. When `site_driver` is omitted, Anvil prefers Yerd when it is on `PATH`, falls back to Herd, and otherwise defaults to Yerd. The setup wizard saves the detected selection.
+Supported values are `yerd` and `herd`. When `site_driver` is omitted, Anvil
+prefers Yerd when it is on `PATH`, falls back to Herd, and otherwise defaults
+to Yerd. The setup wizard saves the detected selection. Both selections use
+their manager's SQL services for server-backed database steps.
 
 ### Configuration Hierarchy
 
@@ -762,13 +772,20 @@ All steps support template variables that are replaced at runtime:
 
 ```yaml
 - name: db.create
-  type: mysql       # or pgsql, auto-detected from DB_CONNECTION if omitted
+  type: mysql       # mysql, mariadb, or pgsql; auto-detected if omitted
   args: ["--prefix", "app"]  # optional: customize database prefix
 ```
 
 - Generates unique name: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}`
 - Loads and reuses a persisted worktree suffix; otherwise generates a new suffix once, persists it, and shares it across all `db.create` steps in the run
 - Auto-detects engine from `DB_CONNECTION` in `.env`
+- With `site_driver: yerd`, uses `yerd service start`, `yerd db create`, and
+  `yerd db list`; direct host, port, username, and password overrides are
+  rejected because Yerd owns the connection
+- With `site_driver: herd`, uses `herd services:start` and the Herd-provided
+  `mysql`, `mariadb`, `createdb`, `psql`, and `dropdb` binaries. Connection
+  values come from `.env` or explicit step arguments; passwords are passed as
+  process environment values, not command arguments
 - Retries up to 5 times on collision
 - Persists the suffix and every created database to `.anvil.local` for exact
   cleanup
@@ -925,6 +942,8 @@ Capture command output:
 ```
 
 The `herd` binary step remains available when `site_driver: herd` is configured.
+Database steps also use Herd's service lifecycle and Herd-provided database
+binaries in that mode.
 
 #### Utility Steps
 
@@ -1099,7 +1118,7 @@ This creates: `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 - Format: `{prefix}_{adjective}_{noun}` or `{site_name}_{adjective}_{noun}` (e.g., `myapp_swift_runner`, `app_cool_engine`)
 - Multiple `db.create` steps share the same suffix, allowing consistent database naming
 - Handles collisions with automatic retries
-- Enforces PostgreSQL/MySQL length limits
+- Enforces PostgreSQL/MySQL/MariaDB length limits
 
 **Database Cleanup**
 - Uses `.anvil.local` ownership records to drop exact databases and enumerate

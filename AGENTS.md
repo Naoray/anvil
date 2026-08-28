@@ -73,8 +73,8 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 - `env.read` - Read .env values
 - `env.write` - Write .env values
 - `env.copy` - Copy between env files
-- `db.create` - Create database
-- `db.destroy` - Drop database
+- `db.create` - Create a database through Yerd, or through Herd-managed service binaries
+- `db.destroy` - Drop owned databases through Yerd, or through Herd-managed service binaries
 - `bash.run` - Run bash commands
 - `command.run` - Run arbitrary commands
 

@@ -21,6 +21,8 @@ func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.Dat
 		switch dbType {
 		case string(config.DBEngineMySQL), string(config.DBEnginePgSQL), string(config.DBEngineSQLite):
 			return config.DatabaseEngine(dbType), nil
+		case string(config.DBEngineMariaDB):
+			return config.DBEngineMySQL, nil
 		default:
 			return "", fmt.Errorf("unsupported database type: %s", dbType)
 		}
@@ -29,7 +31,9 @@ func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.Dat
 	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
 	if conn := env["DB_CONNECTION"]; conn != "" {
 		switch conn {
-		case "mysql", "mariadb":
+		case "mysql":
+			return config.DBEngineMySQL, nil
+		case "mariadb":
 			return config.DBEngineMySQL, nil
 		case "pgsql", "postgres", "postgresql":
 			return config.DBEnginePgSQL, nil
@@ -46,13 +50,6 @@ type databaseStepArgs struct {
 	prefix     string
 	connection DatabaseOptions
 }
-
-type databaseOperation uint8
-
-const (
-	databaseCreateOperation databaseOperation = iota
-	databaseDestroyOperation
-)
 
 func parseDatabaseArgs(args []string) (databaseStepArgs, error) {
 	var parsed databaseStepArgs
@@ -102,6 +99,7 @@ func parseDatabaseArgs(args []string) (databaseStepArgs, error) {
 			parsed.connection.Username = value
 		case "password":
 			parsed.connection.Password = value
+			parsed.connection.PasswordSet = true
 		case "host":
 			parsed.connection.Host = value
 		case "port":
@@ -112,37 +110,16 @@ func parseDatabaseArgs(args []string) (databaseStepArgs, error) {
 	return parsed, nil
 }
 
-func defaultDatabaseOptions(engine config.DatabaseEngine, operation databaseOperation) DatabaseOptions {
-	options := DatabaseOptions{
-		Host:     "127.0.0.1",
-		Username: "root",
+func (args databaseStepArgs) connectionOptions(ctx *types.ScaffoldContext, dbType string) DatabaseOptions {
+	options := args.connection
+	options.WorktreePath = ctx.WorktreePath
+	connection := dbType
+	if connection == "" {
+		connection = utils.ReadEnvFile(ctx.WorktreePath, ".env")["DB_CONNECTION"]
 	}
-	if operation != databaseDestroyOperation {
-		return options
+	if connection == string(config.DBEngineMariaDB) {
+		options.Service = string(config.DBEngineMariaDB)
 	}
-
-	switch engine {
-	case config.DBEnginePgSQL:
-		options.Port = "5432"
-		options.Username = "postgres"
-	default:
-		options.Port = "3306"
-	}
-	return options
-}
-
-func (args databaseStepArgs) connectionOptions(engine config.DatabaseEngine, operation databaseOperation) DatabaseOptions {
-	options := defaultDatabaseOptions(engine, operation)
-	if args.connection.Host != "" {
-		options.Host = args.connection.Host
-	}
-	if args.connection.Port != "" {
-		options.Port = args.connection.Port
-	}
-	if args.connection.Username != "" {
-		options.Username = args.connection.Username
-	}
-	options.Password = args.connection.Password
 	return options
 }
 
@@ -160,7 +137,7 @@ func NewDbCreateStep(cfg config.StepConfig) *DbCreateStep {
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		role:          cfg.Role,
-		clientFactory: DefaultDatabaseClientFactory,
+		clientFactory: NewYerdDatabaseClientFactory(nil),
 	}
 }
 
@@ -265,7 +242,7 @@ func (s *DbCreateStep) createWithRetry(
 	opts types.StepOptions,
 ) (runErr error) {
 	siteName := s.getPrefixOrSiteName(ctx, databaseArgs)
-	dbOpts := databaseArgs.connectionOptions(engine, databaseCreateOperation)
+	dbOpts := databaseArgs.connectionOptions(ctx, s.dbType)
 
 	client, err := s.clientFactory(string(engine), dbOpts)
 	if err != nil {
@@ -274,6 +251,10 @@ func (s *DbCreateStep) createWithRetry(
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
+		var managedServiceErr *managedServiceError
+		if errors.As(err, &managedServiceErr) {
+			return fmt.Errorf("preparing managed database service: %w", err)
+		}
 		if opts.Verbose {
 			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
 		}
@@ -349,13 +330,17 @@ func (s *DbCreateStep) createTestDatabase(
 	}
 
 	dbName := words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), suffix)
-	client, err := s.clientFactory(string(engine), databaseArgs.connectionOptions(engine, databaseCreateOperation))
+	client, err := s.clientFactory(string(engine), databaseArgs.connectionOptions(ctx, s.dbType))
 	if err != nil {
 		return fmt.Errorf("creating database client: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
+		var managedServiceErr *managedServiceError
+		if errors.As(err, &managedServiceErr) {
+			return fmt.Errorf("preparing managed database service: %w", err)
+		}
 		if opts.Verbose {
 			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
 		}
@@ -474,7 +459,7 @@ type DbDestroyStep struct {
 }
 
 func NewDbDestroyStep(cfg config.StepConfig) *DbDestroyStep {
-	return NewDbDestroyStepWithFactoryAndWriter(cfg, DefaultDatabaseClientFactory, os.Stdout)
+	return NewDbDestroyStepWithFactoryAndWriter(cfg, NewYerdDatabaseClientFactory(nil), os.Stdout)
 }
 
 func NewDbDestroyStepWithFactory(cfg config.StepConfig, factory DatabaseClientFactory) *DbDestroyStep {
@@ -517,7 +502,7 @@ func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 		return fmt.Errorf("reading local state for database cleanup: %w", err)
 	}
 	if len(localState.Databases) > 0 {
-		return s.destroyOwnedDatabases(localState.Databases, databaseArgs, opts)
+		return s.destroyOwnedDatabases(ctx, localState.Databases, databaseArgs, opts)
 	}
 
 	suffix := ctx.GetDbSuffix()
@@ -545,7 +530,7 @@ func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 	if engine == config.DBEngineSQLite {
 		return nil
 	}
-	return s.destroyLegacyDatabases(engine, suffix, databaseArgs, opts)
+	return s.destroyLegacyDatabases(ctx, engine, suffix, databaseArgs, opts)
 }
 
 type ownedTargetSelection struct {
@@ -574,6 +559,7 @@ func selectOwnedTargets(databases []config.OwnedDatabase) (ownedTargetSelection,
 }
 
 func (s *DbDestroyStep) destroyOwnedDatabases(
+	ctx *types.ScaffoldContext,
 	databases []config.OwnedDatabase,
 	databaseArgs databaseStepArgs,
 	opts types.StepOptions,
@@ -585,7 +571,7 @@ func (s *DbDestroyStep) destroyOwnedDatabases(
 
 	client, err := s.clientFactory(
 		string(selection.engine),
-		databaseArgs.connectionOptions(selection.engine, databaseDestroyOperation),
+		databaseArgs.connectionOptions(ctx, s.dbType),
 	)
 	if err != nil {
 		if opts.DryRun {
@@ -649,6 +635,7 @@ func (s *DbDestroyStep) destroyOwnedDatabases(
 }
 
 func (s *DbDestroyStep) destroyLegacyDatabases(
+	ctx *types.ScaffoldContext,
 	engine config.DatabaseEngine,
 	suffix string,
 	databaseArgs databaseStepArgs,
@@ -656,7 +643,7 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 ) (runErr error) {
 	client, err := s.clientFactory(
 		string(engine),
-		databaseArgs.connectionOptions(engine, databaseDestroyOperation),
+		databaseArgs.connectionOptions(ctx, s.dbType),
 	)
 	if err != nil {
 		if opts.DryRun {
