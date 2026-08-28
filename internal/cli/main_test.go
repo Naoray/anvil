@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,38 @@ func helperMain() {
 	case "stderr":
 		fmt.Fprint(os.Stderr, os.Getenv("ANVIL_HELPER_STDERR"))
 		os.Exit(0)
+	case "database-command":
+		command := strings.TrimSuffix(filepath.Base(os.Args[0]), filepath.Ext(os.Args[0]))
+		logPath := os.Getenv("ANVIL_TEST_COMMAND_LOG")
+		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "opening database command log:", err)
+			os.Exit(1)
+		}
+		if _, err := fmt.Fprintf(logFile, "%s %s\n", command, strings.Join(os.Args[1:], " ")); err != nil {
+			fmt.Fprintln(os.Stderr, "writing database command log:", err)
+			_ = logFile.Close()
+			os.Exit(1)
+		}
+		if err := logFile.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "closing database command log:", err)
+			os.Exit(1)
+		}
+		switch command {
+		case "herd":
+			os.Exit(0)
+		case "psql":
+			fmt.Println("demo_pg_fixture")
+			fmt.Println("demo_pg_fixture_test")
+			fmt.Println("demo_pg_fixture_test_1")
+			fmt.Println("other")
+			os.Exit(0)
+		case "dropdb":
+			os.Exit(99)
+		default:
+			fmt.Fprintln(os.Stderr, "unknown database command:", command)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown ANVIL_HELPER_MODE %q\n", mode)
 		os.Exit(1)

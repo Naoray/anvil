@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -66,13 +67,19 @@ func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
 	fakeBin := filepath.Join(base, "bin")
 	require.NoError(t, os.MkdirAll(fakeBin, 0o755))
 	commandLog := filepath.Join(base, "commands.log")
-	writeExecutable := func(name, contents string) {
-		t.Helper()
-		require.NoError(t, os.WriteFile(filepath.Join(fakeBin, name), []byte(contents), 0o755))
+	helperBinary, err := os.ReadFile(helperSelf(t))
+	require.NoError(t, err)
+	helperSuffix := ""
+	if runtime.GOOS == "windows" {
+		helperSuffix = ".exe"
 	}
-	writeExecutable("herd", "#!/bin/sh\nprintf 'herd %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\n")
-	writeExecutable("psql", "#!/bin/sh\nprintf 'psql %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\nprintf '%s\\n' demo_pg_fixture demo_pg_fixture_test demo_pg_fixture_test_1 other\n")
-	writeExecutable("dropdb", "#!/bin/sh\nprintf 'dropdb %s\\n' \"$*\" >> \"$ANVIL_TEST_COMMAND_LOG\"\nexit 99\n")
+	for _, name := range []string{"herd", "psql", "dropdb"} {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(fakeBin, name+helperSuffix),
+			helperBinary,
+			0o755,
+		))
+	}
 
 	repoDir := filepath.Join(base, "projects", "demo")
 	require.NoError(t, os.MkdirAll(repoDir, 0o755))
@@ -123,6 +130,8 @@ projects:
 	cmd.Env = subprocessEnv(t,
 		"XDG_CONFIG_HOME="+configHome,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"ANVIL_TEST_HELPER=1",
+		"ANVIL_HELPER_MODE=database-command",
 		"ANVIL_TEST_COMMAND_LOG="+commandLog,
 	)
 	var stdout, stderr bytes.Buffer
