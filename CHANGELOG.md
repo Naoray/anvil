@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.11.0](https://github.com/naoray/anvil/compare/v1.10.0...v1.11.0) - 2026-08-28
+
 ### Added
 
 - **Yerd-managed database services** — Yerd site-driver scaffolds now use Yerd to inspect and start installed SQL services, then create, list, and drop worktree databases through Yerd's CLI.
