@@ -1,11 +1,13 @@
 package types
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -16,6 +18,11 @@ import (
 )
 
 type ScaffoldContext struct {
+	DatabaseLockHeld        bool
+	BorrowAppDB             string
+	DatabaseActions         map[string]string
+	ResetDatabases          []string
+	SiteDriver              string
 	WorktreePath            string
 	Branch                  string
 	RepoName                string
@@ -32,72 +39,74 @@ type ScaffoldContext struct {
 }
 
 type StepOptions struct {
-	Args    []string
-	DryRun  bool
-	Verbose bool
-	Quiet   bool
+	WarmSource string
+	CopyMode   string
+	Args       []string
+	DryRun     bool
+	Verbose    bool
+	Quiet      bool
 }
 
 type ScaffoldStep interface {
 	Name() string
 	Run(ctx *ScaffoldContext, opts StepOptions) error
-	Condition(ctx *ScaffoldContext) bool
+	Condition(ctx *ScaffoldContext) (bool, error)
 }
 
 func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]any) (bool, error) {
-	if len(conditions) == 0 {
-		return true, nil
+	if err := ValidateConditions(conditions); err != nil {
+		return false, err
 	}
-
-	if not, ok := conditions["not"]; ok {
-		result, err := ctx.evaluateCondition(not)
-		if err != nil {
-			return false, err
-		}
-		return !result, nil
-	}
-
 	return ctx.evaluateCondition(conditions)
 }
 
 func (ctx *ScaffoldContext) evaluateCondition(cond any) (bool, error) {
 	switch c := cond.(type) {
 	case map[string]any:
-		return ctx.evaluateMapCondition(c)
+		for _, key := range conditionKeys(c) {
+			result, err := ctx.evaluateSingle(key, c[key])
+			if err != nil || !result {
+				return false, err
+			}
+		}
 	case []any:
-		return ctx.evaluateArrayCondition(c)
+		for _, item := range c {
+			result, err := ctx.evaluateCondition(item)
+			if err != nil || !result {
+				return false, err
+			}
+		}
+	case []map[string]any:
+		for _, item := range c {
+			result, err := ctx.evaluateCondition(item)
+			if err != nil || !result {
+				return false, err
+			}
+		}
 	default:
-		return true, nil
-	}
-}
-
-func (ctx *ScaffoldContext) evaluateMapCondition(conditions map[string]any) (bool, error) {
-	for key, value := range conditions {
-		result, err := ctx.evaluateSingle(key, value)
-		if err != nil {
-			return false, err
-		}
-		if !result {
-			return false, nil
-		}
+		return false, fmt.Errorf("invalid condition shape %T", cond)
 	}
 	return true, nil
 }
 
-func (ctx *ScaffoldContext) evaluateArrayCondition(conditions []any) (bool, error) {
-	for _, item := range conditions {
-		result, err := ctx.evaluateCondition(item.(map[string]any))
-		if err != nil {
-			return false, err
-		}
-		if !result {
-			return false, nil
-		}
+func conditionKeys(conditions map[string]any) []string {
+	keys := make([]string, 0, len(conditions))
+	for key := range conditions {
+		keys = append(keys, key)
 	}
-	return true, nil
+	sort.Strings(keys)
+	return keys
 }
 
 func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) {
+	if list, ok := value.([]string); ok {
+		items := make([]any, len(list))
+		for i, item := range list {
+			items[i] = item
+		}
+		value = items
+	}
+
 	switch key {
 	case "file_exists":
 		return ctx.fileExists(value)
@@ -117,6 +126,12 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 		return ctx.envFileContains(value)
 	case "env_file_missing":
 		return ctx.envFileMissing(value)
+	case "context_var":
+		config := value.(map[string]any)
+		ctx.mu.RLock()
+		defer ctx.mu.RUnlock()
+		actual, exists := ctx.Vars[config["name"].(string)]
+		return exists && actual == config["value"].(string), nil
 	case "not":
 		result, err := ctx.evaluateCondition(value)
 		if err != nil {
@@ -124,7 +139,7 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 		}
 		return !result, nil
 	default:
-		return true, nil
+		return false, fmt.Errorf("unknown condition %q", key)
 	}
 }
 

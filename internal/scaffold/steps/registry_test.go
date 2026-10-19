@@ -165,8 +165,8 @@ func (m *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error
 	return nil
 }
 
-func (m *mockStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (m *mockStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
 // Tests for the explicit Registry struct
@@ -261,7 +261,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 		registry.RegisterDefaults()
 
 		registered := registry.ListRegistered()
-		assert.Len(t, registered, 17) // 9 binary steps + 8 other steps
+		assert.Len(t, registered, 18) // 9 binary steps + 9 other steps
 
 		// Verify all expected steps are present
 		expectedSteps := []string{
@@ -269,6 +269,7 @@ func TestExplicitRegistry_RegisterDefaults(t *testing.T) {
 			"command.run",
 			"db.create",
 			"db.destroy",
+			"db.migrate",
 			"env.copy",
 			"env.read",
 			"env.write",
@@ -335,4 +336,20 @@ func TestExplicitRegistry_Isolation(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, step)
 	})
+}
+
+type disabledRegistryStep struct{ *mockStep }
+
+func (*disabledRegistryStep) IsEnabled() bool { return false }
+
+func TestRegistryConfiguredGuardPreservesIntrinsicDisabledState(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register("custom.step", func(config.StepConfig) types.ScaffoldStep {
+		return &disabledRegistryStep{mockStep: &mockStep{name: "custom.step"}}
+	})
+	step, err := registry.Create("custom.step", config.StepConfig{ConditionHolder: config.ConditionHolder{Condition: map[string]any{"not": map[string]any{"file_exists": "missing"}}}})
+	require.NoError(t, err)
+	enabled, ok := step.(interface{ IsEnabled() bool })
+	require.True(t, ok)
+	assert.False(t, enabled.IsEnabled())
 }

@@ -132,7 +132,8 @@ func TestBinaryStep_CommandConstructionChecks(t *testing.T) {
 			WorktreePath: "/tmp",
 		}
 
-		result := step.Condition(&ctx)
+		result, conditionErr := step.Condition(&ctx)
+		require.NoError(t, conditionErr)
 		assert.Equal(t, hasPHP, result, "Condition should check if 'php' exists")
 	})
 }
@@ -595,7 +596,7 @@ func TestConditionEvaluator_fileHasScript(t *testing.T) {
 		result, err := ctx.EvaluateCondition(map[string]any{
 			"file_has_script": "",
 		})
-		assert.NoError(t, err)
+		assert.Error(t, err)
 		assert.False(t, result)
 	})
 }

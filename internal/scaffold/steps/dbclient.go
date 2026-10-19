@@ -3,10 +3,13 @@ package steps
 import (
 	"fmt"
 	"strings"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 // DatabaseClient abstracts database operations for testability
 type DatabaseClient interface {
+	Endpoint() (config.DatabaseEndpoint, error)
 	CreateDatabase(name string) error
 	DropDatabase(name string) error
 	ListDatabases(pattern string) ([]string, error)
@@ -35,6 +38,7 @@ func newManagedServiceError(format string, args ...any) error {
 
 // DatabaseOptions holds connection parameters
 type DatabaseOptions struct {
+	Endpoint     *config.DatabaseEndpoint
 	Host         string
 	Port         string
 	Username     string

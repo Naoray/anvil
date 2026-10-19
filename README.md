@@ -265,6 +265,12 @@ anvil scaffold
 anvil scaffold
 ```
 
+`--force` suppresses Anvil's interactive prompts. `--no-interactive` and a
+nonempty `CI` environment variable also suppress prompts, including first-run
+setup, even in a terminal. Run inside the desired worktree or supply WORKTREE
+explicitly; missing selection returns an error. `--quiet` keeps prompts enabled.
+`--force` does not authorize database resets or drops or bypass ownership checks.
+
 ### `anvil open <WORKTREE>`
 
 Open a worktree in your IDE and its locally linked site in the browser with a single command. Supports fuzzy matching by folder name, branch name, or partial match.
@@ -318,6 +324,64 @@ anvil work feature/user-auth --no-track
 # Interactive mode — select from available branches
 anvil work
 ```
+
+Selecting a remote branch with `anvil work <remote>/<branch>` or the interactive
+picker creates local `<branch>` at that remote-tracking commit and tracks the
+selected remote. Exact local names take precedence, including names beginning
+with `origin/`. An unqualified name selects a unique remote match; ambiguous
+matches require a remote-qualified name. Use `refs/remotes/<remote>/<branch>`
+when a remote's short name collides with a literal local branch name.
+
+Existing local branches retain their commit and upstream. For new branches,
+`--base` overrides the starting commit while tracking still uses the selected
+remote; `--no-track` disables new tracking, including Git's automatic tracking.
+Anvil does not fetch or push automatically.
+
+Worktrees have separate files, indexes and HEADs. Git refs and repository
+configuration remain shared across worktrees.
+
+### Reuse installed dependencies
+
+Opt in with a successfully scaffolded source in the same linked repository:
+
+```bash
+anvil work feature/next --warm-from feature/current
+anvil work feature/next --warm-from feature/current --copy-mode copy
+```
+
+Use an exact registered branch, folder name, or worktree path. The selected
+target branch and `--base` remain authoritative. `--warm-from` requires scaffold
+execution; `--copy-mode` requires `--warm-from`.
+
+`--copy-mode auto` uses native filesystem cloning where supported, with ordinary
+copy fallback for unsupported or cross-volume operations. `--copy-mode copy`
+always makes ordinary copies. Each dependency install reports `cloned`, `copied`,
+or `cold`. Copies never use hardlinks. No startup speedup or physical disk-space
+savings are claimed; verification and tool probes have their own cost.
+
+Only `vendor` and `node_modules` are eligible, independently. Reuse requires a
+successful recorded locked install, matching manifests/lockfiles, configuration,
+toolchain and platform, and unchanged installed contents, modes and links.
+Missing, stale or incompatible provenance runs the normal cold installer.
+Candidates are staged and checked before publication; unexpected copy failures
+fail scaffolding. A warm hit skips its installer while later build and setup
+steps still run.
+
+Eligibility is deliberately narrow: plain `npm ci` with complete v2/v3 lockfile
+integrity metadata, or scriptless `composer install`. Additional installer
+arguments, install hooks, plugins, local/workspace dependencies, native node
+addons, and nonstandard Composer paths stay cold. Any `npm-shrinkwrap.json` or
+alternate manifest selected through `COMPOSER` stays cold. Normal Laravel
+Composer scripts therefore keep Composer cold while npm may still warm.
+Composer root versions and source refs must also match; compatible hits rebuild
+target autoload files with plugins and scripts disabled.
+
+Provenance lives in the target's `.anvil.local`, alongside its own database state.
+Warm copies contain no Git metadata, environment files, ownership or borrowed
+bindings, application caches, or live databases. Source and sibling writable
+files and Git indexes remain independent; Git refs and configuration are shared
+as with ordinary Git worktrees. Inspect the reported result rather than assuming
+a requested source was eligible.
 
 ### `anvil pull-config`
 
@@ -378,6 +442,84 @@ anvil completion fish > ~/.config/fish/completions/anvil.fish
 anvil completion powershell > anvil.ps1
 ```
 
+## Database Migration and Borrowing
+
+Laravel scaffolding migrates and seeds a newly created, owned application
+database. Existing application databases and borrowed/shared application data
+skip migrations by default. Testing databases remain existence-only unless
+explicitly selected. `--force`, CI, quiet mode and `--no-interactive` never
+authorize a reset.
+
+```bash
+anvil scaffold feature --db-action application=migrate
+anvil scaffold feature --db-action application=skip --db-action testing=migrate
+anvil scaffold feature --reset-database EXACT_OWNED_NAME
+anvil work feature --borrow-app-db owner-worktree
+```
+
+`--db-action` accepts `application`, `testing` or an exact database name, with
+`skip` or `migrate`. The same selectors work in target YAML:
+
+```yaml
+scaffold:
+  database_actions:
+    application: skip
+    testing: migrate
+```
+
+A CLI value replaces the same config selector. Exact-name spelling, including
+case, is preserved. Selectors that overlap one database are rejected. Repeatable
+`--reset-database EXACT_NAME` is the sole built-in authorization for
+`migrate:fresh --seed`, and requires an existing exact owned database. Role names,
+borrowed/shared targets and newly created databases cannot be reset. All selected
+targets are checked before any migration/reset command. Each command uses its
+own database environment and an uncached Laravel configuration path without
+temporarily rewriting `.env`.
+
+Borrowing is opt-in through `--borrow-app-db WORKTREE` on `work` or `scaffold`.
+A registered source path or symlink alias can also identify it. The source must
+own an available managed SQL application database at the same supported service
+endpoint. Chains, self-borrowing, malformed state and engine/service/endpoint
+mismatches fail; socket/URL overrides are rejected as ambiguous. An application
+`db.create` step must apply the binding; an omitted/skipped step fails.
+Credentials, suffixes and testing records are never copied.
+
+Borrowing shares application data and schema: writes and migrations affect all
+borrowers. Use isolated application databases for concurrent work that needs data
+independence. A borrower retains its own suffix, testing database and historical
+owned records. Re-scaffolding retains the binding and requires the source to
+remain registered and available. `anvil exec` exports the borrower's own testing
+database and the exact borrowed application identity without checking/starting a
+service or requiring a still-registered owner merely to export recorded state.
+
+New server ownership records retain the verified driver, service, host and port
+under `endpoint`. Historical resources use that recorded identity even when the
+current `.env` or selected site driver changes. Anvil verifies Yerd's actual
+reported listener before availability checks and migrations. Unknown or
+unverifiable identity cannot grant migration/reset or borrowing authority.
+Legacy ownership records remain readable for safe skips and command exports;
+remove them with `--keep-db` and inspect/manage those databases separately.
+
+Removing a borrower drops only its owned resources. An owner with active borrowers
+cannot be removed destructively, even with `--force`; `--keep-db` preserves its
+databases and permits removal. Borrowers retain the binding and never adopt
+ownership. Malformed or unreadable sibling state blocks destructive cleanup.
+Prune and `unlink --clean` remove selected borrowers before selected owners.
+`unlink --clean` uses guarded cleanup and preserves unregistered files.
+
+The Laravel preset copies `.env.example` only when `.env` is missing. Its
+`env.write` steps still update the resolved database name and an absent app key.
+SQLite defaults to
+`database/database.sqlite`; configured relative paths agree between creation and
+`DB_DATABASE`. Missing files are created exclusively, preserving existing rows.
+Absolute paths, traversal, symlinks, special files, URI forms and `:memory:` are
+rejected. SQLite creates no SQL-server testing ownership record, and `anvil exec`
+keeps its existing SQLite refusal. Live SQLite copying is not supported.
+
+Custom scaffolds can use `db.migrate`; explicit database-action/reset flags append
+that policy when an override omits it. Arbitrary shell commands remain user code:
+this policy does not sandbox a custom `migrate:fresh` command.
+
 ## Test Database Isolation
 
 Parallel worktrees used to share one test database: Laravel's `phpunit.xml`
@@ -398,9 +540,11 @@ databases:
   - name: myapp_swift_runner
     engine: mysql
     role: application
+    endpoint: {driver: yerd, service: mysql, host: 127.0.0.1, port: "3306"}
   - name: myapp_swift_runner_test
     engine: mysql
     role: testing
+    endpoint: {driver: yerd, service: mysql, host: 127.0.0.1, port: "3306"}
 ```
 
 Anvil delegates server-backed database operations to the selected site driver.
@@ -491,9 +635,9 @@ anvil remove feature-x --keep-db
 `--dry-run` prints one `Would drop database: <name>` line per database and
 never drops databases or removes the worktree. `--keep-db` prints the
 preserved names (parallel-worker databases are kept too; drop them manually
-when done). If `.anvil.local` is unreadable or contains records anvil does
-not understand, `remove` stops before deleting the worktree unless `--force`
-is given — databases are then left untouched and unrecorded.
+when done). If ownership or sibling state is unreadable or invalid, destructive cleanup
+stops before site unlink or worktree deletion. `--force` does not bypass borrower
+protection; use `--keep-db` to retain databases when removing a worktree.
 
 ### Limitations (v1.8)
 
@@ -562,6 +706,13 @@ Located inside each worktree, this file can contain worktree-specific overrides:
 - Team default scaffold steps
 - Shared cleanup steps
 - Tool configurations
+
+For `work`, `scaffold`, `remove` and `prune`, Anvil loads configuration from the
+selected worktree's `anvil.yaml`. This includes a newly created worktree whose commit
+differs from the invoking checkout. Target values override linked project
+settings; omitted site name, preset, default branch, editor and cleanup settings
+retain the linked defaults. If the target has no `anvil.yaml`, linked defaults
+apply. Anvil does not substitute the invoking checkout's scaffold YAML.
 
 #### 3. Local State (`<worktree>/.anvil.local`)
 
@@ -917,7 +1068,7 @@ Result: Creates `app_cool_engine`, `quotes_cool_engine`, `knowledge_cool_engine`
 
 ```yaml
 - name: php.laravel
-  args: ["migrate:fresh", "--no-interaction"]
+  args: ["migrate", "--no-interaction"]
 ```
 
 Capture command output:
@@ -1031,6 +1182,41 @@ condition:
     - composer.json
 ```
 
+Use `context_var` to compare output saved by an earlier step with a literal string:
+
+```yaml
+scaffold:
+  steps:
+    - name: command.run
+      command: "git rev-parse --is-inside-work-tree"
+      store_as: IsWorktree
+    - name: file.copy
+      from: .env.example
+      to: .env
+      condition:
+        context_var:
+          name: IsWorktree
+          value: "true"
+```
+
+Conditions are checked when each step reaches execution, so later steps see the
+latest `store_as` output. Quote boolean-looking values: `value` must be a string,
+and comparisons are case-sensitive. A missing variable never matches, including
+`value: ""`; a present variable with an empty string matches `value: ""`.
+Stored command output follows each step's existing trimming behavior.
+
+Sibling conditions are ANDed. `not` negates its operand and still ANDs with its
+siblings. A list under `not` is a conjunction before negation; nested `not` is
+supported. Configured guards apply to every registered step and to cleanup,
+alongside each step's intrinsic eligibility.
+
+Anvil validates all effective condition names and shapes before scaffold state
+changes or step execution, including disabled steps and cleanup steps excluded by
+`--keep-db`. Unknown names, unsupported fields, non-string `context_var` values,
+and malformed nested conditions fail with an error. Structural validation does
+not require variables to exist yet. Preflight checks run before step producers,
+so a `context_var` used in preflight must already be available then.
+
 ### Example Configuration
 
 Complete example for a Laravel project:
@@ -1057,9 +1243,8 @@ scaffold:
     - name: node.npm
       args: ["install"]
 
-    # Run migrations
-    - name: php.laravel
-      args: ["migrate:fresh", "--no-interaction"]
+    # Apply the built-in database migration policy
+    - name: db.migrate
 
     # Set domain based on worktree path
     - name: env.write

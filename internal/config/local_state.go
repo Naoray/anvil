@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -21,15 +22,76 @@ var databaseIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // OwnedDatabase records a database that Anvil created for a worktree.
 type OwnedDatabase struct {
-	Name   string `yaml:"name"`
-	Engine string `yaml:"engine"`
-	Role   string `yaml:"role"`
+	Endpoint *DatabaseEndpoint `yaml:"endpoint,omitempty"`
+	Name     string            `yaml:"name"`
+	Engine   string            `yaml:"engine"`
+	Role     string            `yaml:"role"`
+}
+
+// DatabaseEndpoint is the nonsecret managed connection verified at creation.
+type DatabaseEndpoint struct {
+	Driver  string `yaml:"driver"`
+	Service string `yaml:"service"`
+	Host    string `yaml:"host"`
+	Port    string `yaml:"port"`
+}
+
+func (e DatabaseEndpoint) Validate(engine string) error {
+	if e.Driver != "yerd" && e.Driver != "herd" {
+		return fmt.Errorf("unsupported database driver %q", e.Driver)
+	}
+	if (engine != "mysql" || e.Service != "mysql" && e.Service != "mariadb") && (engine != "pgsql" || e.Driver == "yerd" && e.Service != "postgres" || e.Driver == "herd" && e.Service != "postgresql") {
+		return fmt.Errorf("inconsistent database engine/service identity")
+	}
+	port, err := strconv.Atoi(e.Port)
+	if e.Host == "" || err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("invalid database endpoint host/port")
+	}
+	return nil
 }
 
 // LocalState represents worktree-local state that should never be committed.
 type LocalState struct {
-	DbSuffix  string          `yaml:"db_suffix"`
-	Databases []OwnedDatabase `yaml:"databases,omitempty"`
+	DbSuffix            string               `yaml:"db_suffix"`
+	Databases           []OwnedDatabase      `yaml:"databases,omitempty"`
+	BorrowedApplication *BorrowedApplication `yaml:"borrowed_application,omitempty"`
+}
+
+// BorrowedApplication records an exact nonsecret identity, never ownership.
+type BorrowedApplication struct {
+	SourcePath string `yaml:"source_path"`
+	Name       string `yaml:"name"`
+	Engine     string `yaml:"engine"`
+	Driver     string `yaml:"driver"`
+	Service    string `yaml:"service"`
+	Host       string `yaml:"host,omitempty"`
+	Port       string `yaml:"port,omitempty"`
+}
+
+func ValidateBorrowedApplication(b *BorrowedApplication) error {
+	if b == nil {
+		return nil
+	}
+	if !filepath.IsAbs(b.SourcePath) || filepath.Clean(b.SourcePath) != b.SourcePath || !IsValidDatabaseIdentifier(b.Name) {
+		return fmt.Errorf("invalid borrowed application path or database name")
+	}
+	if b.Driver != "yerd" && b.Driver != "herd" {
+		return fmt.Errorf("unsupported borrowed database driver %q", b.Driver)
+	}
+	if (b.Engine != "mysql" || (b.Service != "mysql" && b.Service != "mariadb")) && (b.Engine != "pgsql" || (b.Service != "postgres" && b.Service != "postgresql")) {
+		return fmt.Errorf("inconsistent borrowed engine/service")
+	}
+	if b.Host == "" {
+		return fmt.Errorf("borrowed database endpoint host is missing")
+	}
+	port, err := strconv.Atoi(b.Port)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("borrowed database endpoint port is invalid")
+	}
+	if b.Engine == "pgsql" && ((b.Driver == "yerd" && b.Service != "postgres") || (b.Driver == "herd" && b.Service != "postgresql")) {
+		return fmt.Errorf("borrowed database driver/service mismatch")
+	}
+	return nil
 }
 
 // IsValidDatabaseIdentifier reports whether a name is safe for Anvil's
@@ -73,6 +135,11 @@ func ValidateOwnedDatabases(databases []OwnedDatabase) error {
 				fmt.Errorf("unsupported database record role %q in record %q; supported roles: application, testing, auxiliary", database.Role, database.Name))
 		}
 
+		if database.Endpoint != nil {
+			if err := database.Endpoint.Validate(database.Engine); err != nil {
+				validationErrors = append(validationErrors, fmt.Errorf("database %q endpoint: %w", database.Name, err))
+			}
+		}
 		switch DatabaseEngine(database.Engine) {
 		case DBEngineMySQL, DBEnginePgSQL:
 			if _, exists := seenEngines[database.Engine]; !exists {
@@ -143,6 +210,12 @@ func WriteLocalState(worktreePath string, data LocalState) error {
 		existing["db_suffix"] = data.DbSuffix
 	}
 
+	if data.BorrowedApplication != nil {
+		if err := ValidateBorrowedApplication(data.BorrowedApplication); err != nil {
+			return err
+		}
+		existing["borrowed_application"] = data.BorrowedApplication
+	}
 	existingDatabases, hasExistingDatabases := existing["databases"]
 	if hasExistingDatabases || len(data.Databases) > 0 {
 		merged, err := mergeOwnedDatabases(existingDatabases, data.Databases)
@@ -187,6 +260,26 @@ func mergeOwnedDatabases(existingRaw any, updates []OwnedDatabase) ([]any, error
 	}
 
 	for _, update := range updates {
+		for _, raw := range records {
+			record := raw.(map[string]any)
+			if record["name"] != update.Name || update.Endpoint == nil {
+				continue
+			}
+			if record["endpoint"] == nil {
+				return nil, fmt.Errorf("database %q has unknown legacy endpoint identity and cannot be reattested", update.Name)
+			}
+			encoded, err := yaml.Marshal(record["endpoint"])
+			if err != nil {
+				return nil, err
+			}
+			var endpoint DatabaseEndpoint
+			if err := yaml.Unmarshal(encoded, &endpoint); err != nil {
+				return nil, err
+			}
+			if endpoint != *update.Endpoint {
+				return nil, fmt.Errorf("database %q endpoint identity cannot be replaced", update.Name)
+			}
+		}
 		var err error
 		switch update.Role {
 		case DbRoleApplication, DbRoleTesting:
@@ -259,15 +352,15 @@ func mergeCanonicalDatabase(records []any, update OwnedDatabase) ([]any, error) 
 		if role != DbRoleAuxiliary {
 			return nil, fmt.Errorf("duplicate database name %q already belongs to role %q", update.Name, role)
 		}
-		setOwnedDatabaseFields(record, OwnedDatabase{
-			Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
-		})
-		return removeDuplicateRole(records, update.Role, canonicalIndex), nil
+		canonicalRole := update.Role
+		update.Role = DbRoleAuxiliary
+		setOwnedDatabaseFields(record, update)
+		return removeDuplicateRole(records, canonicalRole, canonicalIndex), nil
 	}
 
-	return appendOwnedDatabase(removeDuplicateRole(records, update.Role, canonicalIndex), OwnedDatabase{
-		Name: update.Name, Engine: update.Engine, Role: DbRoleAuxiliary,
-	}), nil
+	records = removeDuplicateRole(records, update.Role, canonicalIndex)
+	update.Role = DbRoleAuxiliary
+	return appendOwnedDatabase(records, update), nil
 }
 
 func mergeAuxiliaryDatabase(records []any, update OwnedDatabase) ([]any, error) {
@@ -312,15 +405,18 @@ func mergeDatabaseByRole(records []any, update OwnedDatabase) []any {
 }
 
 func appendOwnedDatabase(records []any, database OwnedDatabase) []any {
-	return append(records, map[string]any{
-		"name": database.Name, "engine": database.Engine, "role": database.Role,
-	})
+	record := make(map[string]any)
+	setOwnedDatabaseFields(record, database)
+	return append(records, record)
 }
 
 func setOwnedDatabaseFields(record map[string]any, database OwnedDatabase) {
 	record["name"] = database.Name
 	record["engine"] = database.Engine
 	record["role"] = database.Role
+	if database.Endpoint != nil {
+		record["endpoint"] = database.Endpoint
+	}
 }
 
 func removeDuplicateRole(records []any, role string, keepIndex int) []any {

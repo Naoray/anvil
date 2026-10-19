@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/scaffold/words"
@@ -23,6 +25,7 @@ type CleanupOptions struct {
 	DryRun              bool
 	Verbose             bool
 	Quiet               bool
+	DatabaseLockHeld    bool
 	SkipDatabaseCleanup bool
 }
 
@@ -54,31 +57,11 @@ func (m *ScaffoldManager) GetStepsForWorktree(
 	worktreePath, branch, presetName string,
 	defaultSteps []config.StepConfig,
 ) ([]types.ScaffoldStep, error) {
-	var stepsList []types.ScaffoldStep
-
-	for _, stepConfig := range defaultSteps {
-		step, err := m.registry.Create(stepConfig.Name, stepConfig)
-		if err != nil {
-			return nil, fmt.Errorf("creating step %q: %w", stepConfig.Name, err)
-		}
-		stepsList = append(stepsList, step)
+	stepConfigs := cfg.Scaffold.Steps
+	if !cfg.Scaffold.Override {
+		stepConfigs = append(append([]config.StepConfig(nil), defaultSteps...), stepConfigs...)
 	}
-
-	if cfg.Scaffold.Override {
-		overrideSteps, err := m.stepsFromConfig(cfg.Scaffold.Steps)
-		if err != nil {
-			return nil, err
-		}
-		stepsList = overrideSteps
-	} else {
-		additionalSteps, err := m.stepsFromConfig(cfg.Scaffold.Steps)
-		if err != nil {
-			return nil, err
-		}
-		stepsList = append(stepsList, additionalSteps...)
-	}
-
-	return stepsList, nil
+	return m.stepsFromConfig(stepConfigs)
 }
 
 func (m *ScaffoldManager) GetCleanupSteps(
@@ -111,17 +94,22 @@ func (m *ScaffoldManager) GetCleanupSteps(
 
 func (m *ScaffoldManager) cleanupConfigToStepConfig(cleanupConfig config.CleanupStep) config.StepConfig {
 	stepConfig := config.StepConfig{
-		Name: cleanupConfig.Name,
-		Args: append([]string(nil), cleanupConfig.Args...),
+		Name:            cleanupConfig.Name,
+		ConditionHolder: config.ConditionHolder{Condition: make(map[string]any)},
+		Args:            append([]string(nil), cleanupConfig.Args...),
 	}
 	if cleanupConfig.Name == "herd" && len(stepConfig.Args) == 0 {
 		stepConfig.Args = []string{"unlink"}
 	}
 	for k, v := range cleanupConfig.Condition {
 		if k == "command" {
-			if cmd, ok := v.(string); ok {
+			if cmd, ok := v.(string); ok && cmd != "" {
 				stepConfig.Command = cmd
+			} else {
+				stepConfig.Condition[k] = v
 			}
+		} else {
+			stepConfig.Condition[k] = v
 		}
 	}
 	return stepConfig
@@ -141,13 +129,61 @@ func (m *ScaffoldManager) stepsFromConfig(stepConfigs []config.StepConfig) ([]ty
 	return stepsList, nil
 }
 
+type WarmOptions struct {
+	Source   string
+	CopyMode string
+}
+
 func (m *ScaffoldManager) RunScaffold(
 	worktreePath, branch, repoName, siteName, preset string,
 	defaultSteps []config.StepConfig,
 	cfg *config.Config,
 	dryRun, verbose, quiet bool,
+	warmOptions ...WarmOptions,
 ) error {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
+
+	ctx.BorrowAppDB = cfg.Scaffold.BorrowAppDB
+	ctx.DatabaseActions = cfg.Scaffold.DatabaseActions
+	ctx.ResetDatabases = cfg.Scaffold.ResetDatabases
+	ctx.SiteDriver = cfg.Scaffold.DatabaseDriver
+	if ctx.BorrowAppDB != "" {
+		effective := append([]config.StepConfig(nil), defaultSteps...)
+		if cfg.Scaffold.Override {
+			effective = nil
+		}
+		effective = append(effective, cfg.Scaffold.Steps...)
+		hasApplication := false
+		for _, step := range effective {
+			if step.Name == config.StepDbCreate && (step.Role == "" || step.Role == config.DbRoleApplication) {
+				hasApplication = true
+			}
+		}
+		if !hasApplication {
+			return fmt.Errorf("--borrow-app-db requires an application db.create step; use the laravel preset or configure that step explicitly")
+		}
+	}
+
+	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch, preset, defaultSteps)
+	if err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
+
+	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
+		found := false
+		for _, step := range stepsList {
+			if step.Name() == "db.migrate" {
+				found = true
+			}
+		}
+		if !found {
+			policy, err := m.registry.Create("db.migrate", config.StepConfig{Name: "db.migrate"})
+			if err != nil {
+				return err
+			}
+			stepsList = append(stepsList, policy)
+		}
+	}
 
 	// Run pre-flight checks with spinner
 	if !quiet {
@@ -165,18 +201,20 @@ func (m *ScaffoldManager) RunScaffold(
 		return err
 	}
 
-	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch, preset, defaultSteps)
-	if err != nil {
-		return fmt.Errorf("getting scaffold steps: %w", err)
-	}
-
 	opts := m.stepOptionsFromFlags(dryRun, verbose, quiet)
+	if len(warmOptions) > 0 {
+		opts.WarmSource = warmOptions[0].Source
+		opts.CopyMode = warmOptions[0].CopyMode
+	}
 
 	executor := NewStepExecutor(stepsList, &ctx, opts)
 	if err := executor.Execute(); err != nil {
 		return err
 	}
 
+	if ctx.BorrowAppDB != "" && ctx.GetVar("BorrowApplicationApplied") != "true" {
+		return fmt.Errorf("--borrow-app-db was not applied because the application db.create step was skipped")
+	}
 	return nil
 }
 
@@ -237,8 +275,22 @@ func (m *ScaffoldManager) RunCleanupWithOptions(
 	cleanupSteps []config.CleanupStep,
 	cfg *config.Config,
 	cleanupOpts CleanupOptions,
-) error {
+) (runErr error) {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
+
+	if !cleanupOpts.SkipDatabaseCleanup {
+		if !cleanupOpts.DatabaseLockHeld {
+			release, err := dblifecycle.Lock(worktreePath)
+			if err != nil {
+				return err
+			}
+			defer func() { runErr = errors.Join(runErr, release()) }()
+		}
+		ctx.DatabaseLockHeld = true
+		if err := dblifecycle.CheckCleanup(worktreePath); err != nil {
+			return err
+		}
+	}
 
 	stepsList, err := m.GetCleanupSteps(cfg, worktreePath, branch, preset, cleanupSteps)
 	if err != nil {

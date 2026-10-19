@@ -25,7 +25,9 @@ func TestDbCreateStep(t *testing.T) {
 		ctx := &types.ScaffoldContext{
 			WorktreePath: t.TempDir(),
 		}
-		assert.True(t, step.Condition(ctx))
+		eligible, conditionErr := step.Condition(ctx)
+		require.NoError(t, conditionErr)
+		assert.True(t, eligible)
 	})
 
 	t.Run("skips when no DB_CONNECTION in env file and no type config", func(t *testing.T) {
@@ -487,7 +489,7 @@ func TestDbCreateStep_TestingRoleCreatesDerivedDatabaseAndPersists(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, state.Databases, 1)
 	assert.Equal(t, config.OwnedDatabase{
-		Name: "dashboard_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting,
+		Name: "dashboard_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting,
 	}, state.Databases[0])
 	assert.Equal(t, "top_provider", state.DbSuffix)
 }
@@ -534,7 +536,7 @@ func TestDbCreateStep_TestingRoleFreshUnrecordedCollisionFailsClosed(t *testing.
 	err := step.Run(ctx, types.StepOptions{})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not owned by this worktree")
-	assert.Equal(t, []string{"dashboard_top_provider_test"}, client.GetCreateCalls())
+	assert.Empty(t, client.GetCreateCalls())
 
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
@@ -564,7 +566,7 @@ func TestDbCreateStep_TestingRolePersistedUnrecordedCollisionFailsClosed(t *test
 	err := step.Run(ctx, types.StepOptions{})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not owned by this worktree")
-	assert.Equal(t, []string{"quotes_top_provider_test"}, client.GetCreateCalls())
+	assert.Empty(t, client.GetCreateCalls())
 
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
@@ -615,7 +617,7 @@ func TestDbCreateStep_ApplicationRolePersistsOwnedDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, state.Databases, 1)
 	assert.Equal(t, config.OwnedDatabase{
-		Name: "dashboard_top_provider", Engine: "mysql", Role: config.DbRoleApplication,
+		Name: "dashboard_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication,
 	}, state.Databases[0])
 }
 
@@ -636,9 +638,9 @@ func TestDbCreateStep_MultipleApplicationRolesPersistCanonicalAndAuxiliaryDataba
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
 	want := []config.OwnedDatabase{
-		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "quotes_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
-		{Name: "knowledge_top_provider", Engine: "mysql", Role: config.DbRoleAuxiliary},
+		{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+		{Name: "quotes_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleAuxiliary},
+		{Name: "knowledge_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleAuxiliary},
 	}
 	assert.Equal(t, want, state.Databases)
 }
@@ -661,8 +663,8 @@ func TestDbCreateStep_MultipleTestingRolesPersistCanonicalAndAuxiliaryDatabases(
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
 	want := []config.OwnedDatabase{
-		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
-		{Name: "quotes_top_provider_test", Engine: "mysql", Role: config.DbRoleAuxiliary},
+		{Name: "app_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
+		{Name: "quotes_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleAuxiliary},
 	}
 	assert.Equal(t, want, state.Databases)
 }
@@ -717,7 +719,7 @@ func TestDbCreateStep_BothRolesPersistenceFailureIsHardError(t *testing.T) {
 
 			err := step.Run(ctx, types.StepOptions{})
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "recording ownership")
+			assert.ErrorContains(t, err, "local state")
 		})
 	}
 }
@@ -768,7 +770,7 @@ func TestCreateWithRetry_ExistsOnPersistedSuffixUnrecordedApplicationPrefixFails
 	err := step.Run(ctx, types.StepOptions{})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not owned by this worktree")
-	assert.Equal(t, []string{"quotes_top_provider"}, client.GetCreateCalls())
+	assert.Empty(t, client.GetCreateCalls())
 	assert.Equal(t, "top_provider", ctx.GetDbSuffix())
 
 	state, err := config.ReadLocalState(dir)
@@ -797,14 +799,14 @@ func TestCreateWithRetry_ExistsOnSameRunAfterApplicationRecordFailsClosed(t *tes
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not owned by this worktree")
 	assert.Equal(t, "top_provider", ctx.GetDbSuffix())
-	assert.Equal(t, []string{"app_top_provider", "quotes_top_provider"}, client.GetCreateCalls())
+	assert.Equal(t, []string{"app_top_provider"}, client.GetCreateCalls())
 
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
 	assert.Equal(t, config.LocalState{
 		DbSuffix: "top_provider",
 		Databases: []config.OwnedDatabase{{
-			Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication,
+			Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication,
 		}},
 	}, *state)
 }
@@ -908,7 +910,7 @@ func TestCreateWithRetry_ExistsWithInvalidOwnershipStateFailsClosed(t *testing.T
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "validating owned database records")
 	assert.Equal(t, "top_provider", ctx.GetDbSuffix())
-	assert.Equal(t, []string{"dashboard_top_provider"}, client.GetCreateCalls())
+	assert.Empty(t, client.GetCreateCalls())
 
 	state, err := config.ReadLocalState(dir)
 	require.NoError(t, err)
@@ -925,8 +927,8 @@ func TestCreateWithRetry_ExistsOnFreshSuffixStillRotates(t *testing.T) {
 
 	require.NoError(t, step.Run(ctx, types.StepOptions{}))
 	assert.NotEqual(t, "collision", ctx.GetDbSuffix())
-	assert.Len(t, client.GetCreateCalls(), 2)
-	assert.Equal(t, "dashboard_collision", client.GetCreateCalls()[0])
+	assert.Len(t, client.GetCreateCalls(), 1)
+	assert.NotEqual(t, "dashboard_collision", client.GetCreateCalls()[0])
 }
 
 func TestDbCreateStep_MySQLFreshCollisionRetriesWithoutPersistingCollidingDatabase(t *testing.T) {
@@ -966,7 +968,9 @@ func TestDbDestroyStep(t *testing.T) {
 		ctx := &types.ScaffoldContext{
 			WorktreePath: t.TempDir(),
 		}
-		assert.True(t, step.Condition(ctx))
+		eligible, conditionErr := step.Condition(ctx)
+		require.NoError(t, conditionErr)
+		assert.True(t, eligible)
 	})
 
 	t.Run("returns nil when no DbSuffix in context or local state", func(t *testing.T) {
@@ -1495,7 +1499,8 @@ func TestDatabaseSteps_DoNotInjectConnectionDefaults(t *testing.T) {
 
 			client := NewMockDatabaseClient()
 			var gotOptions DatabaseOptions
-			factory := func(_ string, options DatabaseOptions) (DatabaseClient, error) {
+			factory := func(engine string, options DatabaseOptions) (DatabaseClient, error) {
+				client.configureEndpoint(engine, options)
 				gotOptions = options
 				return client, nil
 			}

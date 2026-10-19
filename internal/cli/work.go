@@ -6,10 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"strings"
-
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
 )
 
@@ -26,12 +25,32 @@ If no branch is provided, interactive mode allows selection from
 available branches or entering a new branch name.`,
 	Args: cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		warmFrom := mustGetString(cmd, "warm-from")
+		copyMode := mustGetString(cmd, "copy-mode")
+		if warmFrom == "" && cmd.Flags().Changed("copy-mode") {
+			return fmt.Errorf("--copy-mode requires --warm-from")
+		}
+		if copyMode != "auto" && copyMode != "copy" {
+			return fmt.Errorf("--copy-mode must be auto or copy")
+		}
+		if warmFrom != "" && mustGetBool(cmd, "skip-scaffold") {
+			return fmt.Errorf("--warm-from requires scaffold; remove --skip-scaffold")
+		}
+
 		pc, err := OpenProjectFromCWD()
 		if err != nil {
 			return err
 		}
 
+		warmSource := ""
+		if warmFrom != "" {
+			warmSource, err = resolveWarmSource(pc, warmFrom)
+			if err != nil {
+				return err
+			}
+		}
 		baseBranch := mustGetString(cmd, "base")
+
 		dryRun := mustGetBool(cmd, "dry-run")
 		verbose := mustGetBool(cmd, "verbose")
 		quiet := mustGetBool(cmd, "quiet")
@@ -39,7 +58,7 @@ available branches or entering a new branch name.`,
 		var branch string
 		if len(args) > 0 {
 			branch = args[0]
-		} else if ui.IsInteractive() {
+		} else if ui.ShouldPrompt(cmd, false) {
 			localBranches, remoteBranches, err := branchRefsForSelection(pc.GitDir)
 			if err != nil {
 				return err
@@ -56,12 +75,16 @@ available branches or entering a new branch name.`,
 			return fmt.Errorf("branch name required (run interactively or provide branch as argument)")
 		}
 
-		// Strip remote prefix (e.g. "origin/feature/foo" -> "feature/foo")
-		// to avoid creating worktrees with detached HEAD
-		branch = stripRemotePrefix(branch)
-
+		selection, err := git.ResolveWorkBranch(pc.GitDir, branch)
+		if err != nil {
+			return err
+		}
+		branch = selection.Branch
 		if baseBranch == "" {
-			baseBranch = pc.DefaultBranch
+			baseBranch = selection.Base
+			if baseBranch == "" {
+				baseBranch = pc.DefaultBranch
+			}
 		}
 
 		worktreePath := ""
@@ -102,14 +125,18 @@ available branches or entering a new branch name.`,
 
 		// Set up branch tracking unless --no-track is specified
 		noTrack := mustGetBool(cmd, "no-track")
-		if !dryRun && !noTrack {
-			if err := git.SetBranchUpstream(pc.GitDir, branch, config.DefaultRemote); err != nil {
+		if !dryRun && !noTrack && !selection.Existing {
+			remote := selection.Remote
+			if remote == "" {
+				remote = config.DefaultRemote
+			}
+			if err := git.SetBranchUpstream(pc.GitDir, branch, remote); err != nil {
 				// Non-fatal - just inform user if verbose
 				if verbose {
 					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))
 				}
 			} else {
-				ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on origin", branch))
+				ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on %s", branch, remote))
 			}
 		}
 
@@ -119,6 +146,13 @@ available branches or entering a new branch name.`,
 				ui.PrintInfo("Scaffold skipped (run 'anvil scaffold' to set up later)")
 			}
 		} else if !dryRun {
+			if err := pc.LoadWorktreeConfig(absWorktreePath); err != nil {
+				return err
+			}
+			if err := applyDatabaseFlags(cmd, pc); err != nil {
+				return err
+			}
+
 			resolvedPreset := pc.ResolvePreset("", absWorktreePath)
 
 			if verbose && resolvedPreset.Name() != "" {
@@ -139,8 +173,10 @@ available branches or entering a new branch name.`,
 				false,
 				verbose,
 				quiet,
+				scaffold.WarmOptions{Source: warmSource, CopyMode: copyMode},
 			); err != nil {
 				ui.PrintErrorWithHint("Scaffold steps failed", err.Error())
+				return err
 			}
 
 			// Check if .anvil.local should be gitignored
@@ -164,22 +200,15 @@ func branchRefsForSelection(gitDir string) (local, remote []string, err error) {
 	return local, remote, nil
 }
 
-// stripRemotePrefix removes the remote prefix from a branch name
-// (e.g. "origin/feature/foo" -> "feature/foo") so that git creates
-// a proper local tracking branch instead of a detached HEAD.
-func stripRemotePrefix(branch string) string {
-	// Common remote prefixes to strip
-	for _, prefix := range []string{"origin/", "upstream/"} {
-		if strings.HasPrefix(branch, prefix) {
-			return strings.TrimPrefix(branch, prefix)
-		}
-	}
-	return branch
-}
-
 func init() {
+	addDatabaseFlags(workCmd)
 	rootCmd.AddCommand(workCmd)
 
+	workCmd.Flags().String("warm-from", "", "Reuse verified vendor/node_modules from a registered worktree")
+	workCmd.Flags().String("copy-mode", "auto", "Warm dependency copy mode: auto (clone with copy fallback) or copy")
+	if err := workCmd.RegisterFlagCompletionFunc("warm-from", completeWorktreeNames); err != nil {
+		panic(err)
+	}
 	workCmd.Flags().StringP("base", "b", "", "Base branch for new worktree")
 	workCmd.Flags().Bool("no-track", false, "Skip setting up remote tracking for new branches")
 	workCmd.Flags().Bool("skip-scaffold", false, "Skip scaffold steps (run 'anvil scaffold' later)")

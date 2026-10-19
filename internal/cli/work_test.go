@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
 )
 
@@ -122,4 +124,86 @@ func runBranchSelectionGitOutput(t *testing.T, dir string, args ...string) strin
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestWorkCommandRemoteRef(t *testing.T) {
+	binary := os.Getenv("ANVIL_TEST_BIN")
+	require.NotEmpty(t, binary)
+	for _, tc := range []struct {
+		name, selected, remote, base, local, upstream string
+		noTrack, ambiguous, existing                  bool
+	}{
+		{name: "origin qualified", selected: "origin/feature/nested", remote: "origin", upstream: "origin/feature/nested"},
+		{name: "custom qualified", selected: "company/feature/nested", remote: "company", upstream: "company/feature/nested"},
+		{name: "origin unqualified", selected: "feature/nested", remote: "origin", upstream: "origin/feature/nested"},
+		{name: "custom unqualified", selected: "feature/nested", remote: "company", upstream: "company/feature/nested"},
+		{name: "picker canonical ref", selected: "refs/remotes/company/feature/nested", remote: "company", upstream: "company/feature/nested"},
+		{name: "no track", selected: "origin/feature/nested", remote: "origin", noTrack: true},
+		{name: "custom no track", selected: "company/feature/nested", remote: "company", noTrack: true},
+		{name: "explicit base", selected: "company/feature/nested", remote: "company", base: "main", upstream: "company/feature/nested"},
+		{name: "literal origin prefix", selected: "origin/literal", remote: "origin", local: "origin/literal", existing: true, upstream: "company/feature/nested"},
+		{name: "local and remote ref collision", selected: "origin/feature/nested", remote: "origin", local: "origin/feature/nested", existing: true, upstream: "company/feature/nested"},
+		{name: "literal upstream prefix", selected: "upstream/literal", remote: "origin", local: "upstream/literal", existing: true, upstream: "company/feature/nested"},
+		{name: "existing local", selected: "company/feature/nested", remote: "company", local: "feature/nested", existing: true, upstream: "origin/feature/nested"},
+		{name: "existing local explicit base", selected: "company/feature/nested", remote: "company", local: "feature/nested", existing: true, base: "company/feature/nested", upstream: "origin/feature/nested"},
+		{name: "ambiguous", selected: "feature/nested", remote: "company", ambiguous: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := createTestRepo(t)
+			mainSHA := runBranchSelectionGitOutput(t, repo, "rev-parse", "HEAD")
+			runBranchSelectionGit(t, repo, "commit", "--allow-empty", "-m", "remote feature")
+			featureSHA := runBranchSelectionGitOutput(t, repo, "rev-parse", "HEAD")
+			require.NotEqual(t, mainSHA, featureSHA)
+			runBranchSelectionGit(t, repo, "reset", "--hard", mainSHA)
+			for _, remote := range []string{"origin", "company"} {
+				runBranchSelectionGit(t, repo, "remote", "add", remote, "https://example.test/"+remote+".git")
+				if remote == tc.remote || tc.ambiguous || tc.existing {
+					runBranchSelectionGit(t, repo, "update-ref", "refs/remotes/"+remote+"/feature/nested", featureSHA)
+				}
+			}
+			// Even aggressive Git defaults must not defeat --no-track.
+			runBranchSelectionGit(t, repo, "config", "branch.autoSetupMerge", "always")
+			if tc.existing {
+				runBranchSelectionGit(t, repo, "branch", "--no-track", tc.local, "main")
+				runBranchSelectionGit(t, repo, "branch", "--set-upstream-to="+tc.upstream, tc.local)
+			}
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			require.NoError(t, config.SaveGlobalConfig(&config.GlobalConfig{Projects: map[string]*config.ProjectInfo{"test": {Path: repo, DefaultBranch: "main"}}}))
+			target := filepath.Join(t.TempDir(), "worktree")
+			args := []string{"work", tc.selected, target, "--skip-scaffold"}
+			if tc.noTrack {
+				args = append(args, "--no-track")
+			}
+			if tc.base != "" {
+				args = append(args, "--base", tc.base)
+			}
+			cmd := exec.Command(binary, args...)
+			cmd.Dir = repo
+			output, err := cmd.CombinedOutput()
+			if tc.ambiguous {
+				require.Error(t, err, string(output))
+				assert.Contains(t, string(output), "ambiguous")
+				_, statErr := os.Stat(target)
+				assert.True(t, os.IsNotExist(statErr))
+				return
+			}
+			require.NoError(t, err, string(output))
+			wantSHA := featureSHA
+			if tc.base == "main" || tc.existing {
+				wantSHA = mainSHA
+			}
+			assert.Equal(t, wantSHA, runBranchSelectionGitOutput(t, target, "rev-parse", "HEAD"))
+			branch := "feature/nested"
+			if tc.local != "" {
+				branch = tc.local
+			}
+			assert.Equal(t, "refs/heads/"+branch, runBranchSelectionGitOutput(t, target, "symbolic-ref", "HEAD"))
+			if tc.noTrack {
+				out := runBranchSelectionGitOutput(t, repo, "for-each-ref", "--format=%(upstream)", "refs/heads/"+branch)
+				assert.Empty(t, out)
+			} else {
+				assert.Equal(t, tc.upstream, runBranchSelectionGitOutput(t, target, "rev-parse", "--abbrev-ref", "@{upstream}"))
+			}
+		})
+	}
 }

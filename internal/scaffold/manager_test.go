@@ -65,8 +65,8 @@ type contextRecordingStep struct {
 
 func (s *contextRecordingStep) Name() string        { return "selected-step" }
 func (s *contextRecordingStep) Description() string { return "selected step" }
-func (s *contextRecordingStep) Condition(*types.ScaffoldContext) bool {
-	return true
+func (s *contextRecordingStep) Condition(*types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 func (s *contextRecordingStep) Run(ctx *types.ScaffoldContext, _ types.StepOptions) error {
 	s.preset = ctx.Preset

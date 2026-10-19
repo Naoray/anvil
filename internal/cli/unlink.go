@@ -64,6 +64,9 @@ Examples:
 			return fmt.Errorf("current directory is not inside a linked project. Specify the project name as an argument")
 		}
 
+		dryRun := mustGetBool(cmd, "dry-run")
+		verbose := mustGetBool(cmd, "verbose")
+		quiet := mustGetBool(cmd, "quiet")
 		clean := mustGetBool(cmd, "clean")
 		force := mustGetBool(cmd, "force")
 
@@ -96,23 +99,41 @@ Examples:
 							}
 						}
 
-						// Remove worktrees from git first
-						if gitDir, err := git.FindGitDir(projectInfo.Path); err == nil {
-							for _, entry := range entries {
-								if entry.IsDir() {
-									worktreePath := filepath.Join(projectWorktreeDir, entry.Name())
-									// Best-effort: directory will be removed by RemoveAll below regardless
-									_ = git.RemoveWorktree(gitDir, worktreePath, true)
-								}
+						pc, err := openProject(projectInfo.Path, projectName, projectInfo, globalCfg)
+						if err != nil {
+							return err
+						}
+						worktrees, err := git.ListWorktreesDetailed(pc.GitDir, pc.CWD, pc.DefaultBranch)
+						if err != nil {
+							return err
+						}
+						var selected []git.Worktree
+						for _, wt := range worktrees {
+							if filepath.Dir(wt.Path) == projectWorktreeDir {
+								selected = append(selected, wt)
 							}
 						}
-
-						// Remove the directory
-						if err := os.RemoveAll(projectWorktreeDir); err != nil {
-							ui.PrintWarning(fmt.Sprintf("Failed to remove worktree directory: %s", err))
-						} else {
-							ui.PrintSuccess(fmt.Sprintf("Removed worktrees in %s", projectWorktreeDir))
+						if err := orderDatabaseRemovals(selected); err != nil {
+							return err
 						}
+						deps := defaultRemoveCommandDependencies().lifecycleDependencies()
+						for _, wt := range selected {
+							cleanupOpts, messages, err := planWorktreeCleanup(wt.Path, false, dryRun, force, config.ReadLocalState)
+							if err != nil {
+								return err
+							}
+							if err := runRemoveLifecycle(pc, wt, removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet}, cleanupOpts, messages, deps); err != nil {
+								return err
+							}
+						}
+						if dryRun {
+							ui.PrintInfo("[DRY RUN] Would unlink project after worktree cleanup")
+							return nil
+						}
+						if err := os.Remove(projectWorktreeDir); err != nil {
+							return fmt.Errorf("removing worktree directory (unregistered files are preserved): %w", err)
+						}
+						ui.PrintSuccess(fmt.Sprintf("Removed worktrees in %s", projectWorktreeDir))
 					} else {
 						ui.PrintWarning(fmt.Sprintf("Worktrees exist at %s (use --clean to remove)", projectWorktreeDir))
 					}
@@ -120,6 +141,10 @@ Examples:
 			}
 		}
 
+		if dryRun {
+			ui.PrintInfo("[DRY RUN] Would unlink project registration")
+			return nil
+		}
 		// Remove from global config
 		globalCfg.RemoveProject(projectName)
 

@@ -155,6 +155,12 @@ func resolveExecDatabases(worktreeRoot string) (string, string, error) {
 		}
 	}
 
+	if err := config.ValidateBorrowedApplication(state.BorrowedApplication); err != nil {
+		return "", "", err
+	}
+	if state.BorrowedApplication != nil {
+		appDb = state.BorrowedApplication.Name
+	}
 	if testDb == "" {
 		message := legacyExecHint
 		if dbName := envValues["DB_DATABASE"]; dbName != "" && state.DbSuffix != "" && !strings.HasSuffix(dbName, "_"+state.DbSuffix) {

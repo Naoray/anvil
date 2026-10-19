@@ -275,6 +275,9 @@ func pruneProjectWithDependencies(
 		ui.PrintInfo(fmt.Sprintf("Removing %d worktree(s):", len(toRemove)))
 	}
 
+	if err := orderDatabaseRemovals(toRemove); err != nil {
+		return err
+	}
 	var removalErrors []error
 	for _, wt := range toRemove {
 		ui.PrintStep(fmt.Sprintf("Removing %s...", wt.Branch))

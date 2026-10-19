@@ -21,7 +21,9 @@ func TestEnvReadStep(t *testing.T) {
 	t.Run("condition always returns true", func(t *testing.T) {
 		step := NewEnvReadStep(config.StepConfig{})
 		ctx := types.ScaffoldContext{WorktreePath: t.TempDir()}
-		assert.True(t, step.Condition(&ctx))
+		eligible, conditionErr := step.Condition(&ctx)
+		require.NoError(t, conditionErr)
+		assert.True(t, eligible)
 	})
 
 	t.Run("reads key from default .env file and stores as variable", func(t *testing.T) {

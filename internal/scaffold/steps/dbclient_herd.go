@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	anvilexec "github.com/naoray/anvil/internal/exec"
 	"github.com/naoray/anvil/internal/utils"
 )
@@ -20,6 +21,12 @@ type herdDatabaseClient struct {
 // services and the database binaries that Herd provides.
 func NewHerdDatabaseClientFactory(commander anvilexec.Commander) DatabaseClientFactory {
 	return func(engine string, options DatabaseOptions) (DatabaseClient, error) {
+		if options.Endpoint != nil {
+			if options.Endpoint.Driver != "herd" {
+				return nil, fmt.Errorf("stored endpoint requires driver %s", options.Endpoint.Driver)
+			}
+			options.Service, options.Host, options.Port = options.Endpoint.Service, options.Endpoint.Host, options.Endpoint.Port
+		}
 		service := options.Service
 		if service == "" {
 			switch engine {
@@ -47,8 +54,19 @@ func NewHerdDatabaseClientFactory(commander anvilexec.Commander) DatabaseClientF
 		if options.Host == "" {
 			options.Host = "127.0.0.1"
 		}
+		if service == "mysql" || service == "mariadb" {
+			// MySQL treats localhost as a Unix socket and ignores the TCP port.
+			// Use the same TCP host for SQL commands and persisted identity.
+			options.Host = normalizeDatabaseHost(options.Host)
+		}
 		if options.Username == "" {
 			options.Username = "root"
+		}
+		if options.Port == "" {
+			options.Port = "3306"
+			if service == "postgresql" {
+				options.Port = "5432"
+			}
 		}
 		return &herdDatabaseClient{
 			service:  service,
@@ -56,6 +74,10 @@ func NewHerdDatabaseClientFactory(commander anvilexec.Commander) DatabaseClientF
 			executor: anvilexec.NewCommandExecutor(commander),
 		}, nil
 	}
+}
+
+func (c *herdDatabaseClient) Endpoint() (config.DatabaseEndpoint, error) {
+	return config.DatabaseEndpoint{Driver: "herd", Service: c.service, Host: c.options.Host, Port: c.options.Port}, nil
 }
 
 func (c *herdDatabaseClient) Ping() error {

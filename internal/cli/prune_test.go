@@ -162,7 +162,7 @@ func TestCaptureStdoutRestoresAfterCallbackPanic(t *testing.T) {
 func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
 	worktreePath := t.TempDir()
 	require.NoError(t, config.WriteLocalState(worktreePath, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_feature_failed", Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: "app_feature_failed", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
 	}}))
 
 	client := steps.NewMockDatabaseClient()
@@ -189,7 +189,7 @@ func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
 		removeLifecycle: removeLifecycleDependencies{
 			readLocalState: func(string) (*config.LocalState, error) {
 				return &config.LocalState{Databases: []config.OwnedDatabase{
-					{Name: "app_feature_failed", Engine: "mysql", Role: config.DbRoleApplication},
+					{Name: "app_feature_failed", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
 				}}, nil
 			},
 			scaffoldManager: func(*ProjectContext) *scaffold.ScaffoldManager { return manager },
@@ -338,7 +338,7 @@ func TestPlanWorktreeCleanup_RejectsUnreadableOrInvalidStateWithoutForce(t *test
 			name: "invalid",
 			readState: func(string) (*config.LocalState, error) {
 				return &config.LocalState{Databases: []config.OwnedDatabase{
-					{Name: "unsafe-name!", Engine: "mysql", Role: config.DbRoleApplication},
+					{Name: "unsafe-name!", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
 				}}, nil
 			},
 			want: "invalid database records in .anvil.local",
@@ -358,7 +358,7 @@ func TestPlanWorktreeCleanup_RejectsUnreadableOrInvalidStateWithoutForce(t *test
 func TestPruneProject_ForceAndKeepDBOptionsAreShared(t *testing.T) {
 	worktreePath := t.TempDir()
 	require.NoError(t, config.WriteLocalState(worktreePath, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_feature_kept", Engine: "mysql", Role: config.DbRoleApplication},
+		{Name: "app_feature_kept", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
 	}}))
 
 	client := steps.NewMockDatabaseClient()
@@ -400,8 +400,8 @@ func TestPruneProject_ForceAndKeepDBOptionsAreShared(t *testing.T) {
 func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 	worktreePath := t.TempDir()
 	require.NoError(t, config.WriteLocalState(worktreePath, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_feature_dry", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "app_feature_dry_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_feature_dry", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+		{Name: "app_feature_dry_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 	}}))
 
 	client := steps.NewMockDatabaseClient()

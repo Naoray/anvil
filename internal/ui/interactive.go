@@ -22,7 +22,7 @@ func SelectBranchInteractive(barePath string, localBranches, remoteBranches []st
 	}
 
 	for _, b := range remoteBranches {
-		options = append(options, huh.NewOption("↓ "+b, b))
+		options = append(options, huh.NewOption("↓ "+b, "refs/remotes/"+b))
 	}
 
 	form := huh.NewForm(

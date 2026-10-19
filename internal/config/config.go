@@ -142,9 +142,13 @@ type PreFlight struct {
 
 // ScaffoldConfig represents scaffold configuration
 type ScaffoldConfig struct {
-	PreFlight *PreFlight   `mapstructure:"pre_flight"`
-	Steps     []StepConfig `mapstructure:"steps"`
-	Override  bool         `mapstructure:"override"`
+	DatabaseActions map[string]string `mapstructure:"database_actions"`
+	BorrowAppDB     string            `mapstructure:"-"`
+	ResetDatabases  []string          `mapstructure:"-"`
+	DatabaseDriver  string            `mapstructure:"-"`
+	PreFlight       *PreFlight        `mapstructure:"pre_flight"`
+	Steps           []StepConfig      `mapstructure:"steps"`
+	Override        bool              `mapstructure:"override"`
 }
 
 // ConditionHolder provides shared condition-map accessors.
@@ -302,6 +306,20 @@ func LoadProject(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	// Viper normalizes map keys, but exact database selectors are case-sensitive.
+	content, err := os.ReadFile(v.ConfigFileUsed())
+	if err != nil {
+		return nil, fmt.Errorf("reading database actions: %w", err)
+	}
+	var selectors struct {
+		Scaffold struct {
+			DatabaseActions map[string]string `yaml:"database_actions"`
+		} `yaml:"scaffold"`
+	}
+	if err := yaml.Unmarshal(content, &selectors); err != nil {
+		return nil, fmt.Errorf("parsing database actions: %w", err)
+	}
+	config.Scaffold.DatabaseActions = selectors.Scaffold.DatabaseActions
 	return &config, nil
 }
 

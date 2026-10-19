@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
@@ -66,7 +67,9 @@ func TestFileCopyStep(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		assert.True(t, step.Condition(ctx))
+		eligible, conditionErr := step.Condition(ctx)
+		require.NoError(t, conditionErr)
+		assert.True(t, eligible)
 	})
 
 	t.Run("condition returns false when source file does not exist", func(t *testing.T) {
@@ -77,7 +80,9 @@ func TestFileCopyStep(t *testing.T) {
 			WorktreePath: tmpDir,
 		}
 
-		assert.False(t, step.Condition(ctx))
+		eligible, conditionErr := step.Condition(ctx)
+		require.NoError(t, conditionErr)
+		assert.False(t, eligible)
 	})
 
 	t.Run("returns error when source file does not exist", func(t *testing.T) {

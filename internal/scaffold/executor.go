@@ -63,7 +63,11 @@ func (e *StepExecutor) Execute() error {
 	for stepIndex, step := range e.steps {
 		// Progress uses the configured ordinal, including skipped steps.
 		currentStep := stepIndex + 1
-		eligible, skipReason := e.evaluateEligibility(step)
+		eligible, skipReason, err := e.evaluateEligibility(step)
+		if err != nil {
+			e.recordResult(step, err, false)
+			return fmt.Errorf("step %s condition: %w", step.Name(), err)
+		}
 		if !eligible {
 			e.recordResult(step, nil, true)
 			if e.opts.Verbose {
@@ -89,14 +93,18 @@ func (e *StepExecutor) Results() []ExecutionResult {
 	return e.results
 }
 
-func (e *StepExecutor) evaluateEligibility(step types.ScaffoldStep) (bool, string) {
+func (e *StepExecutor) evaluateEligibility(step types.ScaffoldStep) (bool, string, error) {
 	if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok && !stepConfig.IsEnabled() {
-		return false, "disabled"
+		return false, "disabled", nil
 	}
-	if !step.Condition(e.ctx) {
-		return false, "condition not met"
+	eligible, err := step.Condition(e.ctx)
+	if err != nil {
+		return false, "", err
 	}
-	return true, ""
+	if !eligible {
+		return false, "condition not met", nil
+	}
+	return true, "", nil
 }
 
 func (e *StepExecutor) executeStep(step types.ScaffoldStep, current, total int) error {
@@ -109,6 +117,9 @@ func (e *StepExecutor) executeStep(step types.ScaffoldStep, current, total int) 
 }
 
 func (e *StepExecutor) presentStep(step types.ScaffoldStep, current, total int) error {
+	if e.opts.DryRun && (step.Name() == "db.migrate" || step.Name() == config.StepDbCreate) {
+		return step.Run(e.ctx, e.opts)
+	}
 	if e.opts.Verbose {
 		return e.executeVerbose(step, current, total)
 	}

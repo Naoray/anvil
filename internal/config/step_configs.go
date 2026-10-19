@@ -89,6 +89,8 @@ func ValidateStepConfig(stepName string, cfg StepConfig) error {
 		return validateEnvCopyStepConfig(cfg)
 	case StepDbCreate:
 		return validateDbCreateStepConfig(cfg)
+	case "db.migrate":
+		return nil
 	case StepDbDestroy:
 		return validateDbDestroyStepConfig(cfg)
 	default:
