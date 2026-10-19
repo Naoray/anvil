@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned for v1.12.0.
+## [v1.12.0](https://github.com/naoray/anvil/compare/v1.11.0...v1.12.0) - 2026-10-19
 
 ### Added
 
