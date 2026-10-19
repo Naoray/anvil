@@ -58,6 +58,7 @@ func TestRegistryHerdSiteDriverCreatesDatabaseThroughManagedService(t *testing.T
 	}
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
 		{output: []byte("MySQL started")},
+		{},
 		{output: []byte{}},
 	}}
 	registry := NewRegistry()
@@ -75,6 +76,7 @@ func TestRegistryHerdSiteDriverCreatesDatabaseThroughManagedService(t *testing.T
 
 	want := []yerdCommandCall{
 		{command: "herd", args: []string{"services:start", "mysql"}},
+		{command: "mysql", args: []string{"--host=127.0.0.1", "--port=3307", "--user=root", "--batch", "--skip-column-names", "--execute", "SHOW DATABASES"}},
 		{
 			command: "mysql",
 			args: []string{
@@ -103,8 +105,8 @@ func TestRegistryHerdSiteDriverDropsOwnedDatabaseFamiliesThroughManagedService(t
 		t.Fatalf("writing environment: %v", err)
 	}
 	if err := config.WriteLocalState(dir, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_swift_runner", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "app_swift_runner_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_swift_runner", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "mysql", Host: "127.0.0.1", Port: "3307"}, Role: config.DbRoleApplication},
+		{Name: "app_swift_runner_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "mysql", Host: "127.0.0.1", Port: "3307"}, Role: config.DbRoleTesting},
 	}}); err != nil {
 		t.Fatalf("writing local state: %v", err)
 	}
@@ -168,6 +170,7 @@ func TestRegistryHerdSiteDriverCreatesPostgreSQLDatabaseThroughManagedService(t 
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
 		{output: []byte("PostgreSQL started")},
 		{},
+		{},
 	}}
 	registry := NewRegistry()
 	registry.RegisterDefaultsForSiteDriver(config.SiteDriverHerd, commander)
@@ -184,6 +187,7 @@ func TestRegistryHerdSiteDriverCreatesPostgreSQLDatabaseThroughManagedService(t 
 
 	want := []yerdCommandCall{
 		{command: "herd", args: []string{"services:start", "postgresql"}},
+		{command: "psql", args: []string{"--host=127.0.0.1", "--port=5433", "--username=root", "--dbname=postgres", "--tuples-only", "--no-align", "--command", "SELECT datname FROM pg_database WHERE datistemplate = false"}},
 		{
 			command: "createdb",
 			args: []string{
@@ -209,8 +213,8 @@ func TestRegistryHerdSiteDriverDropsPostgreSQLDatabaseFamiliesThroughManagedServ
 		t.Fatalf("writing environment: %v", err)
 	}
 	if err := config.WriteLocalState(dir, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_swift_runner", Engine: "pgsql", Role: config.DbRoleApplication},
-		{Name: "app_swift_runner_test", Engine: "pgsql", Role: config.DbRoleTesting},
+		{Name: "app_swift_runner", Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5433"}, Role: config.DbRoleApplication},
+		{Name: "app_swift_runner_test", Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5433"}, Role: config.DbRoleTesting},
 	}}); err != nil {
 		t.Fatalf("writing local state: %v", err)
 	}
@@ -284,10 +288,10 @@ func TestRegistryHerdSiteDriverKeepsDatabasePasswordOutOfProcessArguments(t *tes
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if len(commander.calls) != 2 {
+	if len(commander.calls) != 3 {
 		t.Fatalf("Herd calls = %#v, want service and database calls", commander.calls)
 	}
-	databaseCall := commander.calls[1]
+	databaseCall := commander.calls[2]
 	if got := databaseCall.environment["MYSQL_PWD"]; got != "secret-value" {
 		t.Fatalf("MYSQL_PWD = %q, want password from .env", got)
 	}
@@ -345,10 +349,10 @@ func TestRegistryHerdSiteDriverHonorsExplicitEmptyPassword(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if len(commander.calls) != 2 {
+	if len(commander.calls) != 3 {
 		t.Fatalf("Herd calls = %#v, want service and database calls", commander.calls)
 	}
-	if commander.calls[1].environment != nil {
-		t.Fatalf("database environment = %#v, want no inherited DB_PASSWORD", commander.calls[1].environment)
+	if commander.calls[2].environment != nil {
+		t.Fatalf("database environment = %#v, want no inherited DB_PASSWORD", commander.calls[2].environment)
 	}
 }

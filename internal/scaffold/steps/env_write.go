@@ -61,8 +61,8 @@ func (s *EnvWriteStep) Name() string {
 	return s.name
 }
 
-func (s *EnvWriteStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *EnvWriteStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
 func (s *EnvWriteStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {

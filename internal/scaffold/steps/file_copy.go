@@ -53,8 +53,8 @@ func (s *FileCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 	return nil
 }
 
-func (s *FileCopyStep) Condition(ctx *types.ScaffoldContext) bool {
+func (s *FileCopyStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
 	fromPath := filepath.Join(ctx.WorktreePath, s.from)
 	_, err := s.fs.Stat(fromPath)
-	return err == nil
+	return err == nil, nil
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/dblifecycle"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/presets"
@@ -85,6 +87,7 @@ type removeLifecycleOptions struct {
 }
 
 type removeLifecycleDependencies struct {
+	lifecycleLock   func(string) (func() error, error)
 	readLocalState  func(string) (*config.LocalState, error)
 	scaffoldManager func(*ProjectContext) *scaffold.ScaffoldManager
 	resolvePreset   func(*ProjectContext, string, string) presets.ResolvedPreset
@@ -108,7 +111,25 @@ func runRemoveLifecycle(
 	cleanupOpts scaffold.CleanupOptions,
 	cleanupMessages []string,
 	deps removeLifecycleDependencies,
-) error {
+) (runErr error) {
+	target, err := pc.ForWorktree(worktree.Path)
+	if err != nil {
+		return err
+	}
+	pc = target
+	if deps.lifecycleLock != nil {
+		release, err := deps.lifecycleLock(worktree.Path)
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, release()) }()
+		cleanupOpts.DatabaseLockHeld = true
+		if !cleanupOpts.SkipDatabaseCleanup {
+			if err := dblifecycle.CheckCleanup(worktree.Path); err != nil {
+				return err
+			}
+		}
+	}
 	cleanupOpts.DryRun = options.DryRun
 	cleanupOpts.Verbose = options.Verbose
 	cleanupOpts.Quiet = options.Quiet
@@ -122,7 +143,7 @@ func runRemoveLifecycle(
 		deps.printInfoMessage(fmt.Sprintf("Running cleanup for preset: %s", resolvedPreset.Name()))
 	}
 
-	if resolvedPreset.Name() != "" {
+	if resolvedPreset.Name() != "" || len(pc.Config.Cleanup.Steps) != 0 {
 		siteName := worktreeSiteName(worktree.Path, worktree.Branch, pc.DefaultBranch, pc.Config.SiteName)
 		if err := deps.scaffoldManager(pc).RunCleanupWithOptions(
 			worktree.Path,
@@ -150,6 +171,7 @@ func runRemoveLifecycle(
 }
 
 type removeCommandDependencies struct {
+	lifecycleLock    func(string) (func() error, error)
 	openProject      func() (*ProjectContext, error)
 	getwd            func() (string, error)
 	getDefaultBranch func(string) (string, error)
@@ -165,6 +187,7 @@ type removeCommandDependencies struct {
 
 func defaultRemoveCommandDependencies() removeCommandDependencies {
 	return removeCommandDependencies{
+		lifecycleLock:    dblifecycle.Lock,
 		openProject:      OpenProjectFromCWD,
 		getwd:            os.Getwd,
 		getDefaultBranch: git.GetDefaultBranch,
@@ -351,6 +374,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 
 func (deps removeCommandDependencies) lifecycleDependencies() removeLifecycleDependencies {
 	return removeLifecycleDependencies{
+		lifecycleLock:   deps.lifecycleLock,
 		readLocalState:  deps.readLocalState,
 		scaffoldManager: deps.scaffoldManager,
 		resolvePreset:   deps.resolvePreset,

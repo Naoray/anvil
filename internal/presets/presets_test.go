@@ -102,15 +102,14 @@ func TestLaravelPreset_DefaultSteps(t *testing.T) {
 
 	assert.Equal(t, "db.create", steps[8].Name)
 	assert.Equal(t, config.DbRoleTesting, steps[8].Role)
-	assert.NotNil(t, steps[8].Condition)
 
 	assert.Equal(t, "node.npm", steps[9].Name)
 	assert.Equal(t, []string{"ci"}, steps[9].Args)
 	assert.NotNil(t, steps[9].Condition, "npm ci should have a condition")
 	assert.Equal(t, "package-lock.json", steps[9].Condition["file_exists"])
 
-	assert.Equal(t, "php.laravel", steps[10].Name)
-	assert.Equal(t, []string{"migrate:fresh", "--seed", "--no-interaction"}, steps[10].Args)
+	assert.Equal(t, "db.migrate", steps[10].Name)
+	assert.Empty(t, steps[10].Args)
 
 	assert.Equal(t, "node.npm", steps[11].Name)
 	assert.Equal(t, []string{"run", "build"}, steps[11].Args)

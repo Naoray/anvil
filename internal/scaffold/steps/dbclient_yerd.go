@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	anvilexec "github.com/naoray/anvil/internal/exec"
 )
 
@@ -22,6 +25,12 @@ func NewYerdDatabaseClientFactory(commander anvilexec.Commander) DatabaseClientF
 	return func(engine string, options DatabaseOptions) (DatabaseClient, error) {
 		if options.Host != "" || options.Port != "" || options.Username != "" || options.PasswordSet {
 			return nil, fmt.Errorf("yerd manages database connections; remove host, port, username, and password overrides")
+		}
+		if options.Endpoint != nil {
+			if options.Endpoint.Driver != "yerd" {
+				return nil, fmt.Errorf("stored endpoint requires driver %s", options.Endpoint.Driver)
+			}
+			options.Service = options.Endpoint.Service
 		}
 		service := options.Service
 		if service == "" {
@@ -44,6 +53,35 @@ func NewYerdDatabaseClientFactory(commander anvilexec.Commander) DatabaseClientF
 			executor: anvilexec.NewCommandExecutor(commander),
 		}, nil
 	}
+}
+
+func (c *yerdDatabaseClient) Endpoint() (config.DatabaseEndpoint, error) {
+	output, err := c.executor.RunBinary(context.Background(), "", "yerd", []string{"--json", "services"})
+	if err != nil {
+		return config.DatabaseEndpoint{}, fmt.Errorf("verifying Yerd endpoint: %w", err)
+	}
+	var response struct {
+		Services []struct {
+			Service string `json:"service"`
+			State   string `json:"state"`
+			Listen  string `json:"listen"`
+			Port    int    `json:"port"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		return config.DatabaseEndpoint{}, fmt.Errorf("parsing Yerd endpoint: %w", err)
+	}
+	for _, service := range response.Services {
+		if service.Service != c.service {
+			continue
+		}
+		host, port, err := net.SplitHostPort(service.Listen)
+		if err != nil || service.State != "running" || host == "" || service.Port != 0 && port != strconv.Itoa(service.Port) {
+			return config.DatabaseEndpoint{}, fmt.Errorf("yerd service %s endpoint is unavailable or unverifiable", c.service)
+		}
+		return config.DatabaseEndpoint{Driver: "yerd", Service: c.service, Host: normalizeDatabaseHost(host), Port: port}, nil
+	}
+	return config.DatabaseEndpoint{}, fmt.Errorf("yerd service %s endpoint is unavailable", c.service)
 }
 
 func (c *yerdDatabaseClient) Ping() error {

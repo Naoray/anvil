@@ -47,7 +47,14 @@ func (r *Registry) Create(name string, cfg config.StepConfig) (types.ScaffoldSte
 	if err := config.ValidateStepConfig(name, cfg); err != nil {
 		return nil, fmt.Errorf("invalid config for step %q: %w", name, err)
 	}
-	return factory(cfg), nil
+	if err := types.ValidateConditions(cfg.Condition); err != nil {
+		return nil, fmt.Errorf("invalid condition for step %q: %w", name, err)
+	}
+	step := factory(cfg)
+	if len(cfg.Condition) != 0 || cfg.Enabled != nil {
+		return &configuredStep{ScaffoldStep: step, condition: cfg.Condition, enabled: cfg.Enabled}, nil
+	}
+	return step, nil
 }
 
 // ListRegistered returns a sorted list of all registered step names.
@@ -60,17 +67,13 @@ func (r *Registry) ListRegistered() []string {
 
 // RegisterDefaults registers all built-in steps.
 func (r *Registry) RegisterDefaults() {
-	r.registerDefaults(NewYerdDatabaseClientFactory(nil))
+	r.registerDefaults(managedDatabaseFactory(config.SiteDriverYerd, nil))
 }
 
 // RegisterDefaultsForSiteDriver registers built-in steps with the database
 // lifecycle used by the selected local site driver.
 func (r *Registry) RegisterDefaultsForSiteDriver(siteDriver config.SiteDriver, commander anvilexec.Commander) {
-	databaseFactory := NewYerdDatabaseClientFactory(commander)
-	if siteDriver == config.SiteDriverHerd {
-		databaseFactory = NewHerdDatabaseClientFactory(commander)
-	}
-	r.registerDefaults(databaseFactory)
+	r.registerDefaults(managedDatabaseFactory(siteDriver, commander))
 }
 
 func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
@@ -79,7 +82,7 @@ func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
 		name := b.name
 		binary := b.binary
 		r.Register(name, func(cfg config.StepConfig) types.ScaffoldStep {
-			return NewBinaryStepWithCondition(name, cfg, binary)
+			return NewBinaryStep(name, binary, cfg.Args, cfg.StoreAs)
 		})
 	}
 
@@ -108,6 +111,7 @@ func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
 		return NewEnvCopyStep(cfg)
 	})
 
+	r.Register("db.migrate", func(cfg config.StepConfig) types.ScaffoldStep { return &DbMigrateStep{clientFactory: databaseFactory} })
 	// Database steps use config-owned validation as well.
 	r.Register(config.StepDbCreate, func(cfg config.StepConfig) types.ScaffoldStep {
 		return NewDbCreateStepWithFactory(cfg, databaseFactory)
@@ -132,4 +136,37 @@ var binaries = []binaryDefinition{
 	{"node.bun", "bun"},
 	{"herd", "herd"},
 	{"yerd", "yerd"},
+}
+
+// configuredStep adds the same configured guard to every registered step while
+// retaining the step's intrinsic eligibility (such as file or binary presence).
+type configuredStep struct {
+	types.ScaffoldStep
+	condition map[string]any
+	enabled   *bool
+}
+
+func (s *configuredStep) IsEnabled() bool {
+	if s.enabled != nil && !*s.enabled {
+		return false
+	}
+	if step, ok := s.ScaffoldStep.(interface{ IsEnabled() bool }); ok {
+		return step.IsEnabled()
+	}
+	return true
+}
+
+func (s *configuredStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	eligible, err := ctx.EvaluateCondition(s.condition)
+	if err != nil || !eligible {
+		return false, err
+	}
+	return s.ScaffoldStep.Condition(ctx)
+}
+
+func (s *configuredStep) GetArgs() []string {
+	if step, ok := s.ScaffoldStep.(interface{ GetArgs() []string }); ok {
+		return step.GetArgs()
+	}
+	return nil
 }

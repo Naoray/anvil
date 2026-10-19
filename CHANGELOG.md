@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned for v1.12.0.
+
+### Added
+
+- Runtime scaffold guards can compare earlier `store_as` outputs through literal `context_var` values and combine them with `not`; all effective guards are validated before scaffold or cleanup effects.
+- Explicit database migration actions and exact owned reset consent, with safe defaults for existing, shared and borrowed applications. New owned application databases migrate/seed; testing databases remain existence-only unless selected.
+- `--borrow-app-db` shares a registered owner's exact managed application database while retaining independent testing and ownership history. Borrower writes affect every workspace sharing that database.
+- Opt-in `work --warm-from` reuses independently verified `vendor` and `node_modules` trees using native cloning or ordinary copies. Later build/setup steps still run; unsupported or stale inputs install cold. No speed or physical-space savings are claimed.
+
+### Changed
+
+- Selected-target `anvil.yaml` drives scaffold and cleanup, including default-branch site identity, with linked defaults retained and no config leakage between prune targets.
+- Owned database records retain verified service endpoints. Historical actions use recorded identity; legacy records with unknown endpoints require `--keep-db` removal and separate database management.
+- Cleanup protects active borrowers and unreadable sibling state before effects, orders borrowers first, and preserves unregistered files during `unlink --clean`.
+- Laravel preserves an existing `.env` when copying the template and uses nontruncating relative SQLite creation; selected environment keys still update.
+
+### Fixed
+
+- New remote-selected worktrees use the chosen remote commit and upstream, preserving local-branch precedence and explicit base/tracking controls.
+- Unattended commands and scaffold `--force` suppress first-run prompts even under a PTY; scaffold failures no longer report ready.
+- Database availability, migration and cleanup use matching verified endpoints, including MySQL/MariaDB TCP transport for `localhost`; preexisting unowned testing databases cannot be adopted.
+- Fresh dry-runs plan new database migrations without provisioning files/state while retaining existing-target and reset validation.
+
 ## [v1.11.0](https://github.com/naoray/anvil/compare/v1.10.0...v1.11.0) - 2026-08-28
 
 ### Added

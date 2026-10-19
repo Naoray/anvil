@@ -63,6 +63,6 @@ func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 	return nil
 }
 
-func (s *BashRunStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *BashRunStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }

@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -34,6 +35,7 @@ type mockStep struct {
 	name            string
 	conditionResult bool
 	conditionCalls  int
+	conditionError  error
 	runError        error
 	runCalled       bool
 	runOptions      []types.StepOptions
@@ -65,12 +67,12 @@ func (s *mockStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error
 	return s.runError
 }
 
-func (s *mockStep) Condition(ctx *types.ScaffoldContext) bool {
+func (s *mockStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
 	s.conditionCalls++
 	if s.conditionFunc != nil {
-		return s.conditionFunc(ctx)
+		return s.conditionFunc(ctx), nil
 	}
-	return s.conditionResult
+	return s.conditionResult, s.conditionError
 }
 
 func TestStepExecutor_Execute_EvaluatesConditionOnceAtExecutionTime(t *testing.T) {
@@ -623,4 +625,17 @@ func TestStepExecutor_LaravelPresetStepOrdering(t *testing.T) {
 	assert.Equal(t, "node.npm build", results[6].Step.Name())
 	assert.Equal(t, "php.laravel storage:link", results[7].Step.Name())
 	assert.Equal(t, "herd", results[8].Step.Name())
+}
+
+func TestStepExecutorConditionErrorStopsExecution(t *testing.T) {
+	failure := errors.New("invalid guard")
+	first := &mockStep{name: "guarded", conditionError: failure}
+	later := &mockStep{name: "later", conditionResult: true}
+	executor := NewStepExecutor([]types.ScaffoldStep{first, later}, &types.ScaffoldContext{}, types.StepOptions{Quiet: true})
+	require.ErrorIs(t, executor.Execute(), failure)
+	assert.False(t, first.runCalled)
+	assert.False(t, later.runCalled)
+	require.Len(t, executor.Results(), 1)
+	assert.ErrorIs(t, executor.Results()[0].Error, failure)
+	assert.False(t, executor.Results()[0].Skipped)
 }

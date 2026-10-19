@@ -98,8 +98,8 @@ func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
 	require.NoError(t, config.WriteLocalState(worktreeDir, config.LocalState{
 		DbSuffix: "pg_fixture",
 		Databases: []config.OwnedDatabase{
-			{Name: appDb, Engine: "pgsql", Role: config.DbRoleApplication},
-			{Name: testDb, Engine: "pgsql", Role: config.DbRoleTesting},
+			{Name: appDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5432"}, Role: config.DbRoleApplication},
+			{Name: testDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5432"}, Role: config.DbRoleTesting},
 		},
 	}))
 

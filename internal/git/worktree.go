@@ -27,7 +27,8 @@ type Worktree struct {
 	IsMerged   bool
 }
 
-// CreateWorktree creates a new worktree from a git directory
+// CreateWorktree creates an attached worktree from a git directory.
+// New branches have no implicit tracking; callers configure their chosen upstream.
 func CreateWorktree(gitDir, worktreePath, branch, baseBranch string) error {
 	repoPath := GetRepoPath(gitDir)
 	if filepath.Base(gitDir) != ".git" {
@@ -42,7 +43,7 @@ func CreateWorktree(gitDir, worktreePath, branch, baseBranch string) error {
 	}
 
 	// Check if branch already exists
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", branch)
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err := cmd.Run(); err == nil {
 		// Branch exists, just checkout
 		cmd = exec.Command("git", "-C", repoPath, "worktree", "add", worktreePath, branch)
@@ -58,7 +59,7 @@ func CreateWorktree(gitDir, worktreePath, branch, baseBranch string) error {
 		baseBranch = config.DefaultBranch
 	}
 
-	gitArgs := []string{"-C", repoPath, "worktree", "add", "-b", branch, worktreePath, baseBranch}
+	gitArgs := []string{"-C", repoPath, "worktree", "add", "--no-track", "-b", branch, worktreePath, baseBranch}
 	cmd = exec.Command("git", gitArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

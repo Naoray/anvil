@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetBranchUpstream(t *testing.T) {
@@ -162,4 +163,47 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestResolveWorkBranch(t *testing.T) {
+	repo := createTestRepo(t)
+	gitDir := filepath.Join(repo, ".git")
+	run := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	run("remote", "add", "company", "https://example.test/company.git")
+	run("remote", "add", "origin", "https://example.test/origin.git")
+	run("branch", "origin/feature/nested")
+	run("update-ref", "refs/remotes/origin/feature/nested", "HEAD")
+	run("update-ref", "refs/remotes/company/feature/nested", "HEAD")
+	run("update-ref", "refs/remotes/company/unique", "HEAD")
+	run("update-ref", "refs/remotes/removed/stale", "HEAD")
+	for _, tc := range []struct {
+		selected string
+		want     WorkBranch
+		wantErr  string
+	}{
+		{selected: "origin/feature/nested", want: WorkBranch{Branch: "origin/feature/nested", Existing: true}},
+		{selected: "refs/remotes/origin/feature/nested", want: WorkBranch{Branch: "feature/nested", Base: "refs/remotes/origin/feature/nested", Remote: "origin"}},
+		{selected: "company/feature/nested", want: WorkBranch{Branch: "feature/nested", Base: "refs/remotes/company/feature/nested", Remote: "company"}},
+		{selected: "unique", want: WorkBranch{Branch: "unique", Base: "refs/remotes/company/unique", Remote: "company"}},
+		{selected: "origin/new", want: WorkBranch{Branch: "origin/new"}},
+		{selected: "upstream/new", want: WorkBranch{Branch: "upstream/new"}},
+		{selected: "removed/stale", want: WorkBranch{Branch: "removed/stale"}},
+		{selected: "new", want: WorkBranch{Branch: "new"}},
+		{selected: "feature/nested", wantErr: "ambiguous"},
+		{selected: "refs/remotes/origin/missing", wantErr: "not found"},
+	} {
+		t.Run(tc.selected, func(t *testing.T) {
+			got, err := ResolveWorkBranch(gitDir, tc.selected)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

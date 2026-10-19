@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/scaffold/words"
 	"github.com/naoray/anvil/internal/utils"
@@ -137,7 +138,7 @@ func NewDbCreateStep(cfg config.StepConfig) *DbCreateStep {
 		args:          cfg.Args,
 		dbType:        cfg.Type,
 		role:          cfg.Role,
-		clientFactory: NewYerdDatabaseClientFactory(nil),
+		clientFactory: managedDatabaseFactory(config.SiteDriverYerd, nil),
 	}
 }
 
@@ -155,17 +156,28 @@ func (s *DbCreateStep) Name() string {
 	return s.name
 }
 
-func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *DbCreateStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
-func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) (runErr error) {
 	databaseArgs, err := parseDatabaseArgs(s.args)
 	if err != nil {
 		return err
 	}
 
 	engine, err := detectDatabaseEngine(s.dbType, ctx)
+	if err != nil && opts.DryRun {
+		connection := utils.ReadEnvFile(ctx.WorktreePath, ".env.example")["DB_CONNECTION"]
+		switch connection {
+		case "mysql", "pgsql", "sqlite":
+			engine = config.DatabaseEngine(connection)
+			err = nil
+		case "mariadb":
+			engine = config.DBEngineMySQL
+			err = nil
+		}
+	}
 	if err != nil {
 		if opts.Verbose {
 			fmt.Printf("  %v\n", err)
@@ -179,6 +191,20 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 	}
 	if role != config.DbRoleApplication && role != config.DbRoleTesting {
 		return fmt.Errorf("unsupported database role %q", role)
+	}
+
+	if !ctx.DatabaseLockHeld {
+		release, err := dblifecycle.Lock(ctx.WorktreePath)
+		if err != nil {
+			return fmt.Errorf("locking database local state: %w", err)
+		}
+		ctx.DatabaseLockHeld = true
+		defer func() { ctx.DatabaseLockHeld = false; runErr = errors.Join(runErr, release()) }()
+	}
+	if role == config.DbRoleApplication {
+		if handled, err := s.borrowApplication(ctx, opts); handled || err != nil {
+			return err
+		}
 	}
 
 	if opts.Verbose {
@@ -195,12 +221,46 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) e
 		dbName := databaseArgs.database
 		if dbName == "" {
 			env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
+			if opts.DryRun && len(env) == 0 {
+				env = utils.ReadEnvFile(ctx.WorktreePath, ".env.example")
+			}
 			dbName = env["DB_DATABASE"]
 		}
 		if dbName == "" {
 			dbName = "database/database.sqlite"
 		}
 		return s.createSqlite(ctx, dbName, opts)
+	}
+
+	if opts.DryRun {
+		name := words.BuildDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), ctx.GetDbSuffix(), 0)
+		if role == config.DbRoleTesting {
+			name = words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), ctx.GetDbSuffix())
+			ctx.SetVar("TestDatabaseName", name)
+		} else {
+			ctx.SetVar("DatabaseName", name)
+		}
+		client, err := s.clientFactory(string(engine), databaseArgs.connectionOptions(ctx, s.dbType))
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, client.Close()) }()
+		names, err := client.ListDatabases(EscapeLikePattern(name))
+		if err != nil {
+			return fmt.Errorf("checking dry-run database existence: %w", err)
+		}
+		present := false
+		for _, candidate := range names {
+			if candidate == name {
+				present = true
+			}
+		}
+		ctx.SetVar("DatabaseNew:"+name, fmt.Sprint(!present))
+		if role == config.DbRoleApplication {
+			ctx.SetVar("ApplicationDatabaseNew", fmt.Sprint(!present))
+		}
+		fmt.Printf("Would ensure database %s role=%s engine=%s\n", name, role, engine)
+		return nil
 	}
 
 	if role == config.DbRoleTesting {
@@ -261,6 +321,11 @@ func (s *DbCreateStep) createWithRetry(
 		return nil
 	}
 
+	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
+	if err != nil {
+		return err
+	}
+
 	var lastErr error
 	for attempt := 0; attempt < maxDbCreateRetries; attempt++ {
 		var dbName string
@@ -280,12 +345,43 @@ func (s *DbCreateStep) createWithRetry(
 			fmt.Printf("  Generated database name: %s (attempt %d/%d)\n", dbName, attempt+1, maxDbCreateRetries)
 		}
 
-		err := client.CreateDatabase(dbName)
+		existing, err := client.ListDatabases(EscapeLikePattern(dbName))
+		if err != nil {
+			return fmt.Errorf("checking pre-create database existence: %w", err)
+		}
+		wasPresent := false
+		for _, name := range existing {
+			if name == dbName {
+				wasPresent = true
+			}
+		}
+		ctx.SetVar("ApplicationDatabaseNew", fmt.Sprint(!wasPresent))
+		if wasPresent {
+			decision, err := s.classifyDatabaseCollision(ctx, dbName, engine, config.DbRoleApplication)
+			if err != nil {
+				return err
+			}
+			switch decision {
+			case databaseCollisionKnown:
+				// Confirmed ownership allows the adapter's idempotent create path.
+			case databaseCollisionAuthoritativeUnowned:
+				return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
+			case databaseCollisionFreshUnknown:
+				ctx.SetDbSuffix("")
+				lastErr = &DatabaseExistsError{Name: dbName}
+				continue
+			}
+		}
+
+		if err := checkRecordedEndpoint(ctx.WorktreePath, dbName, endpoint, !wasPresent); err != nil {
+			return err
+		}
+		err = client.CreateDatabase(dbName)
 		if err == nil {
 			if opts.Verbose {
 				fmt.Printf("  Database '%s' created successfully.\n", dbName)
 			}
-			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication)
+			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication, endpoint)
 		}
 
 		if !IsDatabaseExistsError(err) {
@@ -298,7 +394,8 @@ func (s *DbCreateStep) createWithRetry(
 		}
 		switch decision {
 		case databaseCollisionKnown:
-			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication)
+			ctx.SetVar("ApplicationDatabaseNew", "false")
+			return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleApplication, endpoint)
 		case databaseCollisionAuthoritativeUnowned:
 			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
 		case databaseCollisionFreshUnknown:
@@ -346,6 +443,11 @@ func (s *DbCreateStep) createTestDatabase(
 		}
 		return nil
 	}
+	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
+	if err != nil {
+		return err
+	}
+
 	if opts.DryRun {
 		if opts.Verbose {
 			fmt.Printf("  Would create testing database: %s\n", dbName)
@@ -353,6 +455,29 @@ func (s *DbCreateStep) createTestDatabase(
 		return nil
 	}
 
+	existing, err := client.ListDatabases(EscapeLikePattern(dbName))
+	if err != nil {
+		return fmt.Errorf("checking testing database existence: %w", err)
+	}
+	present := false
+	for _, name := range existing {
+		if name == dbName {
+			present = true
+		}
+	}
+	if present {
+		decision, err := s.classifyDatabaseCollision(ctx, dbName, engine, config.DbRoleTesting)
+		if err != nil {
+			return err
+		}
+		if decision != databaseCollisionKnown {
+			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
+		}
+	}
+	ctx.SetVar("DatabaseNew:"+dbName, fmt.Sprint(!present))
+	if err := checkRecordedEndpoint(ctx.WorktreePath, dbName, endpoint, !present); err != nil {
+		return err
+	}
 	if err := client.CreateDatabase(dbName); err != nil {
 		if !IsDatabaseExistsError(err) {
 			return fmt.Errorf("failed to create testing database: %w", err)
@@ -366,7 +491,7 @@ func (s *DbCreateStep) createTestDatabase(
 			return fmt.Errorf("database %q already exists but is not owned by this worktree", dbName)
 		}
 	}
-	return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleTesting)
+	return s.persistOwnedDatabase(ctx, dbName, engine, config.DbRoleTesting, endpoint)
 }
 
 func (s *DbCreateStep) classifyDatabaseCollision(
@@ -407,11 +532,32 @@ func (s *DbCreateStep) classifyDatabaseCollision(
 	return databaseCollisionFreshUnknown, nil
 }
 
-func (s *DbCreateStep) persistOwnedDatabase(ctx *types.ScaffoldContext, name string, engine config.DatabaseEngine, role string) error {
+func (s *DbCreateStep) persistOwnedDatabase(ctx *types.ScaffoldContext, name string, engine config.DatabaseEngine, role string, endpoint config.DatabaseEndpoint) error {
+	switch role {
+	case config.DbRoleApplication:
+		ctx.SetVar("DatabaseName", name)
+	case config.DbRoleTesting:
+		ctx.SetVar("TestDatabaseName", name)
+	}
+	var recorded *config.DatabaseEndpoint
+	isNew := ctx.GetVar("DatabaseNew:"+name) == "true" || role == config.DbRoleApplication && ctx.GetVar("ApplicationDatabaseNew") == "true"
+	if isNew {
+		recorded = &endpoint
+	} else {
+		state, err := config.ReadLocalState(ctx.WorktreePath)
+		if err != nil {
+			return err
+		}
+		for _, db := range state.Databases {
+			if db.Name == name {
+				recorded = db.Endpoint
+			}
+		}
+	}
 	if err := config.WriteLocalState(ctx.WorktreePath, config.LocalState{
 		DbSuffix: ctx.GetDbSuffix(),
 		Databases: []config.OwnedDatabase{{
-			Name: name, Engine: string(engine), Role: role,
+			Name: name, Engine: string(engine), Role: role, Endpoint: recorded,
 		}},
 	}); err != nil {
 		return fmt.Errorf("recording ownership of database %q: %w", name, err)
@@ -419,35 +565,61 @@ func (s *DbCreateStep) persistOwnedDatabase(ctx *types.ScaffoldContext, name str
 	return nil
 }
 
-func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, opts types.StepOptions) error {
-	dbPath := filepath.Join(ctx.WorktreePath, dbName)
-
-	if opts.Verbose {
-		fmt.Printf("  Creating SQLite database: %s\n", dbPath)
+func (s *DbCreateStep) createSqlite(ctx *types.ScaffoldContext, dbName string, opts types.StepOptions) (runErr error) {
+	if dbName == "" || !filepath.IsLocal(dbName) || strings.Contains(dbName, ":") {
+		return fmt.Errorf("SQLite database must be a relative workspace file path: %q", dbName)
 	}
-
+	for _, part := range strings.Split(filepath.ToSlash(dbName), "/") {
+		if part == ".." {
+			return fmt.Errorf("SQLite database path cannot contain traversal: %q", dbName)
+		}
+	}
+	dbName = filepath.Clean(dbName)
+	if dbName == "." {
+		return fmt.Errorf("SQLite database path must name a file")
+	}
+	root, err := os.OpenRoot(ctx.WorktreePath)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, root.Close()) }()
+	existingFile := false
+	parts := strings.Split(dbName, string(filepath.Separator))
+	for i := range parts {
+		path := filepath.Join(parts[:i+1]...)
+		info, err := root.Lstat(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil {
+			if i == len(parts)-1 {
+				existingFile = true
+			}
+			if info.Mode()&os.ModeSymlink != 0 || (i < len(parts)-1 && !info.IsDir()) || (i == len(parts)-1 && !info.Mode().IsRegular()) {
+				return fmt.Errorf("unsafe SQLite path %q: symlinks and special files are unsupported", path)
+			}
+		}
+		if i < len(parts)-1 && os.IsNotExist(err) && !opts.DryRun {
+			if err := root.Mkdir(path, 0755); err != nil && !os.IsExist(err) {
+				return err
+			}
+		}
+	}
+	ctx.SetVar("DatabaseName", dbName)
+	ctx.SetVar("ApplicationDatabaseNew", fmt.Sprint(!existingFile))
 	if opts.DryRun {
 		return nil
 	}
-
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating database directory: %w", err)
+	file, err := root.OpenFile(dbName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if os.IsExist(err) {
+		ctx.SetVar("ApplicationDatabaseNew", "false")
+		return nil
 	}
-
-	file, err := os.Create(dbPath)
 	if err != nil {
 		return fmt.Errorf("creating SQLite file: %w", err)
 	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("closing SQLite file: %w", err)
-	}
-
-	if opts.Verbose {
-		fmt.Printf("  SQLite database created at: %s\n", dbPath)
-	}
-
-	return nil
+	ctx.SetVar("ApplicationDatabaseNew", "true")
+	return file.Close()
 }
 
 type DbDestroyStep struct {
@@ -459,7 +631,7 @@ type DbDestroyStep struct {
 }
 
 func NewDbDestroyStep(cfg config.StepConfig) *DbDestroyStep {
-	return NewDbDestroyStepWithFactoryAndWriter(cfg, NewYerdDatabaseClientFactory(nil), os.Stdout)
+	return NewDbDestroyStepWithFactoryAndWriter(cfg, managedDatabaseFactory(config.SiteDriverYerd, nil), os.Stdout)
 }
 
 func NewDbDestroyStepWithFactory(cfg config.StepConfig, factory DatabaseClientFactory) *DbDestroyStep {
@@ -487,19 +659,33 @@ func (s *DbDestroyStep) Name() string {
 	return s.name
 }
 
-func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *DbDestroyStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
-func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+func (s *DbDestroyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) (runErr error) {
 	databaseArgs, err := parseDatabaseArgs(s.args)
 	if err != nil {
+		return err
+	}
+
+	if !ctx.DatabaseLockHeld {
+		release, err := dblifecycle.Lock(ctx.WorktreePath)
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, release()) }()
+	}
+	if err := dblifecycle.CheckCleanup(ctx.WorktreePath); err != nil {
 		return err
 	}
 
 	localState, err := config.ReadLocalState(ctx.WorktreePath)
 	if err != nil {
 		return fmt.Errorf("reading local state for database cleanup: %w", err)
+	}
+	if len(localState.Databases) == 0 && localState.BorrowedApplication != nil {
+		return nil
 	}
 	if len(localState.Databases) > 0 {
 		return s.destroyOwnedDatabases(ctx, localState.Databases, databaseArgs, opts)
@@ -558,21 +744,44 @@ func selectOwnedTargets(databases []config.OwnedDatabase) (ownedTargetSelection,
 	return selection, nil
 }
 
-func (s *DbDestroyStep) destroyOwnedDatabases(
+func (s *DbDestroyStep) destroyOwnedDatabases(ctx *types.ScaffoldContext, databases []config.OwnedDatabase, databaseArgs databaseStepArgs, opts types.StepOptions) error {
+	groups := make(map[config.DatabaseEndpoint][]config.OwnedDatabase)
+	var order []config.DatabaseEndpoint
+	for _, db := range databases {
+		if db.Endpoint == nil {
+			return fmt.Errorf("database %q has unknown legacy endpoint identity; use --keep-db and inspect it manually", db.Name)
+		}
+		if err := db.Endpoint.Validate(db.Engine); err != nil {
+			return err
+		}
+		if _, ok := groups[*db.Endpoint]; !ok {
+			order = append(order, *db.Endpoint)
+		}
+		groups[*db.Endpoint] = append(groups[*db.Endpoint], db)
+	}
+	for _, endpoint := range order {
+		if err := s.destroyOwnedGroup(ctx, groups[endpoint], databaseArgs, opts, endpoint); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DbDestroyStep) destroyOwnedGroup(
 	ctx *types.ScaffoldContext,
 	databases []config.OwnedDatabase,
 	databaseArgs databaseStepArgs,
 	opts types.StepOptions,
+	endpoint config.DatabaseEndpoint,
 ) (runErr error) {
 	selection, err := selectOwnedTargets(databases)
 	if err != nil {
 		return err
 	}
 
-	client, err := s.clientFactory(
-		string(selection.engine),
-		databaseArgs.connectionOptions(ctx, s.dbType),
-	)
+	connection := databaseArgs.connectionOptions(ctx, s.dbType)
+	connection.Endpoint = &endpoint
+	client, err := s.clientFactory(string(selection.engine), connection)
 	if err != nil {
 		if opts.DryRun {
 			return errors.Join(
@@ -592,6 +801,10 @@ func (s *DbDestroyStep) destroyOwnedDatabases(
 			)
 		}
 		return fmt.Errorf("connecting to %s for database cleanup: %w", selection.engine, err)
+	}
+
+	if _, err := verifiedClientEndpoint(client, string(selection.engine), ctx.WorktreePath, &endpoint); err != nil {
+		return err
 	}
 
 	targets := append([]string(nil), selection.exact...)

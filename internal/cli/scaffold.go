@@ -21,6 +21,10 @@ Arguments:
             If omitted and inside a worktree, scaffolds the current worktree.
             If omitted and not inside a worktree, prompts for selection.
 
+Use --no-interactive, --force, or CI to disable Anvil prompts. When prompts
+are disabled, run inside the desired worktree or provide WORKTREE explicitly.
+--quiet does not disable prompts. --force does not authorize database resets.
+
 Examples:
   anvil scaffold feature-auth       # Scaffold by folder name
   anvil scaffold auth               # Partial match
@@ -83,7 +87,7 @@ Examples:
 				return fmt.Errorf("current worktree not found")
 			}
 
-			if ui.IsInteractive() {
+			if ui.ShouldPrompt(cmd, false) {
 				confirmed, err := ui.ConfirmScaffold(selectedWorktree.Branch)
 				if err != nil {
 					return err
@@ -94,7 +98,7 @@ Examples:
 				}
 			}
 		} else {
-			if !ui.IsInteractive() {
+			if !ui.ShouldPrompt(cmd, false) {
 				return fmt.Errorf("worktree path required (run from project root with path, or use interactive mode)")
 			}
 
@@ -111,6 +115,13 @@ Examples:
 
 		ui.PrintStep(fmt.Sprintf("Scaffolding worktree: %s", selectedWorktree.Branch))
 		ui.PrintInfo(fmt.Sprintf("Path: %s", selectedWorktree.Path))
+
+		if err := pc.LoadWorktreeConfig(selectedWorktree.Path); err != nil {
+			return err
+		}
+		if err := applyDatabaseFlags(cmd, pc); err != nil {
+			return err
+		}
 
 		resolvedPreset := pc.ResolvePreset("", selectedWorktree.Path)
 
@@ -186,5 +197,7 @@ func canonicalScaffoldPath(path string) (string, error) {
 }
 
 func init() {
+	addDatabaseFlags(scaffoldCmd)
+	scaffoldCmd.Flags().Bool("force", false, "Skip interactive prompts (does not authorize database resets)")
 	rootCmd.AddCommand(scaffoldCmd)
 }

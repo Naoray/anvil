@@ -48,8 +48,8 @@ func (s *EnvCopyStep) Name() string {
 	return s.name
 }
 
-func (s *EnvCopyStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *EnvCopyStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
 func (s *EnvCopyStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {

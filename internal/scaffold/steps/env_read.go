@@ -28,8 +28,8 @@ func (s *EnvReadStep) Name() string {
 	return s.name
 }
 
-func (s *EnvReadStep) Condition(ctx *types.ScaffoldContext) bool {
-	return true
+func (s *EnvReadStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	return true, nil
 }
 
 func (s *EnvReadStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {

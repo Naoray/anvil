@@ -60,7 +60,7 @@ It is cross-project, cross-language, and cross-environment compatible.`,
 			return nil
 		}
 
-		if !ui.IsInteractive() {
+		if !ui.ShouldPrompt(cmd, false) {
 			return nil
 		}
 

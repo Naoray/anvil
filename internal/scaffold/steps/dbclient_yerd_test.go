@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -252,7 +253,9 @@ func TestYerdDatabaseClientListsOnlyDatabasesMatchingCleanupPattern(t *testing.T
 func TestDbCreateStepUsesYerdManagedConnectionWithoutDirectDefaults(t *testing.T) {
 	dir := t.TempDir()
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
-		{output: []byte(`{"services":[{"service":"mysql","state":"running"}]}`)},
+		{output: []byte(`{"services":[{"service":"mysql","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"services":[{"service":"mysql","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"databases":[]}`)},
 		{output: []byte(`{"name":"app_swift_runner"}`)},
 	}}
 	step := NewDbCreateStepWithFactory(
@@ -270,8 +273,8 @@ func TestDbCreateStepUsesYerdManagedConnectionWithoutDirectDefaults(t *testing.T
 	if err != nil {
 		t.Fatalf("reading local state: %v", err)
 	}
-	want := []config.OwnedDatabase{{Name: "app_swift_runner", Engine: "mysql", Role: config.DbRoleApplication}}
-	if !slices.Equal(state.Databases, want) {
+	want := []config.OwnedDatabase{{Name: "app_swift_runner", Engine: "mysql", Role: config.DbRoleApplication, Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}}}
+	if !reflect.DeepEqual(state.Databases, want) {
 		t.Fatalf("owned databases = %#v, want %#v", state.Databases, want)
 	}
 }
@@ -311,7 +314,9 @@ func TestDbCreateStepUsesMariaDBServiceWithoutInvalidatingLegacyOwnership(t *tes
 		t.Fatalf("writing environment: %v", err)
 	}
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
-		{output: []byte(`{"services":[{"service":"mariadb","state":"running"}]}`)},
+		{output: []byte(`{"services":[{"service":"mariadb","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"services":[{"service":"mariadb","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"databases":[{"name":"app_swift_runner"}]}`)},
 		{
 			output: []byte(`{"error":"database app_swift_runner already exists"}`),
 			err:    errors.New("exit status 1"),
@@ -330,14 +335,16 @@ func TestDbCreateStepUsesMariaDBServiceWithoutInvalidatingLegacyOwnership(t *tes
 	}
 
 	want := []string{"--json", "db", "create", "mariadb", "app_swift_runner"}
-	if len(commander.calls) != 2 || !slices.Equal(commander.calls[1].args, want) {
+	if len(commander.calls) != 4 || !slices.Equal(commander.calls[3].args, want) {
 		t.Fatalf("Yerd calls = %#v, want MariaDB create args %v", commander.calls, want)
 	}
 }
 
 func TestRegistryYerdSiteDriverUsesManagedDatabaseLifecycle(t *testing.T) {
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
-		{output: []byte(`{"services":[{"service":"mysql","state":"running"}]}`)},
+		{output: []byte(`{"services":[{"service":"mysql","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"services":[{"service":"mysql","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"databases":[]}`)},
 		{output: []byte(`{"name":"app_swift_runner"}`)},
 	}}
 	registry := NewRegistry()
@@ -357,7 +364,7 @@ func TestRegistryYerdSiteDriverUsesManagedDatabaseLifecycle(t *testing.T) {
 		command: "yerd",
 		args:    []string{"--json", "db", "create", "mysql", "app_swift_runner"},
 	}
-	if len(commander.calls) != 2 || !slices.Equal(commander.calls[1].args, wantCreate.args) {
+	if len(commander.calls) != 4 || !slices.Equal(commander.calls[3].args, wantCreate.args) {
 		t.Fatalf("Yerd calls = %#v, want create call %#v", commander.calls, wantCreate)
 	}
 }
@@ -371,7 +378,8 @@ func TestRegistryYerdSiteDriverDropsOwnedDatabaseFamilies(t *testing.T) {
 		]
 	}`)
 	commander := &yerdScriptedCommander{responses: []yerdCommandResponse{
-		{output: []byte(`{"services":[{"service":"mariadb","state":"running"}]}`)},
+		{output: []byte(`{"services":[{"service":"mariadb","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
+		{output: []byte(`{"services":[{"service":"mariadb","state":"running","listen":"127.0.0.1:3306","port":3306}]}`)},
 		{output: databaseList},
 		{output: databaseList},
 		{output: []byte(`{}`)},
@@ -386,8 +394,8 @@ func TestRegistryYerdSiteDriverDropsOwnedDatabaseFamilies(t *testing.T) {
 		}
 	}
 	requireNoError(config.WriteLocalState(dir, config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_swift_runner", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "app_swift_runner_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_swift_runner", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mariadb", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+		{Name: "app_swift_runner_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mariadb", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 	}}))
 	requireNoError(os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_CONNECTION=mariadb\n"), 0o644))
 	registry := NewRegistry()
@@ -402,11 +410,11 @@ func TestRegistryYerdSiteDriverDropsOwnedDatabaseFamilies(t *testing.T) {
 		{"--json", "db", "drop", "mariadb", "app_swift_runner_test"},
 		{"--json", "db", "drop", "mariadb", "app_swift_runner_test_1"},
 	}
-	if len(commander.calls) != 6 {
+	if len(commander.calls) != 7 {
 		t.Fatalf("Yerd calls = %#v, want six lifecycle calls", commander.calls)
 	}
 	for index, want := range wantDrops {
-		if got := commander.calls[index+3].args; !slices.Equal(got, want) {
+		if got := commander.calls[index+4].args; !slices.Equal(got, want) {
 			t.Fatalf("drop call %d = %v, want %v", index, got, want)
 		}
 	}

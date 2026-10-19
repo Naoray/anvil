@@ -99,6 +99,58 @@ func openProject(cwd, projectName string, projectInfo *config.ProjectInfo, globa
 	}, nil
 }
 
+// LoadWorktreeConfig applies repository settings from the selected scaffold target.
+// Linked settings remain defaults when the target has no configuration file.
+func (pc *ProjectContext) LoadWorktreeConfig(path string) error {
+	if _, err := os.Stat(filepath.Join(path, config.ProjectConfigFile)); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("checking worktree configuration: %w", err)
+	}
+	cfg, err := config.LoadProject(path)
+	if err != nil {
+		return fmt.Errorf("loading worktree configuration: %w", err)
+	}
+	if cfg.SiteName == "" {
+		cfg.SiteName = pc.Config.SiteName
+	}
+	if cfg.Preset == "" {
+		cfg.Preset = pc.Config.Preset
+	}
+	if cfg.DefaultBranch == "" {
+		cfg.DefaultBranch = pc.Config.DefaultBranch
+	}
+	if cfg.EditorCmd == "" {
+		cfg.EditorCmd = pc.Config.EditorCmd
+	}
+	if cfg.Cleanup.Steps == nil {
+		cfg.Cleanup = pc.Config.Cleanup
+	}
+	pc.Config = cfg
+	pc.DefaultBranch = cfg.DefaultBranch
+	return nil
+}
+
+// ForWorktree resolves one target without changing the linked defaults used by
+// subsequent targets in a batch command. Managers are initialized for that target.
+func (pc *ProjectContext) ForWorktree(path string) (*ProjectContext, error) {
+	target := &ProjectContext{
+		CWD:           pc.CWD,
+		GitDir:        pc.GitDir,
+		ProjectPath:   pc.ProjectPath,
+		Config:        pc.Config,
+		DefaultBranch: pc.DefaultBranch,
+		ProjectName:   pc.ProjectName,
+		WorktreeBase:  pc.WorktreeBase,
+		GlobalConfig:  pc.GlobalConfig,
+	}
+	if err := target.LoadWorktreeConfig(path); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
 // openProjectFromWorktree creates a ProjectContext when inside a worktree of a linked project
 func openProjectFromWorktree(cwd, worktreeBase string, globalCfg *config.GlobalConfig) (*ProjectContext, error) {
 	// Check if cwd is under worktreeBase

@@ -5,11 +5,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 // MockDatabaseClient implements DatabaseClient for testing.
 type MockDatabaseClient struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	endpoint config.DatabaseEndpoint
 
 	databases   map[string]bool
 	createCalls []string
@@ -32,6 +35,7 @@ type MockDatabaseClient struct {
 
 func NewMockDatabaseClient() *MockDatabaseClient {
 	return &MockDatabaseClient{
+		endpoint:    config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"},
 		databases:   make(map[string]bool),
 		createCalls: make([]string, 0),
 		dropCalls:   make([]string, 0),
@@ -39,6 +43,35 @@ func NewMockDatabaseClient() *MockDatabaseClient {
 		dropErrors:  make(map[string]error),
 		listErrors:  make(map[string]error),
 		listResults: make(map[string][]string),
+	}
+}
+
+func (m *MockDatabaseClient) Endpoint() (config.DatabaseEndpoint, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.endpoint, nil
+}
+func (m *MockDatabaseClient) configureEndpoint(engine string, options DatabaseOptions) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if options.Endpoint != nil {
+		m.endpoint = *options.Endpoint
+		return
+	}
+	if options.Service != "" {
+		m.endpoint.Service = options.Service
+	} else if engine == "pgsql" {
+		m.endpoint.Service = "postgres"
+		m.endpoint.Port = "5432"
+	} else {
+		m.endpoint.Service = "mysql"
+		m.endpoint.Port = "3306"
+	}
+	if options.Host != "" {
+		m.endpoint.Host = options.Host
+	}
+	if options.Port != "" {
+		m.endpoint.Port = options.Port
 	}
 }
 
@@ -233,6 +266,7 @@ func (m *MockDatabaseClient) DatabaseCount() int {
 
 func MockClientFactory(client *MockDatabaseClient) DatabaseClientFactory {
 	return func(engine string, opts DatabaseOptions) (DatabaseClient, error) {
+		client.configureEndpoint(engine, opts)
 		return client, nil
 	}
 }
@@ -252,6 +286,9 @@ func (r *MockClientFactoryRecorder) Factory(engine string, opts DatabaseOptions)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
+	if client, ok := r.client.(interface{ configureEndpoint(string, DatabaseOptions) }); ok {
+		client.configureEndpoint(engine, opts)
+	}
 	if r.err != nil {
 		return nil, r.err
 	}

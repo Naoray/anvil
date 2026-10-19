@@ -50,8 +50,8 @@ func (removeTestPreset) CleanupSteps() []config.CleanupStep {
 func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 	worktreePath := t.TempDir()
 	state := config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+		{Name: "app_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 	}}
 	require.NoError(t, config.WriteLocalState(worktreePath, state))
 	statePath := filepath.Join(worktreePath, ".anvil.local")
@@ -130,8 +130,8 @@ func TestRemoveCommand_DryRunEnumeratesExactDropSet(t *testing.T) {
 
 func TestPlanRemoveCleanup_KeepDbListsPreservedNames(t *testing.T) {
 	state := &config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
-		{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+		{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+		{Name: "app_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 	}}
 
 	opts, messages, err := planRemoveCleanup(state, nil, true, false, false)
@@ -152,17 +152,17 @@ func TestPlanRemoveCleanup_DuplicateOwnedStateHardStopsUnlessForce(t *testing.T)
 		{
 			name: "duplicate role",
 			state: &config.LocalState{Databases: []config.OwnedDatabase{
-				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
-				{Name: "app_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
-				{Name: "worker_top_provider_test", Engine: "mysql", Role: config.DbRoleTesting},
+				{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+				{Name: "app_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
+				{Name: "worker_top_provider_test", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 			}},
 			want: `duplicate database role "testing" in record 2; first seen in record 1`,
 		},
 		{
 			name: "duplicate name",
 			state: &config.LocalState{Databases: []config.OwnedDatabase{
-				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleApplication},
-				{Name: "app_top_provider", Engine: "mysql", Role: config.DbRoleTesting},
+				{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleApplication},
+				{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: config.DbRoleTesting},
 			}},
 			want: `duplicate database name "app_top_provider" in record 1; first seen in record 0`,
 		},
@@ -213,7 +213,7 @@ func TestPlanRemoveCleanup_KeepDbUnreadableStateHardStopsUnlessForce(t *testing.
 
 func TestPlanRemoveCleanup_InvalidOwnedStateHardStopsUnlessForce(t *testing.T) {
 	state := &config.LocalState{Databases: []config.OwnedDatabase{
-		{Name: "app_top_provider", Engine: "mysql", Role: "unknown"},
+		{Name: "app_top_provider", Engine: "mysql", Endpoint: &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}, Role: "unknown"},
 		{Name: "app_top_provider_test", Engine: "pgsql", Role: config.DbRoleTesting},
 	}}
 

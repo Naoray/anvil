@@ -262,6 +262,15 @@ func TestDbDestroyStep_LegacyStateEscapedAndValidated(t *testing.T) {
 
 func writeOwnedState(t *testing.T, dir string, databases []config.OwnedDatabase) {
 	t.Helper()
+	for i := range databases {
+		if databases[i].Endpoint == nil {
+			service, port := "mysql", "3306"
+			if databases[i].Engine == "pgsql" {
+				service, port = "postgres", "5432"
+			}
+			databases[i].Endpoint = &config.DatabaseEndpoint{Driver: "yerd", Service: service, Host: "127.0.0.1", Port: port}
+		}
+	}
 	require.NoError(t, config.WriteLocalState(dir, config.LocalState{
 		DbSuffix: "top_provider", Databases: databases,
 	}))
