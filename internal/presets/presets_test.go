@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -150,6 +151,13 @@ func TestLaravelPreset_PHPStanCacheStepIsNoOpWithoutBinary(t *testing.T) {
 }
 
 func TestLaravelPreset_DelayedScaffoldClearsPHPStanCacheAfterEnvWrites(t *testing.T) {
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	phpBinary := "php"
+	if runtime.GOOS == "windows" {
+		phpBinary += ".exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, phpBinary), nil, 0755))
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".env.example"), []byte("APP_KEY=\nDB_CONNECTION=sqlite\nDB_DATABASE=\n"), 0644))
 

@@ -100,7 +100,7 @@ func TestFreshLaravelSQLiteDryRunPlansMigrationWithoutEffects(t *testing.T) {
 	}
 	output, err := runPromptPolicyCommand(t, "", repo, env, "", "scaffold", "feature-x", "--dry-run", "--force", "--no-interactive", "--verbose")
 	require.NoError(t, err, output)
-	require.Contains(t, output, "database/planned.sqlite role=application engine=sqlite service=sqlite action=migrate")
+	require.Contains(t, output, filepath.FromSlash("database/planned.sqlite")+" role=application engine=sqlite service=sqlite action=migrate")
 	require.Contains(t, output, "seed=true")
 	require.NoFileExists(t, filepath.Join(wt, ".env"))
 	require.NoFileExists(t, filepath.Join(wt, ".anvil.local"))
