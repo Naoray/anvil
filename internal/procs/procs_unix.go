@@ -56,6 +56,16 @@ func Start(spec Spec) (Started, error) {
 	}
 	pid := cmd.Process.Pid
 	identity, err := StartIdentity(pid)
+	if errors.Is(err, ErrNoProcess) {
+		// The leader already exited (for example a command that backgrounds
+		// work and returns). Its process group may still hold our
+		// descendants: record it without an identity. Stop may then signal
+		// only a surviving group of the dead leader; once the PID is reused
+		// by anyone, the empty identity reads as unknown and is never
+		// signaled.
+		reap(cmd)
+		return Started{PID: pid}, closeErr
+	}
 	if err != nil {
 		// Without an identity the process can never be stopped safely, so
 		// do not leave it running unrecorded.
