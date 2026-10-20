@@ -4,6 +4,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -20,4 +21,12 @@ func runChild(argv []string, env []string) error {
 	}
 	// Unreachable: a successful Exec never returns.
 	return nil
+}
+
+// runChildIn replaces anvil with the child after changing to dir.
+func runChildIn(dir string, argv []string, env []string) error {
+	if err := os.Chdir(dir); err != nil {
+		return &ChildExitError{Code: 1, Message: fmt.Sprintf("changing to %s: %v", dir, err)}
+	}
+	return runChild(argv, env)
 }

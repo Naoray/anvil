@@ -41,3 +41,14 @@ func EnvExists(env map[string]string, key string) bool {
 func EnvNotExists(env map[string]string, key string) bool {
 	return !EnvExists(env, key)
 }
+
+// ExpandEnv expands ${VAR} and $VAR against primary, then the process
+// environment. Unknown variables expand to the empty string, as in a shell.
+func ExpandEnv(value string, primary map[string]string) string {
+	return os.Expand(value, func(name string) string {
+		if v, ok := primary[name]; ok {
+			return v
+		}
+		return os.Getenv(name)
+	})
+}

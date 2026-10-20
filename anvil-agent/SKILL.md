@@ -17,6 +17,7 @@ anvil list                 # List linked worktrees
 anvil info <branch>        # Print the path to a worktree
 anvil scaffold <branch>    # Run scaffold steps for a worktree
 anvil exec -- <command>    # Run with the worktree test database exported
+anvil run <wt> -- <command>  # Run in the worktree environment (no database required)
 anvil sync                 # Sync current worktree with upstream
 anvil remove <branch>      # Remove a worktree
 anvil remove <branch> --dry-run  # Preview database and worktree cleanup

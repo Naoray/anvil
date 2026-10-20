@@ -190,6 +190,16 @@ func (m *ScaffoldManager) RunScaffold(
 	return err
 }
 
+// Validate creates every step of the request without running anything, so
+// callers can refuse invalid configuration before their own effects.
+func (m *ScaffoldManager) Validate(request ScaffoldRequest) error {
+	stepConfigs := append(effectiveStepConfigs(request.Config, request.DefaultSteps), request.ExtraSteps...)
+	if _, err := m.stepsFromConfig(stepConfigs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	return nil
+}
+
 // RunScaffoldWithOptions validates every step before any effect, then runs
 // them under the worktree's preparation lock, persisting each completion as
 // it happens so interrupted or failed runs resume safely.

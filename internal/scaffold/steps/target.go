@@ -7,6 +7,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/utils"
 )
 
 // execTarget is the optional working directory and environment of a command
@@ -47,19 +48,10 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 	for key, value := range ctx.Env {
 		env[key] = value
 	}
+	// Step values expand against the worktree environment only, never
+	// against each other, so the result is independent of map order.
 	for key, value := range t.env {
-		env[key] = ExpandEnv(value, env)
+		env[key] = utils.ExpandEnv(value, ctx.Env)
 	}
 	return dir, env, nil
-}
-
-// ExpandEnv expands ${VAR} and $VAR against primary, then the process
-// environment. Unknown variables expand to the empty string, as in a shell.
-func ExpandEnv(value string, primary map[string]string) string {
-	return os.Expand(value, func(name string) string {
-		if v, ok := primary[name]; ok {
-			return v
-		}
-		return os.Getenv(name)
-	})
 }

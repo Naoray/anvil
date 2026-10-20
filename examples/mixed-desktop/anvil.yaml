@@ -1,0 +1,26 @@
+# Teyos-like local-first desktop app: Tauri/WebKit frontend, Node background
+# service, Swift helper and Rust core. Synthetic fixture; no real toolchains
+# or downloads are needed to read it.
+env:
+  RUST_LOG: info
+  # The app reads these instead of hard-coded singleton locations.
+  DESKTOP_INSTANCE: ${ANVIL_INSTANCE}
+
+components:
+  - name: desktop
+    path: apps/desktop
+    uses: [node, tauri]        # pnpm install + cargo fetch in src-tauri
+    env:
+      VITE_CLEAR_SCREEN: "false"
+
+  - name: service
+    path: service
+    uses: [node]               # npm ci
+
+  - name: helper
+    path: helpers/mac
+    uses: [swift]              # macOS only by default; skipped elsewhere
+    prepare:
+      - run: swift build
+        inputs: [Package.swift, Sources]
+        outputs: [.build]

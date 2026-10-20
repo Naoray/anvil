@@ -14,12 +14,18 @@ import (
 // process, so signal forwarding and job-object management are out of scope
 // for v1.8 (documented limitation).
 func runChild(argv []string, env []string) error {
+	return runChildIn("", argv, env)
+}
+
+// runChildIn runs the child in dir ("" keeps the current directory).
+func runChildIn(dir string, argv []string, env []string) error {
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
 		return childLookPathError(argv[0], err)
 	}
 	cmd := exec.Command(path, argv[1:]...)
 	cmd.Env = env
+	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

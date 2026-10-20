@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `anvil ensure [WORKTREE]` creates a worktree when needed and prepares it idempotently: completed steps are recorded in `.anvil.local` and skipped while their definition, declared `inputs` and `outputs` are unchanged; failed or interrupted runs resume. Database, site-link and `store_as` steps always run under their existing policies. `--json` emits the versioned `anvil.agent/v1` envelope with stable error codes and exit statuses (docs/agent-api.md).
 - Stable worktree identity (`wt_…`) recorded with the canonical path; copied state is detected and never treated as the original's owner.
 - Step options `dir`, `env`, `inputs`, `outputs` and `always` for command and binary steps.
+- Declarative `components` with stack capabilities (`node`, `rust`, `python`, `go`, `php`, `tauri`, `swift`), platform filters, opt-in and conditional preparation, and requirement checks that refuse before any effect. Top-level `env` and `secret_env`.
+- `anvil run [WORKTREE] [--component NAME] -- COMMAND` runs in the worktree environment (`ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE`, project and component env) independent of any testing database; `anvil exec` is unchanged.
+- Synthetic example repositories under `examples/` (Rust/Python, Node/Rust/Tauri/Swift, Laravel).
 
 ### Changed
 
