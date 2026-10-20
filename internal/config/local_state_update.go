@@ -47,7 +47,8 @@ func WorktreeGitDir(worktreePath string) (string, error) {
 }
 
 // WorktreeLockPath returns a lock path private to one worktree. Non-Git
-// directories fall back to a per-path lock under the system temp directory.
+// directories fall back to a per-path lock in a per-user directory under the
+// system temp directory, so users sharing /tmp never block each other.
 func WorktreeLockPath(worktreePath, name string) string {
 	if dir, err := WorktreeGitDir(worktreePath); err == nil {
 		return filepath.Join(dir, name)
@@ -60,7 +61,7 @@ func WorktreeLockPath(worktreePath, name string) string {
 		canonical = eval
 	}
 	sum := sha256.Sum256([]byte(canonical))
-	return filepath.Join(os.TempDir(), "anvil-locks", hex.EncodeToString(sum[:8])+"-"+name)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("anvil-locks-%d", os.Getuid()), hex.EncodeToString(sum[:8])+"-"+name)
 }
 
 // ReadLocalStateMap returns the raw .anvil.local document. A missing file is
