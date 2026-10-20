@@ -106,10 +106,95 @@ anvil run feature-x --require-ready -- make lint
 not found, 126 = not executable). `run` is read-only and works whether or not a
 testing database exists. `anvil exec` keeps its database-specific semantics.
 
+## Runtime resources
+
+Each prepared worktree owns a runtime directory **outside** the working tree,
+under `$ANVIL_RUNTIME_ROOT`, else `$XDG_STATE_HOME/anvil`, else
+`~/.local/state/anvil` (`%LOCALAPPDATA%\anvil` on Windows):
+`<root>/worktrees/<worktree id>/`, with an `owner.json` naming the worktree ID
+and path.
+
+```yaml
+resources:
+  directories: [index-out]       # extra writable dirs → ANVIL_DIR_INDEX_OUT
+  ports:
+    - name: web                  # ANVIL_PORT_WEB
+      env: VITE_PORT             # optional alias
+  shared:
+    - name: models               # ANVIL_SHARED_MODELS
+      path: ~/.cache/seyk/models # absolute, ~ or ${VAR}
+      env: SEYK_MODEL_DIR
+      required: true             # ensure refuses (before effects) when missing
+```
+
+| Variable | Directory |
+|----------|-----------|
+| `ANVIL_RUNTIME_DIR` | the worktree's runtime root |
+| `ANVIL_STATE_DIR`, `ANVIL_TMP_DIR`, `ANVIL_CACHE_DIR`, `ANVIL_LOG_DIR`, `ANVIL_ARTIFACTS_DIR` | standard writable directories |
+| `ANVIL_DIR_<NAME>` | declared extra directories |
+| `ANVIL_SHARED_<NAME>` | declared shared resources (used in place) |
+| `ANVIL_PORT_<NAME>` | allocated ports |
+
+Map them onto your tools in `env`, e.g. `TMPDIR: ${ANVIL_TMP_DIR}` or
+`CARGO_TARGET_DIR: ${ANVIL_CACHE_DIR}/target`.
+
+**Ports.** `anvil ensure` (and `anvil start`) reserves one port per declared
+name in a machine-wide registry (`<root>/ports.json`) under a cross-process
+lock. Reservations are stable per worktree identity, unique across all
+worktrees, and only chosen when currently bindable on `127.0.0.1` (range
+`20000-29999`, override with `ANVIL_PORT_RANGE=LOW-HIGH`). Reservations of
+worktrees that no longer exist (or whose identity changed) are reclaimed.
+A reservation is an advisory agreement among Anvil processes, **not** a
+guarantee: an unrelated program can still bind the port between allocation
+and your service starting, so services should bind strictly (for example Vite
+`--strictPort`) and fail fast. Status output reports whether something is
+currently listening.
+
+**Shared resources** are never copied, written or deleted by Anvil. Read-only
+use is a convention Anvil cannot enforce.
+
+## Managed processes
+
+```yaml
+processes:
+  - name: web
+    component: desktop          # working directory and component env
+    command: pnpm dev --port "$VITE_PORT" --strictPort
+    env: {BROWSER: none}
+    stop_timeout: 10s           # SIGTERM → SIGKILL
+```
+
+`anvil start [WORKTREE] [--process NAME]` runs each process detached through
+`sh -c` in its own session/process group, with the worktree environment and
+output appended to `$ANVIL_LOG_DIR/<name>.log`. The PID is recorded in
+`.anvil.local` together with the kernel start time (Linux `/proc/<pid>/stat`
+start ticks + boot ID; macOS `kern.proc.pid` start time). `anvil stop` signals
+the group only when the PID still has that start identity, or when the leader
+exited but its own process group survives (a PID is never recycled while it is
+a live process group ID). A recycled PID is reported as
+`not_signaled_pid_reused` and never signaled; nothing is ever killed because it
+listens on a recorded port. Managed processes are unsupported on Windows and
+other platforms without a verifiable identity (`unsupported_platform`).
+
+## Cleanup
+
+`anvil remove`, `prune` and `unlink --clean` additionally:
+
+1. inspect owned resources before any effect (`--dry-run` lists processes to
+   stop, ports to release and the runtime directory to delete),
+2. stop verified owned processes first (failure keeps the worktree),
+3. after the worktree is removed, release its ports and delete its runtime
+   directory only when `owner.json` names exactly this worktree ID and path.
+
+Shared resources, files outside the runtime directory and other worktrees'
+resources are never touched. A worktree whose `.anvil.local` was copied from
+another directory never cleans up the original's resources.
+
 ## Platform notes
 
 Command steps run through `sh -c`; on Windows they require a POSIX shell on
 PATH, as before. Keychain entries, application identifiers, LaunchAgents and
 singleton helpers cannot be isolated generically: applications must read
-`ANVIL_INSTANCE` (and, with resource management, Anvil's directories and
-ports) to namespace them.
+`ANVIL_INSTANCE`, `ANVIL_STATE_DIR` and `ANVIL_PORT_*` to namespace them (see
+`examples/mixed-desktop`). This is development resource isolation, not a
+security sandbox: processes run with your user's full permissions.

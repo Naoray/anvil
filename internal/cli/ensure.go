@@ -113,6 +113,15 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 			Cause:   wenv.ComponentErr,
 		}
 	}
+	if wenv.SharedErr != nil {
+		summary, warnings := summarizeWorktree(*target)
+		data.Worktree = summary
+		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
+			Code:    agentapi.CodePrepareFailed,
+			Message: fmt.Sprintf("%v (nothing was changed)", wenv.SharedErr),
+			Cause:   wenv.SharedErr,
+		}
+	}
 	targetPC := wenv.PC
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
@@ -126,6 +135,12 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	// Identity is the first write; the exported environment includes it.
 	if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+		return agentResult{}, err
+	}
+	if err := provisionResources(wenv); err != nil {
+		return agentResult{Data: data}, err
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
 		return agentResult{}, err

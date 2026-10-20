@@ -455,6 +455,23 @@ components:
     uses: [swift]            # macOS only by default; skipped elsewhere
 ```
 
+Per-worktree runtime resources and managed processes:
+
+```yaml
+resources:
+  ports: [{name: web, env: VITE_PORT}]     # stable, collision-free ANVIL_PORT_WEB
+  directories: [index-out]                 # plus ANVIL_STATE_DIR/TMP/CACHE/LOG/ARTIFACTS
+  shared: [{name: models, path: ~/.cache/models, required: true}]
+processes:
+  - {name: web, component: desktop, command: 'pnpm dev --port "$VITE_PORT" --strictPort'}
+```
+
+```bash
+anvil start feature-x --json     # detached, logs in $ANVIL_LOG_DIR
+anvil stop feature-x             # verified PID + start-time identity only
+anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs
+```
+
 Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
 `swift`. See [docs/environments.md](docs/environments.md) for the full schema and
 [examples/](examples/) for synthetic Rust/Python, Node/Rust/Tauri/Swift and

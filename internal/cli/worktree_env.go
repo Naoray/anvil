@@ -9,6 +9,7 @@ import (
 	"github.com/naoray/anvil/internal/capabilities"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/resources"
 	"github.com/naoray/anvil/internal/workenv"
 	"github.com/naoray/anvil/internal/wtstate"
 )
@@ -27,6 +28,16 @@ type worktreeEnv struct {
 	ComponentErr error
 	Component    *capabilities.ComponentPlan
 	Env          *workenv.Environment
+
+	// Observed runtime resources (never created by loadWorktreeEnv).
+	RuntimeRoot string
+	Directories *resources.Directories
+	Ports       []resources.PortState
+	Shared      []resources.SharedStatus
+	// SharedErr reports missing required shared resources.
+	SharedErr error
+	// Warnings are nonfatal inspection problems.
+	Warnings []string
 }
 
 type worktreeEnvOptions struct {
@@ -86,12 +97,87 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	if result.Identity != nil && result.IdentityStatus != wtstate.IdentityCopied {
 		identity.ID = result.Identity.ID
 	}
+	resourceVars := result.describeResources(identity.ID)
 	result.Env = workenv.Build(workenv.Options{
 		Identity:  identity,
 		Config:    target.Config,
 		State:     result.State,
 		Component: component,
-		Resources: opts.Resources,
+		Resources: append(resourceVars, opts.Resources...),
 	})
 	return result, nil
+}
+
+// describeResources reports directories, port reservations and shared
+// resources without creating or allocating anything.
+func (w *worktreeEnv) describeResources(worktreeID string) []workenv.Variable {
+	var vars []workenv.Variable
+	cfg := w.PC.Config
+	statuses, sharedVars, err := resources.DescribeShared(cfg)
+	w.Shared, w.SharedErr = statuses, err
+	if err != nil {
+		w.Warnings = append(w.Warnings, err.Error())
+	}
+	root, err := resources.Root()
+	if err != nil {
+		w.Warnings = append(w.Warnings, "runtime directory unavailable: "+err.Error())
+		return sharedVars
+	}
+	w.RuntimeRoot = root
+	if worktreeID == "" {
+		return sharedVars
+	}
+	dirs, dirVars, err := resources.DescribeDirectories(root, worktreeID, cfg)
+	if err != nil {
+		w.Warnings = append(w.Warnings, err.Error())
+		return sharedVars
+	}
+	w.Directories = &dirs
+	vars = append(vars, dirVars...)
+	if ports, err := resources.NewPorts(root); err != nil {
+		w.Warnings = append(w.Warnings, err.Error())
+	} else if states, err := ports.Lookup(worktreeID); err != nil {
+		w.Warnings = append(w.Warnings, err.Error())
+	} else {
+		w.Ports = states
+		reservations := make([]resources.Reservation, len(states))
+		for i, state := range states {
+			reservations[i] = state.Reservation
+		}
+		vars = append(vars, resources.PortVariables(cfg, reservations)...)
+		if len(states) < len(cfg.Resources.Ports) {
+			w.Warnings = append(w.Warnings, "declared ports are not allocated yet; run 'anvil ensure'")
+		}
+	}
+	return append(vars, sharedVars...)
+}
+
+// provisionResources creates directories and allocates ports for a worktree
+// with a recorded identity. It is the only resource-mutating path.
+func provisionResources(w *worktreeEnv) error {
+	if w.Identity == nil || w.IdentityStatus == wtstate.IdentityCopied {
+		return agentapi.Errorf(agentapi.CodeInternal, "worktree has no identity; run 'anvil ensure'")
+	}
+	root, err := resources.Root()
+	if err != nil {
+		return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if _, _, err := resources.ProvisionDirectories(root, w.Identity.ID, w.Worktree.Path, w.PC.Config); err != nil {
+		return agentapi.Wrap(agentapi.CodeResourceBusy, err)
+	}
+	if len(w.PC.Config.Resources.Ports) == 0 {
+		return nil
+	}
+	ports, err := resources.NewPorts(root)
+	if err != nil {
+		return agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
+	names := make([]string, len(w.PC.Config.Resources.Ports))
+	for i, port := range w.PC.Config.Resources.Ports {
+		names[i] = port.Name
+	}
+	if _, err := ports.Allocate(w.Identity.ID, w.Worktree.Path, names); err != nil {
+		return agentapi.Wrap(agentapi.CodeResourceBusy, err)
+	}
+	return nil
 }

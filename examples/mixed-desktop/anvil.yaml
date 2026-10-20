@@ -5,6 +5,24 @@ env:
   RUST_LOG: info
   # The app reads these instead of hard-coded singleton locations.
   DESKTOP_INSTANCE: ${ANVIL_INSTANCE}
+  DESKTOP_STATE_DIR: ${ANVIL_STATE_DIR}
+  DESKTOP_HELPER_SOCKET: ${ANVIL_STATE_DIR}/helper.sock
+
+resources:
+  directories: [webkit-data]   # ANVIL_DIR_WEBKIT_DATA
+  ports:
+    - name: vite
+      env: VITE_PORT
+    - name: service
+      env: SERVICE_PORT
+
+processes:
+  - name: service
+    component: service
+    command: node index.js
+  - name: vite
+    component: desktop
+    command: pnpm dev --port "$VITE_PORT" --strictPort
 
 components:
   - name: desktop

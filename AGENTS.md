@@ -44,6 +44,8 @@ anvil remove feature-my-feature  # When done
 | JSON envelope and error codes | `internal/agentapi/` |
 | Components → scaffold steps (stack capabilities) | `internal/capabilities/` |
 | Exported worktree environment | `internal/workenv/` |
+| Runtime directories, ports, shared resources | `internal/resources/` |
+| Managed process identity and lifecycle | `internal/procs/` |
 | Synthetic example repositories | `examples/` |
 | UI components | `internal/ui/` |
 | Shell completions | `internal/cli/completion.go` |

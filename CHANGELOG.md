@@ -14,12 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Step options `dir`, `env`, `inputs`, `outputs` and `always` for command and binary steps.
 - Declarative `components` with stack capabilities (`node`, `rust`, `python`, `go`, `php`, `tauri`, `swift`), platform filters, opt-in and conditional preparation, and requirement checks that refuse before any effect. Top-level `env` and `secret_env`.
 - `anvil run [WORKTREE] [--component NAME] -- COMMAND` runs in the worktree environment (`ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE`, project and component env) independent of any testing database; `anvil exec` is unchanged.
+- Per-worktree runtime resources: writable state/tmp/cache/logs/artifacts (and declared) directories outside the working tree, stable collision-free ports from a lock-coordinated machine registry with stale-owner reclamation, and declared shared resources used in place (`ANVIL_*` variables).
+- `anvil start` / `anvil stop` manage declared development processes in their own process groups, verified by PID plus kernel start time so recycled PIDs are never signaled (macOS and Linux).
 - Synthetic example repositories under `examples/` (Rust/Python, Node/Rust/Tauri/Swift, Laravel).
 
 ### Changed
 
 - Every `.anvil.local` writer now uses one cross-process lock and atomic replacement, so concurrent Anvil commands cannot lose each other's updates. Symlinked `.anvil.local` files are refused for writes.
 - Laravel/PHP preset installs declare their manifest/lockfile inputs.
+- `remove`, `prune` and `unlink --clean` stop verified owned processes before cleanup, then release ports and delete only the owned runtime directory; `--dry-run` lists them.
 
 ## [v1.12.0](https://github.com/naoray/anvil/compare/v1.11.0...v1.12.0) - 2026-10-19
 
