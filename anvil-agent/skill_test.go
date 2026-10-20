@@ -28,6 +28,14 @@ func TestSkillContentIsEmbedded(t *testing.T) {
 		[]byte("site_driver: herd"),
 		[]byte("herd services:start"),
 		[]byte("Herd-provided database binaries"),
+		[]byte("anvil ensure"),
+		[]byte("anvil context"),
+		[]byte("anvil status"),
+		[]byte("anvil check --list"),
+		[]byte("passing_and_current"),
+		[]byte("--review"),
+		[]byte("anvil lease release"),
+		[]byte("not a security boundary"),
 	}
 	for _, fragment := range requiredGuidance {
 		if !bytes.Contains(Content, fragment) {

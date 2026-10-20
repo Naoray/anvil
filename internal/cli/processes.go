@@ -166,7 +166,7 @@ func startProcess(pc *ProjectContext, wt git.Worktree, process config.ProcessCon
 	for key, value := range process.Env {
 		extra[key] = utils.ExpandEnv(value, base)
 	}
-	environ := wenv.Env.Environ(os.Environ(), nil, false)
+	environ := wenv.Env.Environ(os.Environ(), wenv.Unset, false)
 	for key, value := range extra {
 		environ = append(environ, key+"="+value)
 	}

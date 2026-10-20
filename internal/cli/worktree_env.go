@@ -39,6 +39,11 @@ type worktreeEnv struct {
 	SharedErr error
 	// Warnings are nonfatal inspection problems.
 	Warnings []string
+
+	Metadata wtstate.Metadata
+	Lease    *wtstate.Lease
+	// Unset lists inherited variables removed for this worktree's role.
+	Unset []string
 }
 
 type worktreeEnvOptions struct {
@@ -68,6 +73,15 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	result.State, err = config.ReadLocalState(wt.Path)
 	if err != nil {
 		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if result.Metadata, err = wtstate.ReadMetadata(wt.Path); err != nil {
+		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if result.Lease, err = wtstate.ReadLease(wt.Path); err != nil {
+		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if result.Metadata.Role == wtstate.RoleReview {
+		result.Unset = append([]string(nil), target.Config.Roles.Review.EnvUnset...)
 	}
 
 	selected := append([]string(nil), opts.Selected...)

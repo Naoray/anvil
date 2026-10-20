@@ -65,7 +65,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	defer func() { err = errors.Join(err, active.Release()) }()
 
-	identity, err := ComputeIdentity(ctx, IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env})
+	identity, err := ComputeIdentity(ctx, IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Unset: req.Unset})
 	if err != nil {
 		return nil, fmt.Errorf("computing check identity: %w", err)
 	}

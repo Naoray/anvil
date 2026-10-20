@@ -63,6 +63,8 @@ type IdentityRequest struct {
 	RuntimeDir   string
 	Check        config.CheckConfig
 	Env          *workenv.Environment
+	// Unset removes inherited variables from toolchain probes.
+	Unset []string
 }
 
 const probeTimeout = 15 * time.Second
@@ -105,7 +107,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 		Platform:         Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	envMap := req.Env.Map()
-	identity.Toolchain = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env)
+	identity.Toolchain = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env, req.Unset)
 	var toolFields []string
 	for _, probe := range identity.Toolchain {
 		toolFields = append(toolFields, probe.Command, probe.Output, fmt.Sprint(probe.ExitCode))
@@ -145,13 +147,13 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 	return identity, nil
 }
 
-func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment) []ToolProbe {
+func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment, unset []string) []ToolProbe {
 	probes := make([]ToolProbe, 0, len(commands))
 	for _, command := range commands {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 		cmd := exec.CommandContext(probeCtx, "sh", "-c", command)
 		cmd.Dir = dir
-		cmd.Env = env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
+		cmd.Env = env.Environ(os.Environ(), unset, runtime.GOOS == "windows")
 		out, err := cmd.CombinedOutput()
 		cancel()
 		probe := ToolProbe{Command: command, Output: firstLine(string(out))}

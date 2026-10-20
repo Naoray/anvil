@@ -87,7 +87,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: worktree preparation is %s; run 'anvil ensure' to prepare it\n", status)
 	}
 
-	env := wenv.Env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
+	env := wenv.Env.Environ(os.Environ(), wenv.Unset, runtime.GOOS == "windows")
 	return runChildIn(dir, command, env)
 }
 
