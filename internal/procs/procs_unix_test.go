@@ -97,3 +97,16 @@ func TestStopTerminatesOrphanedGroupAfterLeaderExit(t *testing.T) {
 		return err != nil
 	}, 5*time.Second, 20*time.Millisecond)
 }
+
+// TestStartToleratesLeaderExitingImmediately covers commands that background
+// their work and return before Anvil can read the leader's start identity.
+func TestStartToleratesLeaderExitingImmediately(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		started := startSpec(t, "sleep 30 & exit 0")
+		require.Eventually(t, func() bool { return Check(started.PID, started.Identity) == StateExited }, 5*time.Second, 10*time.Millisecond)
+		result, err := Stop(started.PID, started.Identity, 5*time.Second)
+		require.NoError(t, err)
+		require.Equal(t, StopTerminated, result, "the surviving group is still stoppable")
+		require.False(t, groupExists(started.PID))
+	}
+}
