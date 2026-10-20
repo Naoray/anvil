@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // StartIdentity returns "linux:<boot id>:<start ticks>" for a live process.
@@ -16,11 +17,16 @@ func StartIdentity(pid int) (string, error) {
 		return "", ErrNoProcess
 	}
 	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if errors.Is(err, os.ErrNotExist) {
+	// A process being reaped while its stat file is read yields ESRCH
+	// rather than ENOENT; both mean it no longer exists.
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 		return "", ErrNoProcess
 	}
 	if err != nil {
 		return "", err
+	}
+	if len(content) == 0 {
+		return "", ErrNoProcess // exited while being read
 	}
 	// The command name may contain spaces and parentheses; fields resume
 	// after the last ')'.
