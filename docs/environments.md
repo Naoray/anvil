@@ -176,10 +176,103 @@ a live process group ID). A recycled PID is reported as
 listens on a recorded port. Managed processes are unsupported on Windows and
 other platforms without a verifiable identity (`unsupported_platform`).
 
+## Checks
+
+Checks are named, ordered lists of existing project commands. Anvil runs them
+and records results; it never replaces Cargo, pytest, `go test` or a
+benchmark runner.
+
+```yaml
+checks:
+  fast:
+    description: Unit tests
+    commands:
+      - cargo test --lib                      # string shorthand
+      - run: uv run pytest -q
+        component: eval                       # component dir + env
+        dir: tests                            # relative to the component/worktree
+        env: {PYTHONHASHSEED: "0"}
+        timeout: 5m
+    timeout: 15m
+    toolchain: [cargo --version, uv --version]  # output recorded in the identity
+  benchmark:
+    expensive: true          # never implicit; needs --allow-expensive
+    reusable: true           # allows --reuse of a current passing result
+    locks: [gpu]             # exclusive machine-wide resource
+    inputs: ["${ANVIL_ARTIFACTS_DIR}/recordings", eval/contract.yaml]
+    artifacts: ["${ANVIL_ARTIFACTS_DIR}/bench/*.json"]
+    commands: [...]
+```
+
+```bash
+anvil check                      # every non-expensive check, in order
+anvil check fast quality --json
+anvil check --list --json        # read-only: latest result + whether it is current
+anvil check benchmark --allow-expensive --lock-wait 30m
+anvil check benchmark --allow-expensive --reuse
+```
+
+**Provenance.** Every run stores `result.json` (schema
+`anvil.check-result/v1`) and per-command logs under
+`$ANVIL_RUNTIME_DIR/checks/<name>/runs/<run id>/` (latest 20 kept;
+`latest.json` points at the newest). A result records:
+
+- the commit (`identity.git.head`), whether the tree was dirty, how many paths
+  differed and `state_digest` — a digest of HEAD plus the exact content of every
+  modified, deleted and untracked non-ignored path (`.anvil.local` excluded). A
+  dirty tree never shares a digest with its HEAD;
+- the check definition digest, toolchain probe output, an environment digest
+  (names listed; values hashed; secret values excluded), declared input digests
+  and platform;
+- status (`passed`, `failed`, `timed_out`, `interrupted`, `error`), exit code,
+  timings, the commands with their logs, and artifacts with SHA-256 and size.
+
+**Validity.** `anvil check --list` recomputes the identity and reports
+`assessment.current`, `assessment.passing_and_current` and `stale_reasons`
+(`commit changed`, `uncommitted changes differ`, `check definition changed`,
+`toolchain changed`, `environment changed`, `inputs changed`,
+`platform changed`). Only `passing_and_current` may be treated as a pass.
+Ignored files are not part of the working-tree identity; declare them as
+`inputs` when results depend on them. A check that modifies tracked files makes
+its own result stale — the recorded identity is the state it validated.
+
+**Failure and interruption.** A run is written as `running` before its first
+command and holds a lock for its lifetime. A failing command stops the check
+and its exit status is passed through. Timeouts kill the command's whole
+process group (exit 124). SIGINT/SIGTERM terminate the group and record
+`interrupted` (exit 130). If Anvil itself is killed, the stored `running` record
+has no live holder and is reported as `interrupted`. Nothing that did not finish
+successfully is ever recorded as passing.
+
+**Locks.** `locks` are exclusive across all Anvil processes on the machine
+(`<runtime root>/locks/<name>.lock`, holder details in `<name>.holder.json`).
+A held lock fails fast with `resource_busy` (exit 7) and the holder's check,
+worktree and PID, unless `--lock-wait` is given. Locks are released by their
+holder or by the operating system when the holder exits — never because time
+passed. The same check cannot run twice concurrently in one worktree; different
+checks without shared locks run concurrently.
+
+**Reuse and benchmark caching.** `--reuse` returns the latest result instead of
+running only when the check is declared `reusable`, the latest result passed,
+its complete identity is unchanged, and every recorded artifact still has its
+recorded digest. Commands receive `ANVIL_CHECK_IDENTITY`, `ANVIL_GIT_STATE`,
+`ANVIL_GIT_HEAD`, `ANVIL_GIT_DIRTY`, `ANVIL_CHECK_RUN_ID` and
+`ANVIL_CHECK_RUN_DIR` so an existing runner can key its own outputs (for
+example recordings under `$ANVIL_ARTIFACTS_DIR/recordings/$ANVIL_GIT_STATE`).
+A scoring check that declares the recordings and its scoring contract as
+`inputs` gets a new identity whenever either changes, so recordings can be
+rescored under a new contract without re-recording. Anvil does not infer
+compatibility beyond these explicit identities (see `examples/gaze-like`).
+Reuse is per worktree.
+
+Logs contain whatever commands print and are stored with mode 0600 in the
+runtime directory; they are referenced by path, never embedded in JSON.
+
 ## Cleanup
 
 `anvil remove`, `prune` and `unlink --clean` additionally:
 
+0. refuse (`cleanup_blocked`, exit 7) while a check is running in the worktree,
 1. inspect owned resources before any effect (`--dry-run` lists processes to
    stop, ports to release and the runtime directory to delete),
 2. stop verified owned processes first (failure keeps the worktree),

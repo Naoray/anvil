@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"runtime"
+	"sort"
 
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/capabilities"
@@ -180,4 +181,18 @@ func provisionResources(w *worktreeEnv) error {
 		return agentapi.Wrap(agentapi.CodeResourceBusy, err)
 	}
 	return nil
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// variableFor classifies an ad-hoc command variable.
+func variableFor(name, value string, cfg *config.Config) workenv.Variable {
+	return workenv.Variable{Name: name, Value: value, Source: workenv.SourceProject, Secret: workenv.IsSecretName(name, cfg.SecretEnv)}
 }

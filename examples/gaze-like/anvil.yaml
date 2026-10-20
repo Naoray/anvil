@@ -11,3 +11,41 @@ components:
   - name: eval
     path: eval
     uses: [python]             # uv sync --frozen; .venv/bin on PATH for `anvil run --component eval`
+
+# Checks run the project's own tools; Anvil records provenance. Expensive
+# benchmark stages never run implicitly and serialize on the shared GPU.
+checks:
+  fast:
+    commands:
+      - run: cargo test --lib
+        component: detector
+  quality:
+    commands:
+      - {run: cargo clippy --all-targets -- -D warnings, component: detector}
+      - {run: uv run ruff check ., component: eval}
+  integration:
+    timeout: 20m
+    commands:
+      - {run: cargo test --tests, component: detector}
+
+  # Detection/recording and scoring are separate. Recordings are keyed by the
+  # exact working-tree state; rescoring reuses them under a new contract.
+  benchmark-record:
+    description: Run the detector over the benchmark corpus and record detections
+    expensive: true
+    reusable: true          # `anvil check benchmark-record --reuse` skips an identical rerun
+    locks: [gpu]
+    timeout: 4h
+    toolchain: [cargo --version, uv --version]
+    inputs: [eval/corpus-manifest.json]
+    commands:
+      - run: uv run python record.py --out "$ANVIL_ARTIFACTS_DIR/recordings/$ANVIL_GIT_STATE"
+        component: eval
+    artifacts: ["${ANVIL_ARTIFACTS_DIR}/recordings/*/*.jsonl"]
+  benchmark-score:
+    description: Score existing recordings under the current scoring contract
+    reusable: true
+    inputs: ["${ANVIL_ARTIFACTS_DIR}/recordings", eval/scoring-contract.yaml]
+    commands:
+      - run: uv run python score.py --recordings "$ANVIL_ARTIFACTS_DIR/recordings/$ANVIL_GIT_STATE" --contract scoring-contract.yaml
+        component: eval

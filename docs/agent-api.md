@@ -100,3 +100,44 @@ Step `result` is `ran`, `up_to_date`, `skipped` (with `reason`), `failed` or
 `interrupted` (a previous run died; the next `ensure` resumes) or `unprepared`.
 `ready` is `true` only when status is `complete`. A failure returns `ok: false`,
 `error.code: "prepare_failed"`, exit status 6 and the partial `data`.
+
+## `anvil check [CHECK...] --json` (mutating) and `anvil check --list --json` (read-only)
+
+Run:
+
+```json
+"data": {
+  "worktree": { },
+  "results": [
+    {
+      "schema": "anvil.check-result/v1",
+      "run_id": "20261020T201500Z-1a2b3c4d",
+      "check": "fast",
+      "status": "passed",
+      "exit_code": 0,
+      "started_at": "…", "finished_at": "…", "duration_ms": 812,
+      "worktree": {"id": "wt_…", "path": "…", "branch": "feature/x"},
+      "identity": {
+        "git": {"head": "<sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
+        "definition_digest": "…", "toolchain": [{"command": "cargo --version", "output": "cargo 1.82.0", "exit_code": 0}],
+        "toolchain_digest": "…", "environment_names": ["ANVIL_WORKTREE_ID", "…"], "environment_digest": "…",
+        "inputs": [], "inputs_digest": "…", "platform": {"os": "darwin", "arch": "arm64"},
+        "identity_digest": "…"
+      },
+      "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
+      "artifacts": [{"path": "…", "sha256": "…", "size": 123}],
+      "locks": [], "anvil_version": "…", "run_dir": "…",
+      "reused": false
+    }
+  ]
+}
+```
+
+A non-passing check sets `ok: false`, `error.code: "check_failed"` with
+`details.{check,status,run_id}`, and exits with the failing command's status
+(124 timeout, 130 interrupted). Child output never appears in stdout with
+`--json`; it streams to stderr and is kept in the logs.
+
+List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
+`locks`, `commands`, `latest` (a result or `null`), `assessment`
+(`current`, `passing_and_current`, `stale_reasons[]`) and `lock_holders[]`.

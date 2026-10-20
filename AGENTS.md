@@ -46,6 +46,7 @@ anvil remove feature-my-feature  # When done
 | Exported worktree environment | `internal/workenv/` |
 | Runtime directories, ports, shared resources | `internal/resources/` |
 | Managed process identity and lifecycle | `internal/procs/` |
+| Check runner, provenance, resource locks | `internal/checks/` |
 | Synthetic example repositories | `examples/` |
 | UI components | `internal/ui/` |
 | Shell completions | `internal/cli/completion.go` |
@@ -102,6 +103,8 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 Agent commands (`ensure` and later `--json` commands) return these codes through
 `internal/agentapi`; see [docs/agent-api.md](docs/agent-api.md) for the stable
 error codes and JSON envelope.
+
+**`anvil check` exception:** a failing check exits with the failing command's status (124 timeout, 130 interrupted); the JSON error code is `check_failed`.
 
 **`anvil exec` exception:** `anvil exec` passes the child process's exit code through verbatim; `127` means the command was not found and `126` means it was found but could not be executed. Anvil's own resolution failures exit `1`. See README "Test Database Isolation" for the `anvil exec` and `anvil remove --keep-db` command reference.
 

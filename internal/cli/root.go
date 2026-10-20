@@ -25,6 +25,7 @@ var skipFirstRunCommands = map[string]bool{
 	"run":              true,
 	"start":            true,
 	"stop":             true,
+	"check":            true,
 }
 
 // shouldRunSetupWizard returns true when the setup wizard should be triggered.
@@ -198,6 +199,7 @@ Commands:
   ensure       Create and idempotently prepare a worktree (--json)
   run          Run a command in a worktree's configured environment
   start/stop   Start or stop a worktree's managed dev processes
+  check        Run named checks and record provenance (--list, --json)
   exec         Run a command with the worktree test database
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project

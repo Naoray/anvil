@@ -1,0 +1,418 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/naoray/anvil/internal/agentapi"
+	"github.com/naoray/anvil/internal/checks"
+	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/ui"
+	"github.com/naoray/anvil/internal/utils"
+	"github.com/naoray/anvil/internal/wtstate"
+)
+
+var checkCmd = &cobra.Command{
+	Use:   "check [CHECK...]",
+	Short: "Run named validation workflows and record their provenance",
+	Long: `Run checks declared under 'checks' in anvil.yaml and record trustworthy results.
+
+Each result records the commit, whether the tree was dirty (and a digest of
+the exact uncommitted contents), the check definition, toolchain probe output,
+an environment digest, declared inputs, exit status, duration, logs and
+produced artifacts. 'anvil check --list' reports, for the latest result of
+each check, whether it is still current for the checkout and why not.
+
+Without CHECK, every check not marked expensive runs in declaration order.
+Expensive checks require naming them and --allow-expensive. Checks holding
+'locks' take exclusive machine-wide resource locks; a lock held by another
+live process fails fast unless --lock-wait is given. Locks are released only
+by their holder or when it exits, never because time passed.
+
+Child output streams to stdout (stderr with --json). With --json the
+envelope carries the results; the exit status is the first failing
+command's (124 timed out, 130 interrupted).`,
+	ValidArgsFunction: completeCheckNames,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		list := mustGetBool(cmd, "list")
+		return runAgentCommand(cmd, agentCommand{Name: "check", Mutating: !list, Human: printCheckHuman}, func() (agentResult, error) {
+			if list {
+				return runCheckList(cmd, args)
+			}
+			return runChecks(cmd, args)
+		})
+	},
+}
+
+type checkSummary struct {
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Expensive   bool                 `json:"expensive"`
+	Reusable    bool                 `json:"reusable"`
+	Locks       []string             `json:"locks"`
+	Commands    []string             `json:"commands"`
+	Latest      *checks.Result       `json:"latest"`
+	Assessment  checks.Assessment    `json:"assessment"`
+	LockHolders []*checks.LockHolder `json:"lock_holders"`
+}
+
+type checkListData struct {
+	Worktree worktreeSummary `json:"worktree"`
+	Checks   []checkSummary  `json:"checks"`
+}
+
+type checkRunEntry struct {
+	*checks.Result
+	Reused bool `json:"reused"`
+}
+
+type checkRunData struct {
+	Worktree worktreeSummary `json:"worktree"`
+	Results  []checkRunEntry `json:"results"`
+}
+
+// checkContext loads the worktree, its identity and runtime directory.
+func checkContext(cmd *cobra.Command, mutate bool) (*worktreeEnv, error) {
+	pc, err := openAgentProject()
+	if err != nil {
+		return nil, err
+	}
+	var query []string
+	if wt := mustGetString(cmd, "worktree"); wt != "" {
+		query = []string{wt}
+	}
+	wt, err := selectAgentWorktree(pc, query)
+	if err != nil {
+		return nil, err
+	}
+	if mutate {
+		if _, _, err := wtstate.EnsureIdentity(wt.Path); err != nil {
+			return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+	}
+	wenv, err := loadWorktreeEnv(pc, *wt, worktreeEnvOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if mutate {
+		if err := provisionResources(wenv); err != nil {
+			return nil, err
+		}
+		if wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{}); err != nil {
+			return nil, err
+		}
+	}
+	return wenv, nil
+}
+
+func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.IdentityRequest {
+	request := checks.IdentityRequest{WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env}
+	if wenv.Directories != nil {
+		request.RuntimeDir = wenv.Directories.Root
+	}
+	return request
+}
+
+func runCheckList(cmd *cobra.Command, args []string) (agentResult, error) {
+	wenv, err := checkContext(cmd, false)
+	if err != nil {
+		return agentResult{}, err
+	}
+	summary, warnings := summarizeWorktree(wenv.Worktree)
+	data := checkListData{Worktree: summary, Checks: []checkSummary{}}
+	selected, err := selectChecks(wenv.PC.Config, args, true)
+	if err != nil {
+		return agentResult{Data: data}, err
+	}
+	for _, check := range selected {
+		entry := checkSummary{Name: check.Name, Description: check.Description, Expensive: check.Expensive, Reusable: check.Reusable,
+			Locks: append([]string{}, check.Locks...), Commands: []string{}, LockHolders: []*checks.LockHolder{}}
+		for _, command := range check.Commands {
+			entry.Commands = append(entry.Commands, command.Run)
+		}
+		if wenv.Directories != nil {
+			entry.Latest, err = checks.Store{RuntimeDir: wenv.Directories.Root}.Latest(check.Name)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
+			}
+		}
+		if entry.Latest == nil {
+			entry.Assessment = checks.Assess(nil, checks.Identity{})
+		} else if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check)); err != nil {
+			warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
+			entry.Assessment = checks.Assessment{Reasons: []string{"identity unavailable: " + err.Error()}}
+		} else {
+			entry.Assessment = checks.Assess(entry.Latest, identity)
+		}
+		if wenv.RuntimeRoot != "" {
+			for _, lock := range check.Locks {
+				holder, err := checks.ReadHolder(wenv.RuntimeRoot, lock)
+				if err != nil {
+					warnings = append(warnings, err.Error())
+				} else if holder != nil {
+					entry.LockHolders = append(entry.LockHolders, holder)
+				}
+			}
+		}
+		data.Checks = append(data.Checks, entry)
+	}
+	return agentResult{Data: data, Warnings: append(warnings, wenv.Warnings...)}, nil
+}
+
+// selectChecks resolves names; without names it returns every check (list)
+// or every non-expensive check (run).
+func selectChecks(cfg *config.Config, names []string, includeExpensive bool) ([]config.CheckConfig, error) {
+	if len(names) == 0 {
+		var out []config.CheckConfig
+		for _, check := range cfg.Checks {
+			if includeExpensive || !check.Expensive {
+				out = append(out, check)
+			}
+		}
+		return out, nil
+	}
+	var out []config.CheckConfig
+	for _, name := range names {
+		check, ok := cfg.FindCheck(name)
+		if !ok {
+			return nil, agentapi.Errorf(agentapi.CodeCheckNotFound, "no check named %q is declared", name)
+		}
+		out = append(out, *check)
+	}
+	return out, nil
+}
+
+func runChecks(cmd *cobra.Command, args []string) (agentResult, error) {
+	wenv, err := checkContext(cmd, true)
+	if err != nil {
+		return agentResult{}, err
+	}
+	selected, err := selectChecks(wenv.PC.Config, args, false)
+	if err != nil {
+		return agentResult{}, err
+	}
+	allowExpensive := mustGetBool(cmd, "allow-expensive")
+	for _, check := range selected {
+		if check.Expensive && !allowExpensive {
+			return agentResult{}, agentapi.Errorf(agentapi.CodeExpensiveCheck, "check %q is expensive; rerun with --allow-expensive to opt in", check.Name)
+		}
+	}
+	if len(selected) == 0 {
+		return agentResult{}, agentapi.Errorf(agentapi.CodeCheckNotFound, "no checks to run (expensive checks must be named)")
+	}
+	lockWait, err := cmd.Flags().GetDuration("lock-wait")
+	if err != nil {
+		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	}
+
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	summary, warnings := summarizeWorktree(wenv.Worktree)
+	warnings = append(warnings, wenv.Warnings...)
+	data := checkRunData{Worktree: summary, Results: []checkRunEntry{}}
+	var failure error
+	for _, check := range selected {
+		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, lockWait)
+		if warning != "" {
+			warnings = append(warnings, warning)
+		}
+		if err != nil {
+			return agentResult{Data: data, Warnings: warnings}, err
+		}
+		data.Results = append(data.Results, entry)
+		if failure == nil && entry.Status != checks.StatusPassed {
+			failure = checkFailure(entry.Result)
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return agentResult{Data: data, Warnings: warnings}, failure
+}
+
+func checkFailure(result *checks.Result) error {
+	exit := result.ExitCode
+	if exit <= 0 || exit > 255 {
+		exit = agentapi.ExitGeneral
+	}
+	return &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: exit, Message: fmt.Sprintf("check %s %s (exit %d)", result.Check, result.Status, result.ExitCode),
+		Details: map[string]any{"check": result.Check, "status": result.Status, "run_id": result.RunID}}
+}
+
+func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
+	store := checks.Store{RuntimeDir: wenv.Directories.Root}
+	warning := ""
+	if mustGetBool(cmd, "reuse") {
+		reused, reason, err := reusableResult(ctx, wenv, store, check)
+		if err != nil {
+			return checkRunEntry{}, "", agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		if reused != nil {
+			return checkRunEntry{Result: reused, Reused: true}, "", nil
+		}
+		warning = fmt.Sprintf("check %s not reused: %s", check.Name, reason)
+	}
+	result, err := checks.Run(ctx, checks.RunRequest{
+		Check:       check,
+		Worktree:    checks.WorktreeRef{ID: wenv.Identity.ID, Path: wenv.Worktree.Path, Branch: wenv.Worktree.Branch},
+		RuntimeDir:  wenv.Directories.Root,
+		RuntimeRoot: wenv.RuntimeRoot,
+		Env:         wenv.Env,
+		Resolve: func(command config.CheckCommand) (checks.CommandTarget, error) {
+			return resolveCheckCommand(wenv, command)
+		},
+		Output:       checkOutput(cmd),
+		LockWait:     lockWait,
+		AnvilVersion: Version,
+	})
+	var busy *checks.BusyError
+	switch {
+	case errors.As(err, &busy):
+		details := map[string]any{"lock": busy.Lock}
+		if busy.Holder != nil {
+			details["holder"] = busy.Holder
+		}
+		return checkRunEntry{}, warning, (&agentapi.Error{Code: agentapi.CodeResourceBusy, Message: busy.Error(), Cause: err}).WithDetails(details)
+	case errors.Is(err, checks.ErrAlreadyRunning):
+		return checkRunEntry{}, warning, agentapi.Errorf(agentapi.CodeResourceBusy, "check %s: %v", check.Name, err)
+	case err != nil && result == nil:
+		return checkRunEntry{}, warning, agentapi.Wrap(agentapi.CodeInternal, err)
+	case err != nil:
+		warning = fmt.Sprintf("check %s: %v", check.Name, err)
+	}
+	return checkRunEntry{Result: result}, warning, nil
+}
+
+// reusableResult returns the latest result only when the check is declared
+// reusable, it passed, its full identity is unchanged and every recorded
+// artifact is intact.
+func reusableResult(ctx context.Context, wenv *worktreeEnv, store checks.Store, check config.CheckConfig) (*checks.Result, string, error) {
+	if !check.Reusable {
+		return nil, "the check is not declared reusable", nil
+	}
+	latest, err := store.Latest(check.Name)
+	if err != nil || latest == nil {
+		return nil, "no earlier result", err
+	}
+	if latest.Status != checks.StatusPassed {
+		return nil, "the latest result is " + latest.Status, nil
+	}
+	identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check))
+	if err != nil {
+		return nil, "", err
+	}
+	assessment := checks.Assess(latest, identity)
+	if !assessment.Current {
+		return nil, fmt.Sprintf("the latest result is stale (%v)", assessment.Reasons), nil
+	}
+	if intact, reason := checks.ArtifactsIntact(latest); !intact {
+		return nil, reason, nil
+	}
+	return latest, "", nil
+}
+
+func resolveCheckCommand(wenv *worktreeEnv, command config.CheckCommand) (checks.CommandTarget, error) {
+	target, err := loadWorktreeEnv(wenv.PC, wenv.Worktree, worktreeEnvOptions{Component: command.Component})
+	if err != nil {
+		return checks.CommandTarget{}, err
+	}
+	dir := target.Worktree.Path
+	if target.Component != nil {
+		dir = target.Component.AbsPath
+	}
+	if command.Dir != "" {
+		dir = filepath.Join(dir, command.Dir)
+	}
+	base := target.Env.Map()
+	for _, key := range sortedKeys(command.Env) {
+		target.Env.Set(variableFor(key, utils.ExpandEnv(command.Env[key], base), target.PC.Config))
+	}
+	return checks.CommandTarget{Dir: dir, Env: target.Env}, nil
+}
+
+func checkOutput(cmd *cobra.Command) io.Writer {
+	if mustGetBool(cmd, "quiet") {
+		return nil
+	}
+	// In --json mode os.Stdout is redirected to stderr by runAgentCommand.
+	return os.Stdout
+}
+
+func printCheckHuman(result agentResult) error {
+	switch data := result.Data.(type) {
+	case checkListData:
+		if len(data.Checks) == 0 {
+			ui.PrintInfo("No checks declared")
+		}
+		for _, check := range data.Checks {
+			state := "never run"
+			if check.Latest != nil {
+				state = check.Latest.Status
+				if check.Assessment.Current {
+					state += ", current"
+				} else {
+					state += fmt.Sprintf(", stale: %v", check.Assessment.Reasons)
+				}
+			}
+			flags := ""
+			if check.Expensive {
+				flags = " [expensive]"
+			}
+			fmt.Printf("%-16s %s%s\n", check.Name, state, flags)
+		}
+	case checkRunData:
+		for _, entry := range data.Results {
+			label := entry.Status
+			if entry.Reused {
+				label += " (reused " + entry.RunID + ")"
+			}
+			ui.PrintInfo(fmt.Sprintf("%s: %s in %dms", entry.Check, label, entry.DurationMS))
+		}
+	}
+	return nil
+}
+
+func completeCheckNames(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+	pc, err := OpenProjectFromCWD()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		if worktrees, err := git.ListWorktrees(pc.GitDir); err == nil {
+			if wt, err := selectWorktreeByContainment(worktrees, cwd); err == nil && wt != nil {
+				if target, err := pc.ForWorktree(wt.Path); err == nil {
+					pc = target
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(pc.Config.Checks))
+	for _, check := range pc.Config.Checks {
+		names = append(names, check.Name)
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+func init() {
+	addJSONFlag(checkCmd)
+	checkCmd.Flags().Bool("list", false, "List checks with their latest result and whether it is current (read-only)")
+	checkCmd.Flags().String("worktree", "", "Worktree to check (exact name, branch, path or ID; default: current)")
+	checkCmd.Flags().Bool("allow-expensive", false, "Allow running checks marked expensive")
+	checkCmd.Flags().Bool("reuse", false, "Return a current passing result of a reusable check instead of rerunning")
+	checkCmd.Flags().Duration("lock-wait", 0, "Wait this long for busy resource locks (default: fail immediately)")
+	if err := checkCmd.RegisterFlagCompletionFunc("worktree", completeWorktreeNames); err != nil {
+		panic(err)
+	}
+	rootCmd.AddCommand(checkCmd)
+}

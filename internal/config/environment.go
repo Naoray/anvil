@@ -181,6 +181,9 @@ func (c *Config) ValidateEnvironment() error {
 	if err := c.validateResources(); err != nil {
 		problems = append(problems, err)
 	}
+	if err := c.validateChecks(); err != nil {
+		problems = append(problems, err)
+	}
 	return errors.Join(problems...)
 }
 

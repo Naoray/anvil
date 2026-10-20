@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/procs"
 	"github.com/naoray/anvil/internal/resources"
@@ -20,6 +22,9 @@ type runtimeCleanupPlan struct {
 	Processes    []wtstate.ProcessRecord `json:"processes"`
 	Ports        []resources.PortState   `json:"ports"`
 	RuntimeDir   string                  `json:"runtime_dir,omitempty"`
+	// RunningChecks are checks a live process is running in this worktree;
+	// removal refuses while any exist.
+	RunningChecks []string `json:"running_checks"`
 	// Skipped explains why runtime resources are left untouched.
 	Skipped string `json:"skipped,omitempty"`
 	root    string
@@ -31,7 +36,7 @@ func planRuntimeCleanup(worktreePath string) (*runtimeCleanupPlan, error) {
 	if err != nil {
 		canonical = worktreePath
 	}
-	plan := &runtimeCleanupPlan{WorktreePath: canonical, Processes: []wtstate.ProcessRecord{}, Ports: []resources.PortState{}}
+	plan := &runtimeCleanupPlan{WorktreePath: canonical, Processes: []wtstate.ProcessRecord{}, Ports: []resources.PortState{}, RunningChecks: []string{}}
 	if _, statErr := os.Stat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
 		// Without .anvil.local nothing identifies owned resources; port
 		// reservations of a vanished worktree are reclaimed as stale.
@@ -81,8 +86,21 @@ func planRuntimeCleanup(worktreePath string) (*runtimeCleanupPlan, error) {
 	}
 	if owner, err := resources.ReadOwner(dir); err == nil && owner.WorktreeID == identity.ID {
 		plan.RuntimeDir = dir
+		running, err := checks.RunningChecks(dir)
+		if err != nil {
+			return nil, err
+		}
+		plan.RunningChecks = running
 	}
 	return plan, nil
+}
+
+// blocked reports resources that make removal unsafe right now.
+func (p *runtimeCleanupPlan) blocked() error {
+	if len(p.RunningChecks) > 0 {
+		return fmt.Errorf("checks are running in this worktree (%s); wait for them or stop them first", strings.Join(p.RunningChecks, ", "))
+	}
+	return nil
 }
 
 // describe renders the plan for dry-run and progress output.

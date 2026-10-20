@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
@@ -140,6 +141,9 @@ func runRemoveLifecycle(
 	runtimePlan, err := planRuntimeCleanup(worktree.Path)
 	if err != nil {
 		return fmt.Errorf("inspecting runtime resources: %w", err)
+	}
+	if err := runtimePlan.blocked(); err != nil {
+		return agentapi.Wrap(agentapi.CodeCleanupBlocked, fmt.Errorf("refusing to remove %s: %w", worktree.Path, err))
 	}
 	if options.DryRun {
 		for _, line := range runtimePlan.describe("[DRY RUN] Would ") {
