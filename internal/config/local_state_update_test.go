@@ -138,3 +138,9 @@ func TestSectionRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(content), "name: a")
 }
+
+func TestWorktreeLockPathFallbackIsPerUser(t *testing.T) {
+	path := WorktreeLockPath(t.TempDir(), "x.lock")
+	require.Equal(t, fmt.Sprintf("anvil-locks-%d", os.Getuid()), filepath.Base(filepath.Dir(path)),
+		"a shared temp dir created by another user must never block this one")
+}
