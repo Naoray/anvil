@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -36,9 +37,11 @@ func TestUpdateLocalStatePreservesUnknownFieldsAndRejectsOnError(t *testing.T) {
 	require.Equal(t, "swift", doc["db_suffix"])
 	require.Equal(t, map[string]any{"nested": true}, doc["future_field"])
 	require.Equal(t, "yes", doc["added"])
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o640), info.Mode().Perm(), "existing mode is preserved")
+	if runtime.GOOS != "windows" { // Windows exposes no Unix permission bits
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0o640), info.Mode().Perm(), "existing mode is preserved")
+	}
 
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
