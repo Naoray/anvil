@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/cli"
 )
 
@@ -26,6 +27,11 @@ func main() {
 				fmt.Fprintln(os.Stderr, childErr.Message)
 			}
 			os.Exit(childErr.Code)
+		}
+		var apiErr *agentapi.Error
+		if errors.As(err, &apiErr) {
+			fmt.Fprintln(os.Stderr, "error: "+apiErr.Message)
+			os.Exit(apiErr.ExitCode())
 		}
 		os.Exit(1)
 	}

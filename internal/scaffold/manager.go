@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
@@ -15,6 +16,7 @@ import (
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/scaffold/words"
 	"github.com/naoray/anvil/internal/ui"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 type ScaffoldManager struct {
@@ -57,11 +59,16 @@ func (m *ScaffoldManager) GetStepsForWorktree(
 	worktreePath, branch, presetName string,
 	defaultSteps []config.StepConfig,
 ) ([]types.ScaffoldStep, error) {
+	return m.stepsFromConfig(effectiveStepConfigs(cfg, defaultSteps))
+}
+
+// effectiveStepConfigs merges preset defaults with configured steps.
+func effectiveStepConfigs(cfg *config.Config, defaultSteps []config.StepConfig) []config.StepConfig {
 	stepConfigs := cfg.Scaffold.Steps
 	if !cfg.Scaffold.Override {
 		stepConfigs = append(append([]config.StepConfig(nil), defaultSteps...), stepConfigs...)
 	}
-	return m.stepsFromConfig(stepConfigs)
+	return append([]config.StepConfig(nil), stepConfigs...)
 }
 
 func (m *ScaffoldManager) GetCleanupSteps(
@@ -134,6 +141,29 @@ type WarmOptions struct {
 	CopyMode string
 }
 
+// ScaffoldRequest describes one scaffold or preparation run.
+type ScaffoldRequest struct {
+	WorktreePath string
+	Branch       string
+	RepoName     string
+	SiteName     string
+	Preset       string
+	DefaultSteps []config.StepConfig
+	// ExtraSteps run after preset and configured scaffold steps (for example
+	// compiled component preparation).
+	ExtraSteps []config.StepConfig
+	Config     *config.Config
+	DryRun     bool
+	Verbose    bool
+	Quiet      bool
+	Warm       WarmOptions
+	// Env is the worktree environment exported to command steps.
+	Env map[string]string
+	// SkipCompleted skips steps whose completion record still matches their
+	// definition, inputs and outputs. Completion is recorded on every real run.
+	SkipCompleted bool
+}
+
 func (m *ScaffoldManager) RunScaffold(
 	worktreePath, branch, repoName, siteName, preset string,
 	defaultSteps []config.StepConfig,
@@ -141,32 +171,56 @@ func (m *ScaffoldManager) RunScaffold(
 	dryRun, verbose, quiet bool,
 	warmOptions ...WarmOptions,
 ) error {
-	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
+	request := ScaffoldRequest{
+		WorktreePath: worktreePath,
+		Branch:       branch,
+		RepoName:     repoName,
+		SiteName:     siteName,
+		Preset:       preset,
+		DefaultSteps: defaultSteps,
+		Config:       cfg,
+		DryRun:       dryRun,
+		Verbose:      verbose,
+		Quiet:        quiet,
+	}
+	if len(warmOptions) > 0 {
+		request.Warm = warmOptions[0]
+	}
+	_, err := m.RunScaffoldWithOptions(request)
+	return err
+}
+
+// RunScaffoldWithOptions validates every step before any effect, then runs
+// them under the worktree's preparation lock, persisting each completion as
+// it happens so interrupted or failed runs resume safely.
+func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (report *PrepareReport, runErr error) {
+	cfg := request.Config
+	worktreePath := request.WorktreePath
+	ctx := m.newScaffoldContext(worktreePath, request.Branch, request.RepoName, request.SiteName, request.Preset)
+	for key, value := range request.Env {
+		ctx.Env[key] = value
+	}
 
 	ctx.BorrowAppDB = cfg.Scaffold.BorrowAppDB
 	ctx.DatabaseActions = cfg.Scaffold.DatabaseActions
 	ctx.ResetDatabases = cfg.Scaffold.ResetDatabases
 	ctx.SiteDriver = cfg.Scaffold.DatabaseDriver
+	stepConfigs := append(effectiveStepConfigs(cfg, request.DefaultSteps), request.ExtraSteps...)
 	if ctx.BorrowAppDB != "" {
-		effective := append([]config.StepConfig(nil), defaultSteps...)
-		if cfg.Scaffold.Override {
-			effective = nil
-		}
-		effective = append(effective, cfg.Scaffold.Steps...)
 		hasApplication := false
-		for _, step := range effective {
+		for _, step := range stepConfigs {
 			if step.Name == config.StepDbCreate && (step.Role == "" || step.Role == config.DbRoleApplication) {
 				hasApplication = true
 			}
 		}
 		if !hasApplication {
-			return fmt.Errorf("--borrow-app-db requires an application db.create step; use the laravel preset or configure that step explicitly")
+			return nil, fmt.Errorf("--borrow-app-db requires an application db.create step; use the laravel preset or configure that step explicitly")
 		}
 	}
 
-	stepsList, err := m.GetStepsForWorktree(cfg, worktreePath, branch, preset, defaultSteps)
+	stepsList, err := m.stepsFromConfig(stepConfigs)
 	if err != nil {
-		return fmt.Errorf("getting scaffold steps: %w", err)
+		return nil, fmt.Errorf("getting scaffold steps: %w", err)
 	}
 
 	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
@@ -177,45 +231,88 @@ func (m *ScaffoldManager) RunScaffold(
 			}
 		}
 		if !found {
-			policy, err := m.registry.Create("db.migrate", config.StepConfig{Name: "db.migrate"})
+			policyConfig := config.StepConfig{Name: "db.migrate"}
+			policy, err := m.registry.Create("db.migrate", policyConfig)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			stepsList = append(stepsList, policy)
+			stepConfigs = append(stepConfigs, policyConfig)
 		}
 	}
 
 	// Run pre-flight checks with spinner
-	if !quiet {
+	if !request.Quiet {
 		if err := m.runPreFlightWithSpinner(&ctx, &cfg.Scaffold); err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		// Quiet mode: run without spinner
 		if err := m.runPreFlightChecks(&ctx, &cfg.Scaffold); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	if err := prepareDbSuffix(&ctx, worktreePath, dryRun); err != nil {
-		return err
+	if !request.DryRun {
+		lock, err := wtstate.AcquirePrepareLock(worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("locking worktree preparation: %w", err)
+		}
+		defer func() { runErr = errors.Join(runErr, lock.Release()) }()
 	}
 
-	opts := m.stepOptionsFromFlags(dryRun, verbose, quiet)
-	if len(warmOptions) > 0 {
-		opts.WarmSource = warmOptions[0].Source
-		opts.CopyMode = warmOptions[0].CopyMode
+	if err := prepareDbSuffix(&ctx, worktreePath, request.DryRun); err != nil {
+		return nil, err
 	}
 
-	executor := NewStepExecutor(stepsList, &ctx, opts)
-	if err := executor.Execute(); err != nil {
-		return err
+	opts := m.stepOptionsFromFlags(request.DryRun, request.Verbose, request.Quiet)
+	opts.WarmSource = request.Warm.Source
+	opts.CopyMode = request.Warm.CopyMode
+
+	plan, planDigest := buildPlan(stepConfigs)
+	recorder := &prepareRecorder{
+		worktreePath:  worktreePath,
+		plan:          plan,
+		skipCompleted: request.SkipCompleted,
+		now:           time.Now,
+		reasons:       map[int]string{},
+	}
+	executorOptions := ExecutorOptions{}
+	if !request.DryRun {
+		if _, _, err := wtstate.EnsureIdentity(worktreePath); err != nil {
+			return nil, fmt.Errorf("recording worktree identity: %w", err)
+		}
+		state, err := wtstate.ReadPrepare(worktreePath)
+		if err != nil {
+			return nil, err
+		}
+		if state != nil {
+			recorder.records = state.Steps
+		}
+		if err := wtstate.BeginPrepare(worktreePath, planDigest, time.Now()); err != nil {
+			return nil, fmt.Errorf("recording preparation start: %w", err)
+		}
+		executorOptions.Hooks = recorder
 	}
 
-	if ctx.BorrowAppDB != "" && ctx.GetVar("BorrowApplicationApplied") != "true" {
-		return fmt.Errorf("--borrow-app-db was not applied because the application db.create step was skipped")
+	executor := NewStepExecutorWithOptions(stepsList, &ctx, opts, executorOptions)
+	execErr := executor.Execute()
+	if execErr == nil && ctx.BorrowAppDB != "" && ctx.GetVar("BorrowApplicationApplied") != "true" {
+		execErr = fmt.Errorf("--borrow-app-db was not applied because the application db.create step was skipped")
 	}
-	return nil
+	report = buildReport(plan, planDigest, executor.Results(), recorder.reasons)
+	if !request.DryRun {
+		failedStep := ""
+		for _, outcome := range report.Steps {
+			if outcome.Result == OutcomeFailed {
+				failedStep = outcome.Key
+			}
+		}
+		if err := wtstate.FinishPrepare(worktreePath, time.Now(), failedStep, execErr, recorder.planKeys()); err != nil {
+			return report, errors.Join(execErr, fmt.Errorf("recording preparation outcome: %w", err))
+		}
+	}
+	return report, execErr
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {

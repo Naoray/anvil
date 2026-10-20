@@ -18,6 +18,7 @@ import (
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 type BinaryStep struct {
+	target    execTarget
 	name      string
 	binary    string
 	args      []string
@@ -101,7 +102,10 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 	allArgs := append(s.args, opts.Args...)
 	allArgs = s.replaceTemplate(allArgs, ctx)
 
-	install := warm.Prepare(ctx.WorktreePath, s.name, s.binary, allArgs)
+	var install *warm.Install
+	if s.target.dir == "" {
+		install = warm.Prepare(ctx.WorktreePath, s.name, s.binary, allArgs)
+	}
 	if install != nil && s.storeAs == "" && opts.WarmSource != "" {
 		mode := opts.CopyMode
 		if mode == "" {
@@ -137,8 +141,17 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 		fmt.Printf("  Running: %s\n", strings.Join(fullCmd, " "))
 	}
 
+	dir, env, err := s.target.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", s.name, err)
+	}
 	// Use the command executor for testability
-	output, err := s.executor.RunBinary(context.Background(), ctx.WorktreePath, s.binary, allArgs)
+	var output []byte
+	if env == nil {
+		output, err = s.executor.RunBinary(context.Background(), dir, s.binary, allArgs)
+	} else {
+		output, err = s.executor.RunBinaryWithEnv(context.Background(), dir, env, s.binary, allArgs)
+	}
 	if err != nil {
 		return fmt.Errorf("%s failed: %w\n%s", s.name, err, string(output))
 	}
@@ -169,4 +182,11 @@ func (s *BinaryStep) replaceTemplate(args []string, ctx *types.ScaffoldContext) 
 		args[i] = replaced
 	}
 	return args
+}
+
+// WithTarget sets the step's working directory and extra environment. Warm
+// dependency reuse only applies to worktree-root installs.
+func (s *BinaryStep) WithTarget(cfg config.StepConfig) *BinaryStep {
+	s.target = newExecTarget(cfg)
+	return s
 }

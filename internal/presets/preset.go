@@ -60,6 +60,14 @@ func cloneStepConfigs(stepConfigs []config.StepConfig) []config.StepConfig {
 		cloned[i] = stepConfig
 		cloned[i].Args = append([]string(nil), stepConfig.Args...)
 		cloned[i].Keys = append([]string(nil), stepConfig.Keys...)
+		cloned[i].Inputs = append([]string(nil), stepConfig.Inputs...)
+		cloned[i].Outputs = append([]string(nil), stepConfig.Outputs...)
+		if stepConfig.Env != nil {
+			cloned[i].Env = make(map[string]string, len(stepConfig.Env))
+			for key, value := range stepConfig.Env {
+				cloned[i].Env[key] = value
+			}
+		}
 		cloned[i].Condition = cloneConditionMap(stepConfig.Condition)
 		if stepConfig.Enabled != nil {
 			enabled := *stepConfig.Enabled
@@ -113,3 +121,10 @@ func cloneConditionValue(value any) any {
 		return value
 	}
 }
+
+// composerInputs and npmInputs identify installs for idempotent preparation:
+// ensure reruns an install only when its manifest or lockfile changed or the
+// installed tree disappeared.
+func composerInputs() []string { return []string{"composer.json", "composer.lock"} }
+
+func npmInputs() []string { return []string{"package.json", "package-lock.json"} }

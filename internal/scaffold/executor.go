@@ -10,13 +10,33 @@ import (
 )
 
 type ExecutionResult struct {
-	Step    types.ScaffoldStep
-	Error   error
-	Skipped bool
+	Step       types.ScaffoldStep
+	Error      error
+	Skipped    bool
+	SkipReason string
+	// Index is the step's position in the configured plan.
+	Index int
+}
+
+// Skip reasons reported in ExecutionResult.SkipReason.
+const (
+	SkipDisabled  = "disabled"
+	SkipCondition = "condition not met"
+	SkipUpToDate  = "up-to-date"
+)
+
+// StepHooks observe and optionally short-circuit eligible steps. BeforeStep
+// may report that a step is already satisfied; AfterStep runs after every
+// executed step with its outcome and may fail the run (for example when its
+// completion cannot be recorded).
+type StepHooks interface {
+	BeforeStep(index int, step types.ScaffoldStep) (skip bool, reason string, err error)
+	AfterStep(index int, step types.ScaffoldStep, stepErr error) error
 }
 
 type ExecutorOptions struct {
 	DelegateDryRunToSteps bool
+	Hooks                 StepHooks
 }
 
 type StepExecutor struct {
@@ -65,18 +85,28 @@ func (e *StepExecutor) Execute() error {
 		currentStep := stepIndex + 1
 		eligible, skipReason, err := e.evaluateEligibility(step)
 		if err != nil {
-			e.recordResult(step, err, false)
+			e.recordResult(stepIndex, step, err, false, "")
 			return fmt.Errorf("step %s condition: %w", step.Name(), err)
 		}
+		if eligible && e.executorOpts.Hooks != nil {
+			skip, reason, err := e.executorOpts.Hooks.BeforeStep(stepIndex, step)
+			if err != nil {
+				e.recordResult(stepIndex, step, err, false, "")
+				return fmt.Errorf("step %s: %w", step.Name(), err)
+			}
+			if skip {
+				eligible, skipReason = false, reason
+			}
+		}
 		if !eligible {
-			e.recordResult(step, nil, true)
+			e.recordResult(stepIndex, step, nil, true, skipReason)
 			if e.opts.Verbose {
 				fmt.Printf("Skipping step (%s): %s\n", skipReason, step.Name())
 			}
 			continue
 		}
 
-		if err := e.executeStep(step, currentStep, totalSteps); err != nil {
+		if err := e.executeStep(stepIndex, step, currentStep, totalSteps); err != nil {
 			return err
 		}
 	}
@@ -95,25 +125,30 @@ func (e *StepExecutor) Results() []ExecutionResult {
 
 func (e *StepExecutor) evaluateEligibility(step types.ScaffoldStep) (bool, string, error) {
 	if stepConfig, ok := step.(interface{ IsEnabled() bool }); ok && !stepConfig.IsEnabled() {
-		return false, "disabled", nil
+		return false, SkipDisabled, nil
 	}
 	eligible, err := step.Condition(e.ctx)
 	if err != nil {
 		return false, "", err
 	}
 	if !eligible {
-		return false, "condition not met", nil
+		return false, SkipCondition, nil
 	}
 	return true, "", nil
 }
 
-func (e *StepExecutor) executeStep(step types.ScaffoldStep, current, total int) error {
+func (e *StepExecutor) executeStep(index int, step types.ScaffoldStep, current, total int) error {
 	err := e.presentStep(step, current, total)
-	e.recordResult(step, err, false)
+	e.recordResult(index, step, err, false, "")
 	if err != nil {
-		return fmt.Errorf("step %s failed: %w", step.Name(), err)
+		err = fmt.Errorf("step %s failed: %w", step.Name(), err)
 	}
-	return nil
+	if e.executorOpts.Hooks != nil {
+		if hookErr := e.executorOpts.Hooks.AfterStep(index, step, err); hookErr != nil && err == nil {
+			return fmt.Errorf("step %s: %w", step.Name(), hookErr)
+		}
+	}
+	return err
 }
 
 func (e *StepExecutor) presentStep(step types.ScaffoldStep, current, total int) error {
@@ -165,11 +200,13 @@ func (e *StepExecutor) executeQuiet(step types.ScaffoldStep) error {
 	return nil
 }
 
-func (e *StepExecutor) recordResult(step types.ScaffoldStep, err error, skipped bool) {
+func (e *StepExecutor) recordResult(index int, step types.ScaffoldStep, err error, skipped bool, reason string) {
 	e.results = append(e.results, ExecutionResult{
-		Step:    step,
-		Error:   err,
-		Skipped: skipped,
+		Step:       step,
+		Error:      err,
+		Skipped:    skipped,
+		SkipReason: reason,
+		Index:      index,
 	})
 	if skipped {
 		e.skippedCnt++

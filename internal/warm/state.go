@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 func stateMap(root string) (map[string]any, error) {
@@ -49,42 +51,26 @@ func readStamp(root, tree string) (stamp, error) {
 	}
 	return records[tree], nil
 }
-func writeStamp(root, tree string, record stamp) (err error) {
-	value, err := stateMap(root)
-	if err != nil {
+func writeStamp(root, tree string, record stamp) error {
+	// stateMap enforces the regular-file requirement before the shared writer runs.
+	if _, err := stateMap(root); err != nil {
 		return err
 	}
-	records := map[string]any{}
-	if existing, ok := value["dependency_installs"]; ok {
-		var valid bool
-		records, valid = existing.(map[string]any)
-		if !valid {
-			return fmt.Errorf("malformed dependency provenance")
+	return config.UpdateLocalState(root, func(value map[string]any) error {
+		records := map[string]any{}
+		if existing, ok := value["dependency_installs"]; ok {
+			var valid bool
+			records, valid = existing.(map[string]any)
+			if !valid {
+				return fmt.Errorf("malformed dependency provenance")
+			}
 		}
-	}
-	if record.Inputs == "" {
-		delete(records, tree)
-	} else {
-		records[tree] = record
-	}
-	value["dependency_installs"] = records
-	data, err := yaml.Marshal(value)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(root, ".anvil-warm-state-")
-	if err != nil {
-		return err
-	}
-	path := f.Name()
-	defer func() {
-		if e := os.Remove(path); e != nil && !errors.Is(e, os.ErrNotExist) {
-			err = errors.Join(err, e)
+		if record.Inputs == "" {
+			delete(records, tree)
+		} else {
+			records[tree] = record
 		}
-	}()
-	_, writeErr := f.Write(data)
-	if err = errors.Join(writeErr, f.Close()); err != nil {
-		return err
-	}
-	return os.Rename(path, filepath.Join(root, ".anvil.local"))
+		value["dependency_installs"] = records
+		return nil
+	})
 }

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	anvil_exec "github.com/naoray/anvil/internal/exec"
 	"github.com/naoray/anvil/internal/scaffold/template"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 type BashRunStep struct {
+	target   execTarget
 	command  string
 	storeAs  string
 	executor *anvil_exec.CommandExecutor
@@ -47,8 +49,17 @@ func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 		return fmt.Errorf("template replacement failed: %w", err)
 	}
 
+	dir, env, err := s.target.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("bash.run: %w", err)
+	}
 	// Use the command executor for testability
-	output, err := s.executor.RunBash(context.Background(), ctx.WorktreePath, command)
+	var output []byte
+	if env == nil {
+		output, err = s.executor.RunBash(context.Background(), dir, command)
+	} else {
+		output, err = s.executor.RunBashWithEnv(context.Background(), dir, env, command)
+	}
 	if err != nil {
 		return fmt.Errorf("bash.run failed: %w\n%s", err, string(output))
 	}
@@ -65,4 +76,10 @@ func (s *BashRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) er
 
 func (s *BashRunStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
 	return true, nil
+}
+
+// WithTarget sets the step's working directory and extra environment.
+func (s *BashRunStep) WithTarget(cfg config.StepConfig) *BashRunStep {
+	s.target = newExecTarget(cfg)
+	return s
 }

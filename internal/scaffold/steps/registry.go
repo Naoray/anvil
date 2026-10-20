@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/naoray/anvil/internal/config"
@@ -52,7 +53,7 @@ func (r *Registry) Create(name string, cfg config.StepConfig) (types.ScaffoldSte
 	}
 	step := factory(cfg)
 	if len(cfg.Condition) != 0 || cfg.Enabled != nil {
-		return &configuredStep{ScaffoldStep: step, condition: cfg.Condition, enabled: cfg.Enabled}, nil
+		return &configuredStep{ScaffoldStep: step, condition: cfg.Condition, enabled: cfg.Enabled, dir: cfg.Dir}, nil
 	}
 	return step, nil
 }
@@ -76,13 +77,19 @@ func (r *Registry) RegisterDefaultsForSiteDriver(siteDriver config.SiteDriver, c
 	r.registerDefaults(managedDatabaseFactory(siteDriver, commander))
 }
 
+// RegisterDefaultsWithDatabaseFactory registers built-in steps with an
+// explicit database client factory (used by tests with mock clients).
+func (r *Registry) RegisterDefaultsWithDatabaseFactory(factory DatabaseClientFactory) {
+	r.registerDefaults(factory)
+}
+
 func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
 	// Binary steps
 	for _, b := range binaries {
 		name := b.name
 		binary := b.binary
 		r.Register(name, func(cfg config.StepConfig) types.ScaffoldStep {
-			return NewBinaryStep(name, binary, cfg.Args, cfg.StoreAs)
+			return NewBinaryStep(name, binary, cfg.Args, cfg.StoreAs).WithTarget(cfg)
 		})
 	}
 
@@ -92,11 +99,11 @@ func (r *Registry) registerDefaults(databaseFactory DatabaseClientFactory) {
 	})
 
 	r.Register(config.StepBashRun, func(cfg config.StepConfig) types.ScaffoldStep {
-		return NewBashRunStep(cfg.Command, cfg.StoreAs)
+		return NewBashRunStep(cfg.Command, cfg.StoreAs).WithTarget(cfg)
 	})
 
 	r.Register(config.StepCommandRun, func(cfg config.StepConfig) types.ScaffoldStep {
-		return NewCommandRunStep(cfg.Command, cfg.StoreAs)
+		return NewCommandRunStep(cfg.Command, cfg.StoreAs).WithTarget(cfg)
 	})
 
 	r.Register(config.StepEnvRead, func(cfg config.StepConfig) types.ScaffoldStep {
@@ -144,6 +151,7 @@ type configuredStep struct {
 	types.ScaffoldStep
 	condition map[string]any
 	enabled   *bool
+	dir       string
 }
 
 func (s *configuredStep) IsEnabled() bool {
@@ -157,7 +165,11 @@ func (s *configuredStep) IsEnabled() bool {
 }
 
 func (s *configuredStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
-	eligible, err := ctx.EvaluateCondition(s.condition)
+	root := ctx.WorktreePath
+	if s.dir != "" {
+		root = filepath.Join(ctx.WorktreePath, s.dir)
+	}
+	eligible, err := ctx.EvaluateConditionAt(root, s.condition)
 	if err != nil || !eligible {
 		return false, err
 	}

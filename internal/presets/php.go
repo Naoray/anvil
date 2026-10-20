@@ -16,7 +16,7 @@ func NewPHP() *PHP {
 		basePreset: basePreset{
 			name: "php",
 			defaultSteps: []config.StepConfig{
-				{Name: "php.composer", Args: []string{"install"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "composer.lock"}}},
+				{Name: "php.composer", Args: []string{"install"}, Inputs: composerInputs(), Outputs: []string{"vendor"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"file_exists": "composer.lock"}}},
 				{Name: "php.composer", Args: []string{"update"}, ConditionHolder: config.ConditionHolder{Condition: map[string]any{"not": map[string]any{"file_exists": "composer.lock"}}}},
 			},
 			cleanupSteps: nil,

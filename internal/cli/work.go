@@ -115,29 +115,13 @@ available branches or entering a new branch name.`,
 		ui.PrintStep(fmt.Sprintf("Creating worktree for branch '%s' from '%s'", branch, baseBranch))
 		ui.PrintInfo(fmt.Sprintf("Path: %s", absWorktreePath))
 
+		noTrack := mustGetBool(cmd, "no-track")
 		if !dryRun {
-			if err := git.CreateWorktree(pc.GitDir, absWorktreePath, branch, baseBranch); err != nil {
-				return fmt.Errorf("creating worktree: %w", err)
+			if err := createBranchWorktree(pc, selection, absWorktreePath, baseBranch, noTrack, verbose); err != nil {
+				return err
 			}
 		} else {
 			ui.PrintInfo("[DRY RUN] Would create worktree")
-		}
-
-		// Set up branch tracking unless --no-track is specified
-		noTrack := mustGetBool(cmd, "no-track")
-		if !dryRun && !noTrack && !selection.Existing {
-			remote := selection.Remote
-			if remote == "" {
-				remote = config.DefaultRemote
-			}
-			if err := git.SetBranchUpstream(pc.GitDir, branch, remote); err != nil {
-				// Non-fatal - just inform user if verbose
-				if verbose {
-					ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", branch, err))
-				}
-			} else {
-				ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on %s", branch, remote))
-			}
 		}
 
 		skipScaffold := mustGetBool(cmd, "skip-scaffold")
@@ -190,6 +174,30 @@ available branches or entering a new branch name.`,
 		ui.PrintDone(fmt.Sprintf("Worktree ready at %s", absWorktreePath))
 		return nil
 	},
+}
+
+// createBranchWorktree creates an attached worktree and configures tracking
+// for newly created branches. It is shared by `anvil work` and `anvil ensure`.
+func createBranchWorktree(pc *ProjectContext, selection git.WorkBranch, absWorktreePath, baseBranch string, noTrack, verbose bool) error {
+	if err := git.CreateWorktree(pc.GitDir, absWorktreePath, selection.Branch, baseBranch); err != nil {
+		return fmt.Errorf("creating worktree: %w", err)
+	}
+	if noTrack || selection.Existing {
+		return nil
+	}
+	remote := selection.Remote
+	if remote == "" {
+		remote = config.DefaultRemote
+	}
+	if err := git.SetBranchUpstream(pc.GitDir, selection.Branch, remote); err != nil {
+		// Non-fatal - just inform user if verbose
+		if verbose {
+			ui.PrintInfo(fmt.Sprintf("Could not set up tracking for branch '%s': %v", selection.Branch, err))
+		}
+	} else {
+		ui.PrintSuccess(fmt.Sprintf("Set up tracking for branch '%s' on %s", selection.Branch, remote))
+	}
+	return nil
 }
 
 func branchRefsForSelection(gitDir string) (local, remote []string, err error) {

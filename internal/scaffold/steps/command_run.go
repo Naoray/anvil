@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/naoray/anvil/internal/config"
 	anvil_exec "github.com/naoray/anvil/internal/exec"
 	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 type CommandRunStep struct {
+	target   execTarget
 	command  string
 	storeAs  string
 	executor *anvil_exec.CommandExecutor
@@ -41,8 +43,17 @@ func (s *CommandRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions)
 	if opts.DryRun {
 		return nil
 	}
+	dir, env, err := s.target.resolve(ctx)
+	if err != nil {
+		return fmt.Errorf("command.run: %w", err)
+	}
 	// Use the command executor for testability
-	output, err := s.executor.RunShell(context.Background(), ctx.WorktreePath, s.command)
+	var output []byte
+	if env == nil {
+		output, err = s.executor.RunShell(context.Background(), dir, s.command)
+	} else {
+		output, err = s.executor.RunShellWithEnv(context.Background(), dir, env, s.command)
+	}
 	if err != nil {
 		return fmt.Errorf("command.run failed: %w\n%s", err, string(output))
 	}
@@ -59,4 +70,10 @@ func (s *CommandRunStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions)
 
 func (s *CommandRunStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
 	return true, nil
+}
+
+// WithTarget sets the step's working directory and extra environment.
+func (s *CommandRunStep) WithTarget(cfg config.StepConfig) *CommandRunStep {
+	s.target = newExecTarget(cfg)
+	return s
 }

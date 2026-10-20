@@ -57,28 +57,38 @@ func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]any) (bool, 
 	if err := ValidateConditions(conditions); err != nil {
 		return false, err
 	}
-	return ctx.evaluateCondition(conditions)
+	return ctx.evaluateCondition(ctx.WorktreePath, conditions)
 }
 
-func (ctx *ScaffoldContext) evaluateCondition(cond any) (bool, error) {
+// EvaluateConditionAt evaluates conditions with file paths relative to root
+// instead of the worktree root. Steps with a configured working directory use
+// it so component conditions read their own files.
+func (ctx *ScaffoldContext) EvaluateConditionAt(root string, conditions map[string]any) (bool, error) {
+	if err := ValidateConditions(conditions); err != nil {
+		return false, err
+	}
+	return ctx.evaluateCondition(root, conditions)
+}
+
+func (ctx *ScaffoldContext) evaluateCondition(root string, cond any) (bool, error) {
 	switch c := cond.(type) {
 	case map[string]any:
 		for _, key := range conditionKeys(c) {
-			result, err := ctx.evaluateSingle(key, c[key])
+			result, err := ctx.evaluateSingle(root, key, c[key])
 			if err != nil || !result {
 				return false, err
 			}
 		}
 	case []any:
 		for _, item := range c {
-			result, err := ctx.evaluateCondition(item)
+			result, err := ctx.evaluateCondition(root, item)
 			if err != nil || !result {
 				return false, err
 			}
 		}
 	case []map[string]any:
 		for _, item := range c {
-			result, err := ctx.evaluateCondition(item)
+			result, err := ctx.evaluateCondition(root, item)
 			if err != nil || !result {
 				return false, err
 			}
@@ -98,7 +108,7 @@ func conditionKeys(conditions map[string]any) []string {
 	return keys
 }
 
-func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) {
+func (ctx *ScaffoldContext) evaluateSingle(root, key string, value any) (bool, error) {
 	if list, ok := value.([]string); ok {
 		items := make([]any, len(list))
 		for i, item := range list {
@@ -109,11 +119,11 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 
 	switch key {
 	case "file_exists":
-		return ctx.fileExists(value)
+		return ctx.fileExists(root, value)
 	case "file_contains":
-		return ctx.fileContains(value)
+		return ctx.fileContains(root, value)
 	case "file_has_script":
-		return ctx.fileHasScript(value)
+		return ctx.fileHasScript(root, value)
 	case "command_exists":
 		return ctx.commandExists(value)
 	case "os":
@@ -123,9 +133,9 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 	case "env_not_exists":
 		return ctx.envNotExists(value)
 	case "env_file_contains":
-		return ctx.envFileContains(value)
+		return ctx.envFileContains(root, value)
 	case "env_file_missing":
-		return ctx.envFileMissing(value)
+		return ctx.envFileMissing(root, value)
 	case "context_var":
 		config := value.(map[string]any)
 		ctx.mu.RLock()
@@ -133,7 +143,7 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 		actual, exists := ctx.Vars[config["name"].(string)]
 		return exists && actual == config["value"].(string), nil
 	case "not":
-		result, err := ctx.evaluateCondition(value)
+		result, err := ctx.evaluateCondition(root, value)
 		if err != nil {
 			return false, err
 		}
@@ -143,18 +153,18 @@ func (ctx *ScaffoldContext) evaluateSingle(key string, value any) (bool, error) 
 	}
 }
 
-func (ctx *ScaffoldContext) fileExists(value any) (bool, error) {
+func (ctx *ScaffoldContext) fileExists(root string, value any) (bool, error) {
 	switch v := value.(type) {
 	case string:
 		// Single file
-		fullPath := filepath.Join(ctx.WorktreePath, v)
+		fullPath := filepath.Join(root, v)
 		_, err := os.Stat(fullPath)
 		return err == nil, nil
 	case []any:
 		// Array of files - all must exist
 		for _, item := range v {
 			if path, ok := item.(string); ok {
-				fullPath := filepath.Join(ctx.WorktreePath, path)
+				fullPath := filepath.Join(root, path)
 				_, err := os.Stat(fullPath)
 				if err != nil {
 					return false, nil
@@ -165,7 +175,7 @@ func (ctx *ScaffoldContext) fileExists(value any) (bool, error) {
 	case map[string]any:
 		// Map format with "file" key
 		if p, ok := v["file"].(string); ok {
-			fullPath := filepath.Join(ctx.WorktreePath, p)
+			fullPath := filepath.Join(root, p)
 			_, err := os.Stat(fullPath)
 			return err == nil, nil
 		}
@@ -174,7 +184,7 @@ func (ctx *ScaffoldContext) fileExists(value any) (bool, error) {
 	return false, nil
 }
 
-func (ctx *ScaffoldContext) fileContains(value any) (bool, error) {
+func (ctx *ScaffoldContext) fileContains(root string, value any) (bool, error) {
 	var config struct {
 		File    string `mapstructure:"file"`
 		Pattern string `mapstructure:"pattern"`
@@ -193,7 +203,7 @@ func (ctx *ScaffoldContext) fileContains(value any) (bool, error) {
 		return false, nil
 	}
 
-	fullPath := filepath.Join(ctx.WorktreePath, config.File)
+	fullPath := filepath.Join(root, config.File)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return false, nil
@@ -202,7 +212,7 @@ func (ctx *ScaffoldContext) fileContains(value any) (bool, error) {
 	return strings.Contains(string(data), config.Pattern), nil
 }
 
-func (ctx *ScaffoldContext) fileHasScript(value any) (bool, error) {
+func (ctx *ScaffoldContext) fileHasScript(root string, value any) (bool, error) {
 	var scriptName string
 	switch v := value.(type) {
 	case string:
@@ -217,7 +227,7 @@ func (ctx *ScaffoldContext) fileHasScript(value any) (bool, error) {
 		return false, nil
 	}
 
-	fullPath := filepath.Join(ctx.WorktreePath, "package.json")
+	fullPath := filepath.Join(root, "package.json")
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return false, nil
@@ -311,7 +321,7 @@ func (ctx *ScaffoldContext) envNotExists(value any) (bool, error) {
 	return !exists, nil
 }
 
-func (ctx *ScaffoldContext) envFileContains(value any) (bool, error) {
+func (ctx *ScaffoldContext) envFileContains(root string, value any) (bool, error) {
 	var config struct {
 		File string `mapstructure:"file"`
 		Key  string `mapstructure:"key"`
@@ -331,13 +341,13 @@ func (ctx *ScaffoldContext) envFileContains(value any) (bool, error) {
 		return false, nil
 	}
 
-	env := utils.ReadEnvFile(ctx.WorktreePath, config.File)
+	env := utils.ReadEnvFile(root, config.File)
 	val, exists := env[config.Key]
 	return exists && val != "", nil
 }
 
-func (ctx *ScaffoldContext) envFileMissing(value any) (bool, error) {
-	contains, err := ctx.envFileContains(value)
+func (ctx *ScaffoldContext) envFileMissing(root string, value any) (bool, error) {
+	contains, err := ctx.envFileContains(root, value)
 	if err != nil {
 		return false, err
 	}
