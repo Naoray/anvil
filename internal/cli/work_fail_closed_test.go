@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,8 +48,12 @@ func TestWorkFailsWhenConfiguredDatabaseIsUnreachable(t *testing.T) {
 			yaml := "scaffold:\n  override: true\n  steps:\n    - name: db.create\n      type: " + engine + "\n    - name: command.run\n      command: echo run >> after.count\n"
 			f := newAgentFixture(t, yaml, nil)
 			fakeBin := t.TempDir()
-			script := "#!/bin/sh\necho \"yerd: connection refused\" >&2\nexit 1\n"
-			require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "yerd"), []byte(script), 0o755))
+			// exec.LookPath only finds PATHEXT executables on Windows.
+			name, script := "yerd", "#!/bin/sh\necho \"yerd: connection refused\" >&2\nexit 1\n"
+			if runtime.GOOS == "windows" {
+				name, script = "yerd.bat", "@echo yerd: connection refused 1>&2\r\n@exit /b 1\r\n"
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(fakeBin, name), []byte(script), 0o755))
 			f.env = subprocessEnvFrom(append(f.env, "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH")))
 
 			stdout, stderr, code := f.run(f.repo, "work", "feature/db")
