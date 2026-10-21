@@ -198,9 +198,34 @@ func ResolvePaths(worktreePath, runtimeDir string, patterns []string, env map[st
 			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
 		}
 		sort.Strings(matches)
+		for _, match := range matches {
+			if !resolvesWithin(worktreePath, runtimeDir, match) {
+				return nil, fmt.Errorf("path %q must stay inside the worktree or its runtime directory (%s resolves outside)", pattern, match)
+			}
+		}
 		out[pattern] = matches
 	}
 	return out, nil
+}
+
+// resolvesWithin reports whether path, after following symlinks, is inside
+// the canonical worktree or runtime directory.
+func resolvesWithin(worktreePath, runtimeDir, path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	if within(canonicalRoot(worktreePath), resolved) {
+		return true
+	}
+	return runtimeDir != "" && within(canonicalRoot(runtimeDir), resolved)
+}
+
+func canonicalRoot(root string) string {
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return root
 }
 
 func within(root, path string) bool {

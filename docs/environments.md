@@ -265,6 +265,10 @@ rescored under a new contract without re-recording. Anvil does not infer
 compatibility beyond these explicit identities (see `examples/gaze-like`).
 Reuse is per worktree.
 
+Check `inputs` and `artifacts` must resolve inside the worktree or its runtime
+directory, including through symlinks. An escaping input fails the check
+before any command runs; an escaping artifact is refused rather than hashed.
+
 Logs contain whatever commands print and are stored with mode 0600 in the
 runtime directory; they are referenced by path, never embedded in JSON.
 
