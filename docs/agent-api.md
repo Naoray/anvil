@@ -34,6 +34,10 @@ Rules:
 - Diagnostics, progress and child process output go to **stderr**. stdout
   carries only the envelope, with no ANSI escapes.
 - `--json` never prompts. Agent commands never use partial name matching.
+- Argument and flag errors (unknown flags, extra arguments) also produce one
+  `invalid_arguments` envelope when `--json` appears anywhere before `--`.
+- Mutating commands without a side-effect-free mode refuse `--dry-run` with
+  `invalid_arguments` before any effect; inspect with read-only commands.
 - Secrets are never included. Error messages keep only the first line of a
   failing step's error; full command output is not echoed into JSON.
 
@@ -99,4 +103,15 @@ Step `result` is `ran`, `up_to_date`, `skipped` (with `reason`), `failed` or
 `not_reached`. `prepare.status` is `complete`, `failed`, `running`,
 `interrupted` (a previous run died; the next `ensure` resumes) or `unprepared`.
 `ready` is `true` only when status is `complete`. A failure returns `ok: false`,
-`error.code: "prepare_failed"`, exit status 6 and the partial `data`.
+`error.code: "prepare_failed"` (with `details.failed_step`), exit status 6 and
+the partial `data`. The error message only names the failing step: step errors
+embed command output, which goes to stderr and is never written to JSON or
+`.anvil.local`.
+
+A step that runs again (`--refresh`, changed definition, declared environment,
+inputs or outputs)
+first has its completion record removed, so a failed or interrupted rerun can
+never leave the earlier success in place. `env.read` (which sets template
+variables without `store_as`) always runs, like `store_as` producers. Step
+directories and declared `inputs`/`outputs` must resolve inside the worktree,
+including through symlinks; escapes are refused before any effect.

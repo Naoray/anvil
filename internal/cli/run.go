@@ -94,10 +94,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if status != wtstate.PrepareComplete {
-		if mustGetBool(cmd, "require-ready") {
-			return agentapi.Errorf(agentapi.CodeNotPrepared, "worktree preparation is %s; run 'anvil ensure' first", status)
+		subject := "worktree"
+		if wenv.Component != nil {
+			subject = "component " + wenv.Component.Name
 		}
-		fmt.Fprintf(os.Stderr, "warning: worktree preparation is %s; run 'anvil ensure' to prepare it\n", status)
+		if mustGetBool(cmd, "require-ready") {
+			return agentapi.Errorf(agentapi.CodeNotPrepared, "%s preparation is %s; run 'anvil ensure' first", subject, status)
+		}
+		fmt.Fprintf(os.Stderr, "warning: %s preparation is %s; run 'anvil ensure' to prepare it\n", subject, status)
 	}
 
 	env := wenv.Env.Environ(os.Environ(), nil, runtime.GOOS == "windows")

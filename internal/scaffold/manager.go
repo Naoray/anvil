@@ -197,6 +197,16 @@ func (m *ScaffoldManager) Validate(request ScaffoldRequest) error {
 	if _, err := m.stepsFromConfig(stepConfigs); err != nil {
 		return fmt.Errorf("getting scaffold steps: %w", err)
 	}
+	return checkContainment(request.WorktreePath, stepConfigs)
+}
+
+// ValidateSteps creates steps without running them, validating their
+// options and conditions. Unlike Validate it checks no paths, so it can
+// cover steps of components that do not apply on this machine.
+func (m *ScaffoldManager) ValidateSteps(configs []config.StepConfig) error {
+	if _, err := m.stepsFromConfig(configs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
 	return nil
 }
 
@@ -231,6 +241,9 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	stepsList, err := m.stepsFromConfig(stepConfigs)
 	if err != nil {
 		return nil, fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	if err := checkContainment(worktreePath, stepConfigs); err != nil {
+		return nil, err
 	}
 
 	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
@@ -323,6 +336,20 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 		}
 	}
 	return report, execErr
+}
+
+// checkContainment rejects steps whose directories or declared files escape
+// the worktree through symlinks, before any effect.
+func checkContainment(worktreePath string, configs []config.StepConfig) error {
+	if worktreePath == "" {
+		return nil
+	}
+	for _, cfg := range configs {
+		if err := config.CheckStepContainment(worktreePath, cfg); err != nil {
+			return fmt.Errorf("getting scaffold steps: %w", err)
+		}
+	}
+	return nil
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {

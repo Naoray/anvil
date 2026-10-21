@@ -42,14 +42,3 @@ func pathExistsOrIsBlocked(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil || !errors.Is(err, fs.ErrNotExist)
 }
-
-// childEnvValue reads the effective child environment, keeping the last value.
-func childEnvValue(env []string, name string, insensitive bool) string {
-	for i := len(env) - 1; i >= 0; i-- {
-		key, value, ok := strings.Cut(env[i], "=")
-		if ok && (key == name || (insensitive && strings.EqualFold(key, name))) {
-			return value
-		}
-	}
-	return ""
-}

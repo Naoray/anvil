@@ -38,6 +38,12 @@ var alwaysRunSteps = map[string]bool{
 	"yerd":               true,
 }
 
+// contextProducers set template variables without store_as; skipping them
+// would starve later steps that consume those variables.
+var contextProducers = map[string]bool{
+	config.StepEnvRead: true,
+}
+
 // PrepareReport describes one preparation run.
 type PrepareReport struct {
 	PlanDigest string        `json:"plan_digest"`
@@ -86,7 +92,7 @@ func buildPlan(configs []config.StepConfig, env map[string]string) ([]planEntry,
 			key:        fmt.Sprintf("%s#%s#%d", cfg.Name, definition[:16], occurrences[definition]),
 			definition: definition,
 			cfg:        cfg,
-			cacheable:  !cfg.Always && cfg.StoreAs == "" && !alwaysRunSteps[cfg.Name],
+			cacheable:  !cfg.Always && cfg.StoreAs == "" && !alwaysRunSteps[cfg.Name] && !contextProducers[cfg.Name],
 		}
 		writeHashString(planHash, definition)
 	}
@@ -127,6 +133,9 @@ func InputsDigest(root string, patterns []string) (string, error) {
 			continue
 		}
 		for _, match := range matches {
+			if err := config.CheckResolvedContained(root, match, pattern); err != nil {
+				return "", err
+			}
 			if err := hashTree(h, root, match); err != nil {
 				return "", err
 			}
@@ -182,6 +191,11 @@ func OutputsPresent(root string, patterns []string) (bool, string, error) {
 		if len(matches) == 0 {
 			return false, pattern, nil
 		}
+		for _, match := range matches {
+			if err := config.CheckResolvedContained(root, match, pattern); err != nil {
+				return false, "", err
+			}
+		}
 	}
 	return true, "", nil
 }
@@ -199,31 +213,57 @@ type prepareRecorder struct {
 
 func (r *prepareRecorder) BeforeStep(index int, _ types.ScaffoldStep) (bool, string, error) {
 	entry := r.plan[index]
-	if !r.skipCompleted || !entry.cacheable {
+	if !entry.cacheable {
 		return false, "", nil
 	}
 	record, ok := r.records[entry.key]
-	if !ok || record.Definition != entry.definition {
+	if !ok {
 		return false, "", nil
 	}
-	root := stepRoot(r.worktreePath, entry.cfg)
+	if !r.skipCompleted || record.Definition != entry.definition {
+		return false, "", r.invalidate(entry.key)
+	}
+	current, reason, err := recordCurrent(r.worktreePath, entry, record)
+	if err != nil {
+		return false, "", err
+	}
+	if !current {
+		r.reasons[index] = reason
+		return false, "", r.invalidate(entry.key)
+	}
+	return true, SkipUpToDate, nil
+}
+
+// recordCurrent reports whether a completion record with a matching
+// definition still describes the step's environment, inputs and outputs.
+func recordCurrent(worktreePath string, entry planEntry, record wtstate.StepRecord) (bool, string, error) {
+	root := stepRoot(worktreePath, entry.cfg)
 	inputs, err := InputsDigest(root, entry.cfg.Inputs)
 	if err != nil {
 		return false, "", err
 	}
 	if inputs != record.Inputs {
-		r.reasons[index] = "inputs changed"
-		return false, "", nil
+		return false, "inputs changed", nil
 	}
 	present, missing, err := OutputsPresent(root, entry.cfg.Outputs)
 	if err != nil {
 		return false, "", err
 	}
 	if !present {
-		r.reasons[index] = fmt.Sprintf("output %s missing", missing)
-		return false, "", nil
+		return false, fmt.Sprintf("output %s missing", missing), nil
 	}
-	return true, SkipUpToDate, nil
+	return true, "", nil
+}
+
+// invalidate durably drops a completion record before its step reruns, so
+// a failed or killed rerun can never leave the earlier success in place.
+// Only a later successful run records completion again.
+func (r *prepareRecorder) invalidate(key string) error {
+	if err := wtstate.ForgetStep(r.worktreePath, key); err != nil {
+		return fmt.Errorf("invalidating completion record: %w", err)
+	}
+	delete(r.records, key)
+	return nil
 }
 
 func (r *prepareRecorder) AfterStep(index int, _ types.ScaffoldStep, stepErr error) error {

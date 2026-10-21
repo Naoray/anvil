@@ -17,7 +17,7 @@ func TestEnsureYarnLinkerPreparationIsIdempotent(t *testing.T) {
 				"web/.yarnrc.yml":  "nodeLinker: " + linker + "\n",
 			})
 			fakeToolchain(t, f, "node", "yarn")
-			bin := filepath.SplitList(childEnvValue(f.env, "PATH", false))[0]
+			bin := filepath.SplitList(environValue(f.env, "PATH"))[0]
 			script := "#!/bin/sh\necho run >> installer.count\ncase \"$(cat .yarnrc.yml)\" in\n *node-modules*) mkdir -p node_modules;;\n *) touch .pnp.cjs;;\nesac\n"
 			require.NoError(t, os.WriteFile(filepath.Join(bin, "yarn"), []byte(script), 0o755))
 			_, stderr, code := f.runJSON(f.repo, "ensure", "feature/yarn")
