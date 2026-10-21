@@ -24,7 +24,7 @@ func lookPathIn(command, dir string, env []string) (string, error) {
 		return findExecutable(candidate, env)
 	}
 	var blocked error
-	for _, entry := range filepath.SplitList(envValue(env, "PATH")) {
+	for _, entry := range filepath.SplitList(environValue(env, "PATH")) {
 		if entry == "" || !filepath.IsAbs(entry) {
 			continue
 		}
@@ -69,7 +69,7 @@ func executableCandidates(candidate string, env []string) []string {
 	if runtime.GOOS != "windows" {
 		return []string{candidate}
 	}
-	pathext := envValue(env, "PATHEXT")
+	pathext := environValue(env, "PATHEXT")
 	if pathext == "" {
 		pathext = ".COM;.EXE;.BAT;.CMD"
 	}
@@ -92,9 +92,9 @@ func executableCandidates(candidate string, env []string) []string {
 	return out
 }
 
-// envValue returns the last value of key in env (case-insensitively on
+// environValue returns the last value of key in env (case-insensitively on
 // Windows, where environment names are case-insensitive).
-func envValue(env []string, key string) string {
+func environValue(env []string, key string) string {
 	value := ""
 	for _, entry := range env {
 		name, v, ok := strings.Cut(entry, "=")
