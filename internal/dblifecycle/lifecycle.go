@@ -190,6 +190,8 @@ type RegisteredWorktree struct {
 
 // RegisteredWorktrees parses `git worktree list --porcelain -z`, including
 // lock state: Git never prunes a locked entry whose directory is absent.
+// Paths are returned in the platform's native form (Git for Windows reports
+// C:/... with forward slashes) so messages and comparisons use one spelling.
 func RegisteredWorktrees(path string) ([]RegisteredWorktree, error) {
 	out, err := exec.Command("git", "-C", path, "worktree", "list", "--porcelain", "-z").Output()
 	if err != nil {
@@ -199,7 +201,7 @@ func RegisteredWorktrees(path string) ([]RegisteredWorktree, error) {
 	for _, field := range strings.Split(string(out), "\x00") {
 		switch {
 		case strings.HasPrefix(field, "worktree "):
-			worktrees = append(worktrees, RegisteredWorktree{Path: strings.TrimPrefix(field, "worktree ")})
+			worktrees = append(worktrees, RegisteredWorktree{Path: filepath.Clean(filepath.FromSlash(strings.TrimPrefix(field, "worktree ")))})
 		case len(worktrees) == 0:
 		case field == "locked":
 			worktrees[len(worktrees)-1].Locked = true

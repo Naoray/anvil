@@ -14,7 +14,10 @@ import (
 
 func gitFixture(t *testing.T) (string, string) {
 	t.Helper()
-	base := t.TempDir()
+	// Git reports canonical paths (long names on Windows, resolved symlinks
+	// such as /private/var on macOS); build expectations in the same form.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	root := filepath.Join(base, "repo")
 	out, err := exec.Command("git", "init", root).CombinedOutput()
 	require.NoError(t, err, string(out))
