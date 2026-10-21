@@ -141,3 +141,9 @@ A non-passing check sets `ok: false`, `error.code: "check_failed"` with
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
 `locks`, `commands`, `latest` (a result or `null`), `assessment`
 (`current`, `passing_and_current`, `stale_reasons[]`) and `lock_holders[]`.
+
+Check identities fingerprint each resolved command directory and effective
+non-secret environment, including component values, expanded command overrides
+and inherited process variables. Execution receives the same snapshot. Values
+are never stored. Names marked by `secret_env` or Anvil's secret-name heuristic
+contribute a placeholder, so changing only a secret does not invalidate reuse.

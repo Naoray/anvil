@@ -34,6 +34,7 @@ type RunRequest struct {
 	LockWait     time.Duration
 	AnvilVersion string
 	Unset        []string
+	SecretEnv    []string
 	Now          func() time.Time
 }
 
@@ -65,10 +66,17 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	defer func() { err = errors.Join(err, active.Release()) }()
 
-	identity, err := ComputeIdentity(ctx, IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env})
+	identityReq := IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
+	targets, err := resolveTargets(identityReq)
+	if err != nil {
+		return nil, err
+	}
+	identityReq.Targets = targets
+	identity, err := ComputeIdentity(ctx, identityReq)
 	if err != nil {
 		return nil, fmt.Errorf("computing check identity: %w", err)
 	}
+
 	started := req.now().UTC()
 	runID, err := newRunID(started)
 	if err != nil {
@@ -110,7 +118,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	result.Status = StatusPassed
 	for i, command := range req.Check.Commands {
-		commandResult, status, runErr := runCommand(ctx, checkCtx, req, command, identity, runID, runDir, i)
+		commandResult, status, runErr := runCommand(ctx, checkCtx, req, command, targets[i], identity, runID, runDir, i)
 		result.Commands = append(result.Commands, commandResult)
 		if runErr != nil {
 			result.Status, result.Error, result.ExitCode = StatusError, runErr.Error(), 1
@@ -156,11 +164,7 @@ func checkVariables(check string, identity Identity, runID, runDir string) []wor
 	return vars
 }
 
-func runCommand(parent, ctx context.Context, req RunRequest, command config.CheckCommand, identity Identity, runID, runDir string, index int) (CommandResult, string, error) {
-	target, err := req.Resolve(command)
-	if err != nil {
-		return CommandResult{Run: command.Run}, StatusError, err
-	}
+func runCommand(parent, ctx context.Context, req RunRequest, command config.CheckCommand, target CommandTarget, identity Identity, runID, runDir string, index int) (CommandResult, string, error) {
 	for _, variable := range checkVariables(req.Check.Name, identity, runID, runDir) {
 		target.Env.Set(variable)
 	}
@@ -183,7 +187,7 @@ func runCommand(parent, ctx context.Context, req RunRequest, command config.Chec
 	}
 	cmd := exec.CommandContext(commandCtx, "sh", "-c", command.Run)
 	cmd.Dir = target.Dir
-	cmd.Env = target.Env.Environ(os.Environ(), req.Unset, false)
+	cmd.Env = target.Env.Environ(nil, nil, false)
 	var output io.Writer = logFile
 	if req.Output != nil {
 		output = io.MultiWriter(logFile, req.Output)

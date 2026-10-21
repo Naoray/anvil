@@ -63,6 +63,10 @@ type IdentityRequest struct {
 	RuntimeDir   string
 	Check        config.CheckConfig
 	Env          *workenv.Environment
+	Resolve      func(config.CheckCommand) (CommandTarget, error)
+	Targets      []CommandTarget
+	Unset        []string
+	SecretEnv    []string
 }
 
 const probeTimeout = 15 * time.Second
@@ -112,19 +116,33 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 	}
 	identity.ToolchainDigest = digestFields(toolFields...)
 
-	// Values are hashed, never stored. Secret values are excluded from the
-	// digest entirely so a low-entropy secret cannot be recovered from it.
-	var envFields []string
-	for _, variable := range req.Env.Variables() {
-		identity.EnvNames = append(identity.EnvNames, variable.Name)
-		value := variable.Value
-		if variable.Secret {
-			value = "<secret>"
+	// Resolve exactly the environments execution uses, including inheritance.
+	targets := req.Targets
+	if targets == nil {
+		targets, err = resolveTargets(req)
+		if err != nil {
+			return Identity{}, err
 		}
-		envFields = append(envFields, variable.Name+"="+value)
+	}
+	var envFields []string
+	names := map[string]bool{}
+	for i, target := range targets {
+		fields := []string{target.Dir}
+		for _, variable := range target.Env.Variables() {
+			names[variable.Name] = true
+			value := variable.Value
+			if variable.Secret {
+				value = "<secret>"
+			}
+			fields = append(fields, variable.Name+"="+value)
+		}
+		sort.Strings(fields[1:])
+		envFields = append(envFields, fmt.Sprint(i), digestFields(fields...))
+	}
+	for name := range names {
+		identity.EnvNames = append(identity.EnvNames, name)
 	}
 	sort.Strings(identity.EnvNames)
-	sort.Strings(envFields)
 	identity.EnvDigest = digestFields(envFields...)
 
 	paths, err := ResolvePaths(req.WorktreePath, req.RuntimeDir, req.Check.Inputs, envMap)
@@ -269,4 +287,39 @@ func fileDigest(path string) (string, int64, error) {
 		return "", 0, err
 	}
 	return hex.EncodeToString(h.Sum(nil)), size, nil
+}
+
+// effectiveEnvironment snapshots inherited values once. Only hashes, names and
+// secret placeholders are persisted; execution uses this same in-memory set.
+func effectiveEnvironment(env *workenv.Environment, unset, secrets []string) *workenv.Environment {
+	out := &workenv.Environment{}
+	for _, entry := range env.Environ(os.Environ(), unset, runtime.GOOS == "windows") {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		out.Set(workenv.Variable{Name: name, Value: value, Secret: workenv.IsSecretName(name, secrets)})
+	}
+	for _, variable := range env.Variables() {
+		variable.Secret = variable.Secret || workenv.IsSecretName(variable.Name, secrets)
+		out.Set(variable)
+	}
+	return out
+}
+
+func resolveTargets(req IdentityRequest) ([]CommandTarget, error) {
+	targets := make([]CommandTarget, 0, len(req.Check.Commands))
+	for _, command := range req.Check.Commands {
+		target := CommandTarget{Dir: req.WorktreePath, Env: req.Env}
+		if req.Resolve != nil {
+			var err error
+			target, err = req.Resolve(command)
+			if err != nil {
+				return nil, err
+			}
+		}
+		target.Env = effectiveEnvironment(target.Env, req.Unset, req.SecretEnv)
+		targets = append(targets, target)
+	}
+	return targets, nil
 }
