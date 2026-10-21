@@ -146,7 +146,8 @@ anvil remove feature/user-auth
 anvil remove feature-user-auth --dry-run
 anvil remove feature-user-auth --dry-run --json   # one anvil.agent/v1 plan document
 
-# Clean up merged worktrees
+# Clean up merged worktrees interactively (merge state and leases only;
+# agents and scripts should use prune candidates/apply instead of --force)
 anvil prune
 
 # Preview every merged worktree without prompting or fetching
@@ -158,6 +159,7 @@ anvil adopt --all
 # Evidence-based bulk prune: list candidates, then apply after rechecking
 anvil prune candidates --json --output candidates.json
 anvil prune apply --from candidates.json --dry-run
+anvil prune apply --from candidates.json --force
 
 # Run scaffold steps on an existing worktree
 anvil scaffold main
@@ -459,12 +461,14 @@ owner is never replaced (`lease_held`, exit 7).
 
 ### `anvil prune candidates` / `anvil prune apply`
 
-An auditable alternative to interactive `anvil prune` for one project:
+An auditable alternative to `anvil prune` for one project. Legacy `anvil prune
+--force` only checks merge state and leases (no activity, open-file, unpushed
+or ignored-file evidence), so agents and scripts should use these instead:
 
 ```bash
 anvil prune candidates --json --output candidates.json   # read-only
 anvil prune apply --from candidates.json --dry-run        # recheck, change nothing
-anvil prune apply --from candidates.json --json           # recheck, then remove
+anvil prune apply --from candidates.json --force --json   # recheck, then remove
 ```
 
 `candidates` lists every worktree with `candidate`, `reasons[]` and
@@ -504,8 +508,10 @@ until adopted.
 - **Recent activity** (`--recent`, default `24h`, minimum `10m`; it cannot be
   disabled): the newest of the HEAD reflog (a missing reflog only warns),
   tracked, untracked and ignored file modification times (excluding
-  `node_modules`, `vendor` and `.git`), the lease renewal and the latest check
-  result. Running checks always block.
+  `node_modules`, `vendor` and `.git`), the lease renewal, the latest check
+  result, the preparation record and the `.anvil.local` modification time (so
+  a just-ensured worktree nobody has entered yet is kept). Running checks
+  always block.
 - **Open files**: on Linux every `/proc/<pid>` is inspected for `cwd`, `root`,
   `exe`, open descriptors and memory maps beneath the worktree (a shell whose
   current directory is inside it counts); on macOS `lsof` is used; elsewhere
@@ -520,11 +526,16 @@ until adopted.
   invisible to `lsof` and reported as `null`). A root-owned container (Docker,
   Laravel Sail) or another account using the worktree is therefore **not
   detected** unless you pass `--strict-processes`, which makes them block (on
-  macOS it always blocks, since they cannot be inspected there). Processes in
-  other mount or PID namespaces are not detected at all. The default is
-  permissive here only because system daemons are always uninspectable for
-  non-root users, so blocking would make pruning unusable; use leases or
-  `--strict-processes` when containers share worktrees.
+  macOS it always blocks, since they cannot be inspected there). The default
+  is permissive here only because system daemons are always uninspectable for
+  non-root users, so blocking would make pruning unusable.
+- **Mount namespaces**: a process in another mount namespace (a container
+  started as your user, snap or flatpak apps) sees namespace-local paths that
+  cannot be mapped to the worktree. Your own such processes block ("runs in
+  another mount namespace"); other users' follow the rule above. Kernel threads
+  are ignored. Containers that share worktrees (Docker, Sail) should hold a
+  lease (`anvil lease acquire`); sandboxed desktop apps may need
+  `--allow-uninspectable NAME`.
 
 `apply` validates the file (schema `anvil.prune-candidates/v1`, the same Git
 common directory as the current project) and, for each entry marked
@@ -537,7 +548,8 @@ and process flags apply, only ever strengthened by the file's settings
 (ignored paths may be deleted only if both the file and the current
 invocation allow them), so a stale or edited file cannot override current
 checks. Removal goes through the
-same lifecycle as `anvil remove` (never `--ignore-lease`; `--keep-db`
+same lifecycle as `anvil remove` and requires `--force` unless `--dry-run`
+(never `--ignore-lease`; `--keep-db`
 supported; branches are kept). A process that starts using the worktree outside
 Anvil between the final recheck and `git worktree remove` is not detected.
 

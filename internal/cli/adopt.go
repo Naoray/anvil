@@ -109,7 +109,13 @@ func runAdopt(cmd *cobra.Command, args []string) (agentResult, error) {
 	var failures []error
 	for index, wt := range targets {
 		entry, entryWarnings, err := adoptOne(pc, wt, all && isMainWorktree(pc, wt, index), opts, dryRun)
-		warnings = append(warnings, entryWarnings...)
+		for _, warning := range entryWarnings {
+			if all {
+				// Several worktrees report; name the one each warning is about.
+				warning = wt.Path + ": " + warning
+			}
+			warnings = append(warnings, warning)
+		}
 		if err != nil {
 			classified := agentapi.Wrap(agentapi.CodeInternal, err)
 			entry.Error = &agentapi.ErrorBody{Code: classified.Code, Message: classified.Message}
@@ -138,14 +144,16 @@ func isMainWorktree(pc *ProjectContext, wt git.Worktree, index int) bool {
 // adoptOne records identity and the requested lease for one worktree, or
 // predicts both with dryRun.
 func adoptOne(pc *ProjectContext, wt git.Worktree, skipMain bool, opts leaseOptions, dryRun bool) (adoptEntry, []string, error) {
-	entry := adoptEntry{Worktree: worktreeSummary{Name: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached}, Action: adoptSkipped}
+	entry := adoptEntry{Worktree: worktreeSummary{Name: filepath.Base(wt.Path), Path: wt.Path, Branch: wt.Branch, Detached: wt.Detached, IdentityStatus: identityUnknown}, Action: adoptSkipped}
 	switch {
 	case wt.Bare:
 		entry.Reason = "bare repository entry"
 		return entry, nil, nil
 	case skipMain:
 		entry.Reason = "main checkout (name it explicitly to adopt it)"
-		return entry, nil, nil
+		summary, warnings := summarizeWorktree(wt)
+		entry.Worktree = withKnownIdentityStatus(summary)
+		return entry, warnings, nil
 	}
 	if _, err := os.Stat(wt.Path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -162,6 +170,7 @@ func adoptOne(pc *ProjectContext, wt git.Worktree, skipMain bool, opts leaseOpti
 			return entry, nil, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
 		entry.Worktree, warnings = summarizeWorktree(wt)
+		entry.Worktree = withKnownIdentityStatus(entry.Worktree)
 		entry.Action, entry.Reason = describeAdoption(identity, status)
 		entry.Lease, err = previewLeaseOptions(wt.Path, opts, now, &warnings)
 		return entry, warnings, err
@@ -188,7 +197,7 @@ func adoptOne(pc *ProjectContext, wt git.Worktree, skipMain bool, opts leaseOpti
 		err = agentapi.Wrap(agentapi.CodeInternal, err)
 	}
 	summary, summaryWarnings := summarizeWorktree(wt)
-	entry.Worktree = summary
+	entry.Worktree = withKnownIdentityStatus(summary)
 	warnings = append(warnings, summaryWarnings...)
 	if entry.Lease == nil && err != nil {
 		// Report the lease that blocked acquisition, never a token.
@@ -201,6 +210,17 @@ func adoptOne(pc *ProjectContext, wt git.Worktree, skipMain bool, opts leaseOpti
 
 // describeAdoption maps the identity status found before adoption to the
 // action adoption takes.
+// identityUnknown marks a worktree whose identity could not be read (for
+// example because its directory is missing).
+const identityUnknown = "unknown"
+
+func withKnownIdentityStatus(summary worktreeSummary) worktreeSummary {
+	if summary.IdentityStatus == "" {
+		summary.IdentityStatus = identityUnknown
+	}
+	return summary
+}
+
 func describeAdoption(identity *wtstate.Identity, status wtstate.IdentityStatus) (string, string) {
 	switch status {
 	case wtstate.IdentityOK:

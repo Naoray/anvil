@@ -104,6 +104,10 @@ type activitySources struct {
 	LeaseRenewed *time.Time `json:"lease_renewed,omitempty"`
 	CheckResult  *time.Time `json:"check_result,omitempty"`
 	IgnoredFiles *time.Time `json:"ignored_files,omitempty"`
+	// Preparation is the latest preparation start or finish; LocalState
+	// the .anvil.local modification time (identity, lease, preparation).
+	Preparation *time.Time `json:"preparation,omitempty"`
+	LocalState  *time.Time `json:"local_state,omitempty"`
 }
 
 type activityEvidence struct {
@@ -125,7 +129,10 @@ type openFilesEvidence struct {
 	// counted (lsof).
 	SkippedOtherUsers *int            `json:"skipped_other_users"`
 	UninspectableOwn  []procs.Process `json:"uninspectable_own"`
-	Error             string          `json:"error,omitempty"`
+	// ForeignNamespaceOwn are own processes in another mount namespace;
+	// their open files cannot be mapped to this worktree.
+	ForeignNamespaceOwn []procs.Process `json:"foreign_namespace_own"`
+	Error               string          `json:"error,omitempty"`
 }
 
 // pruneCollectors gather each kind of safety evidence. Every collector
@@ -487,6 +494,22 @@ func activitySourcesOf(path, worktreeID string) (activitySources, []string, erro
 		}
 	}
 
+	prepare, err := wtstate.ReadPrepare(path)
+	if err != nil {
+		return sources, nil, fmt.Errorf("reading preparation record: %w", err)
+	}
+	if prepare != nil {
+		sources.Preparation = newest(nil, prepare.StartedAt)
+		if prepare.FinishedAt != nil {
+			sources.Preparation = newest(sources.Preparation, *prepare.FinishedAt)
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(path, config.LocalStateFile)); err == nil {
+		sources.LocalState = newest(nil, info.ModTime())
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return sources, nil, fmt.Errorf("reading %s: %w", config.LocalStateFile, err)
+	}
+
 	if worktreeID == "" {
 		return sources, running, nil
 	}
@@ -535,7 +558,7 @@ func classifyActivity(sources activitySources, now time.Time, threshold time.Dur
 	for _, source := range []struct {
 		name string
 		at   *time.Time
-	}{{"head_reflog", sources.HeadReflog}, {"files", sources.Files}, {"lease_renewed", sources.LeaseRenewed}, {"check_result", sources.CheckResult}, {"ignored_files", sources.IgnoredFiles}} {
+	}{{"head_reflog", sources.HeadReflog}, {"files", sources.Files}, {"lease_renewed", sources.LeaseRenewed}, {"check_result", sources.CheckResult}, {"ignored_files", sources.IgnoredFiles}, {"preparation", sources.Preparation}, {"local_state", sources.LocalState}} {
 		if source.at != nil && (evidence.LatestAt == nil || source.at.After(*evidence.LatestAt)) {
 			evidence.LatestAt, evidence.LatestSource = source.at, source.name
 		}
@@ -547,7 +570,7 @@ func classifyActivity(sources activitySources, now time.Time, threshold time.Dur
 }
 
 func collectOpenFiles(snapshot func() (procs.Snapshot, error), path string) openFilesEvidence {
-	evidence := openFilesEvidence{Method: "unsupported", Holders: []procs.Holder{}, UninspectableOwn: []procs.Process{}}
+	evidence := openFilesEvidence{Method: "unsupported", Holders: []procs.Holder{}, UninspectableOwn: []procs.Process{}, ForeignNamespaceOwn: []procs.Process{}}
 	scan, err := snapshot()
 	if err != nil {
 		if scan.Method != "" {
@@ -568,6 +591,7 @@ func collectOpenFiles(snapshot func() (procs.Snapshot, error), path string) open
 		evidence.SkippedOtherUsers = &skipped
 	}
 	evidence.UninspectableOwn = append(evidence.UninspectableOwn, scan.UninspectableOwn...)
+	evidence.ForeignNamespaceOwn = append(evidence.ForeignNamespaceOwn, scan.ForeignNamespaceOwn...)
 	return evidence
 }
 

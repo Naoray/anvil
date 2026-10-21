@@ -58,7 +58,11 @@ type Snapshot struct {
 	// inspected (for example non-dumpable agents); their open files are
 	// unknown.
 	UninspectableOwn []Process
-	processes        []processPaths
+	// ForeignNamespaceOwn lists this user's processes in another mount
+	// namespace (containers, sandboxed apps): their paths cannot be mapped to
+	// this filesystem view, so what they hold open is unknown.
+	ForeignNamespaceOwn []Process
+	processes           []processPaths
 }
 
 // Holders returns the processes referencing dir or anything beneath it,

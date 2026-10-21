@@ -273,6 +273,15 @@ func (s pruneScan) assessOpenFiles(c *pruneCandidate, ev openFilesEvidence) {
 	if len(allowed) > 0 {
 		c.Warnings = append(c.Warnings, "not inspected (--allow-uninspectable): "+strings.Join(allowed, ", "))
 	}
+	for _, process := range ev.ForeignNamespaceOwn {
+		message := fmt.Sprintf("process %d (%s) runs in another mount namespace; its open files cannot be mapped to this worktree", process.PID, orUnknown(process.Command))
+		if process.Command != "" && slices.Contains(s.Settings.AllowUninspectable, process.Command) {
+			c.Warnings = append(c.Warnings, message+" (allowed by --allow-uninspectable)")
+		} else {
+			block("%s (use leases for containers sharing worktrees; pass --allow-uninspectable NAME if it cannot use any worktree)", message)
+			unknown = append(unknown, process.Command)
+		}
+	}
 	switch {
 	case ev.SkippedOtherUsers == nil:
 		// lsof silently omits processes it may not inspect.
@@ -479,7 +488,8 @@ func newPruneCandidatesCommand() *cobra.Command {
     and --protect (glob on branch or folder name); the default branch always
   - recent activity: newest HEAD reflog entry (a missing reflog only warns),
     tracked, untracked and ignored file mtimes (node_modules, vendor and .git
-    excluded), lease renewal and check result, within --recent (default 24h,
+    excluded), lease renewal, check result, preparation record and
+    .anvil.local modification, within --recent (default 24h,
     minimum 10m; the check cannot be disabled)
   - processes holding anything beneath the worktree open: cwd, root, exe,
     file descriptors or memory maps (/proc on Linux, lsof on macOS)
@@ -493,12 +503,18 @@ inspected (on Linux counted as skipped_other_users; on macOS invisible to
 lsof and reported as null) only warn by default, so a root-owned container
 (Docker, Sail) or another account using the worktree is NOT detected unless
 --strict-processes is given (which then blocks; on macOS it always blocks).
-Processes in other mount or PID namespaces are not detected at all. Blocking
-by default would make prune unusable for non-root users, because system
-daemons are always uninspectable. Your own uninspectable processes block;
---allow-uninspectable NAME exempts every process with that command name
-(the kernel's comm, truncated to 15 characters and settable by any process
-of the same user) in every worktree. The main checkout, bare, detached, locked and missing worktrees
+Processes in another mount namespace (containers, snap/flatpak apps) see
+namespace-local paths that cannot be mapped to this worktree: your own block
+("runs in another mount namespace"), other users' follow the rule above.
+Kernel threads are ignored. Blocking other users' processes by default would make
+prune unusable for non-root users, because system daemons are always
+uninspectable. Containers sharing worktrees should hold leases. Your own
+uninspectable processes block; --allow-uninspectable NAME exempts every
+process with that command name (the kernel's comm, truncated to 15
+characters and settable by any process of the same user) in every worktree,
+which snap/flatpak apps may need.
+
+The main checkout, bare, detached, locked and missing worktrees
 and the default branch are listed as non-candidates. Worktrees without an
 Anvil identity are blocked until adopted ('anvil adopt --all').
 

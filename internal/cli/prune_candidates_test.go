@@ -299,3 +299,18 @@ func TestRemoveLifecycleRecheckRunsUnderExclusiveGateBeforeAnyEffect(t *testing.
 	require.NoFileExists(t, marker, "no cleanup step runs after a failed recheck")
 	require.DirExists(t, target)
 }
+
+func TestPruneEvaluateForeignMountNamespaceBlocks(t *testing.T) {
+	collectors := safeCollectors()
+	collectors.openFiles = func(string) openFilesEvidence {
+		return openFilesEvidence{Method: procs.MethodProcfs, Holders: []procs.Holder{}, SkippedOtherUsers: intPointer(0),
+			ForeignNamespaceOwn: []procs.Process{{PID: 77, Command: "containerd-shim"}}}
+	}
+	candidate := evaluateSafe(t, collectors, pruneSettings{})
+	require.False(t, candidate.Candidate)
+	require.True(t, hasBlocker(candidate, "process 77 (containerd-shim) runs in another mount namespace; its open files cannot be mapped to this worktree"), candidate.Blockers)
+
+	candidate = evaluateSafe(t, collectors, pruneSettings{AllowUninspectable: []string{"containerd-shim"}})
+	require.True(t, candidate.Candidate, candidate.Blockers)
+	require.Contains(t, strings.Join(candidate.Warnings, "\n"), "another mount namespace")
+}

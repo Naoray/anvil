@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `anvil adopt [WORKTREE] | --all` records Anvil identity (and, with `--lease-owner`, a lease) for existing worktrees without scaffolding; safe to retry, keeps moved/copied semantics of `ensure`, never replaces another owner's active lease; `--dry-run` and `--json`.
+- `anvil prune candidates` (read-only) reports per-worktree prune candidacy with reasons, blockers and evidence: merge and GitHub PR state, unpushed commits, tracked/untracked/ignored files, leases, protected patterns (`prune.protected`, `--protect`), recent activity (minimum 10m window) and processes holding files open (procfs on Linux including mount namespaces, lsof on macOS). Missing evidence blocks.
+- `anvil prune apply --from FILE --force|--dry-run` removes only the file's candidates after validating them against the current repository and rechecking all evidence, last under the exclusive lifecycle gate; a stale or edited file cannot weaken current checks.
+
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.

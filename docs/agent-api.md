@@ -71,7 +71,7 @@ Codes are stable and never reused for a different meaning.
 | `anvil remove WT --json` (`--force` or `--dry-run`) | yes | Remove a worktree with cleanup, or preview the plan |
 | `anvil adopt [WT] \| --all --json` | yes (`--dry-run`) | Record identity (and optionally a lease) for existing worktrees without scaffolding |
 | `anvil prune candidates --json [--output FILE]` | no | Per-worktree prune candidacy with reasons, blockers and evidence (never fetches, never rewrites indexes) |
-| `anvil prune apply --from FILE --json` | yes (`--dry-run`) | Recheck and remove the file's candidates |
+| `anvil prune apply --from FILE --json` (`--force` or `--dry-run`) | yes | Recheck and remove the file's candidates |
 | `anvil run [WT] -- CMD` | no (state) | Exec in the worktree environment; child stdio and exit status are the child's own |
 
 Read-only commands never write `.anvil.local`, allocate ports or create
@@ -102,7 +102,8 @@ key Anvil uses for ownership. Branch names are not unique identifiers.
 }
 ```
 
-`identity_status` is `ok`, `missing` (never prepared), `moved` (path changed;
+`identity_status` is `ok`, `missing` (never prepared), `unknown` (identity
+could not be read, for example a missing directory or a bare entry), `moved` (path changed;
 the ID is kept on the next `ensure` or `adopt`) or `copied` (another directory holds the
 same ID; the copy receives a new ID and drops the original's lease and process
 records on the next `ensure` or `adopt`, and is never treated as their owner).
@@ -347,7 +348,7 @@ the first one's code is used. `--all` together with `WORKTREE` is
                      "sources": {"head_reflog": "…", "files": "…", "lease_renewed": "…", "check_result": "…", "ignored_files": "…"},
                      "running_checks": [], "warnings": []},
         "open_files": {"method": "procfs", "holders": [{"pid": 4242, "command": "vim", "via": ["fd"], "path": "…"}],
-                       "skipped_other_users": 0, "uninspectable_own": []}
+                       "skipped_other_users": 0, "uninspectable_own": [], "foreign_namespace_own": []}
       }
     }
   ]
@@ -383,12 +384,23 @@ on macOS, where `lsof` cannot see them at all (a warning is emitted on every
 scan). A root-owned container (Docker, Sail) or another account using the
 worktree is therefore not detected unless `--strict-processes` is given, which
 blocks on them (always on macOS: "other users' processes cannot be inspected on
-this platform"). Processes in other mount or PID namespaces are never
-detected. The permissive default exists because system daemons are always
-uninspectable for non-root users. Nothing is fetched unless `--fetch`. Worktrees without an `ok` identity
+this platform"). The permissive default exists because system daemons are
+always uninspectable for non-root users. Processes in another mount namespace
+(containers, snap/flatpak apps) cannot have their paths mapped: own ones are
+listed in `foreign_namespace_own` and block ("runs in another mount
+namespace") unless named by `--allow-uninspectable`; other users' are counted
+in `skipped_other_users`; kernel threads are ignored. Containers sharing a
+worktree should hold a lease. Activity sources also include `preparation`
+(the preparation record's start/finish) and `local_state` (`.anvil.local`
+mtime). Agents should use `prune candidates`/`prune apply` rather than legacy
+`anvil prune --force`, which only checks merge state and leases. Nothing is fetched unless `--fetch`. Worktrees without an `ok` identity
 are blocked until `anvil adopt`.
 
 ## `anvil prune apply --from FILE --json` (mutating)
+
+Without `--dry-run`, `--force` is required (like `remove --json`; it never
+prompts); otherwise `invalid_arguments` (2) before any effect, also in human
+mode. Each result carries `warnings` from the latest evaluation.
 
 `FILE` is the candidate document or a `prune candidates --json` envelope.
 A wrong schema, malformed file, invalid pattern, a path or worktree ID listed

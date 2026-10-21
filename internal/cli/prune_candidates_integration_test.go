@@ -88,6 +88,9 @@ func pruneArgs(t *testing.T, args ...string) []string {
 		}
 		args = append(args, "--allow-uninspectable", process.Command)
 	}
+	for _, process := range snapshot.ForeignNamespaceOwn {
+		args = append(args, "--allow-uninspectable", process.Command)
+	}
 	return args
 }
 
@@ -326,7 +329,7 @@ func TestPruneApplyRemovesOnlyStillSafeCandidates(t *testing.T) {
 	commitFile(t, paths["d"], "new.txt", "new\n")
 	require.NoError(t, os.WriteFile(filepath.Join(paths["e"], "README.md"), []byte("dirty\n"), 0o644))
 
-	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--force")...)
 	require.Equal(t, 0, code, stderr)
 	require.Equal(t, true, envelope["mutating"])
 	results := applyResults(t, envelope)
@@ -369,7 +372,7 @@ func TestPruneApplyDryRunMutatesNothingAndCurrentThresholdsWin(t *testing.T) {
 
 	// The file was generated with --recent 10m; apply's own larger window
 	// applies, so activity 48h ago now blocks.
-	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "72h")...)
+	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "72h", "--force")...)
 	require.Equal(t, 0, code, stderr)
 	result := applyResults(t, envelope)["feature-a"]
 	require.Equal(t, "skipped", result["outcome"])
@@ -413,7 +416,7 @@ func TestPruneApplyRefusesTamperedFiles(t *testing.T) {
 	}
 	writeCandidates(t, file, doc)
 
-	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--force")...)
 	require.Equal(t, 0, code, stderr)
 	results := applyResults(t, envelope)
 	for _, name := range []string{"x", "y", "z", "w"} {
@@ -430,7 +433,7 @@ func TestPruneApplyRefusesTamperedFiles(t *testing.T) {
 
 	doc["repository"].(map[string]any)["common_dir"] = filepath.Join(other.repo, ".git")
 	writeCandidates(t, file, doc)
-	envelope, _, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	envelope, _, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--force")...)
 	require.Equal(t, 2, code)
 	require.Equal(t, "invalid_arguments", field(t, envelope, "error", "code"))
 
@@ -438,7 +441,7 @@ func TestPruneApplyRefusesTamperedFiles(t *testing.T) {
 	worktrees := doc["worktrees"].([]any)
 	doc["worktrees"] = append(worktrees, worktrees[len(worktrees)-1])
 	writeCandidates(t, file, doc)
-	envelope, _, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	envelope, _, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--force")...)
 	require.Equal(t, 2, code, "duplicate entries are refused")
 	require.Contains(t, field(t, envelope, "error", "message"), "duplicate")
 
@@ -519,7 +522,7 @@ func TestPruneApplyNeverAllowsMoreIgnoredFilesThanTheInvocation(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(late, "storage", "db.sqlite"), []byte("x"), 0o644))
 	require.NoError(t, os.Chtimes(filepath.Join(late, "storage", "db.sqlite"), idleTime, idleTime))
 
-	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--force")...)
 	require.Equal(t, 0, code, stderr)
 	results := applyResults(t, envelope)
 	requireListContains(t, results["feature-env"], "blockers", "ignored path(s) would be deleted")
@@ -527,7 +530,7 @@ func TestPruneApplyNeverAllowsMoreIgnoredFilesThanTheInvocation(t *testing.T) {
 	require.DirExists(t, env)
 	require.DirExists(t, late)
 
-	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--allow-ignored", ".env")...)
+	envelope, stderr, code = f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--allow-ignored", ".env", "--force")...)
 	require.Equal(t, 0, code, stderr)
 	results = applyResults(t, envelope)
 	require.Equal(t, "removed", results["feature-env"]["outcome"], "%v", results["feature-env"])
@@ -557,4 +560,47 @@ func TestPruneCandidatesNeverRewriteTheIndex(t *testing.T) {
 	afterContent, err := os.ReadFile(index)
 	require.NoError(t, err)
 	require.Equal(t, content, afterContent)
+}
+
+func TestPruneApplyRequiresForceUnlessDryRun(t *testing.T) {
+	f := newPruneFixture(t)
+	path := f.addGitWorktree("feature/a", "feature-a")
+	_, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	file, _ := generateCandidates(t, f)
+
+	envelope, _, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	require.Equal(t, 2, code)
+	require.Equal(t, "invalid_arguments", field(t, envelope, "error", "code"))
+	require.Contains(t, field(t, envelope, "error", "message"), "--force")
+	_, stderr, code = f.run(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m")...)
+	require.Equal(t, 2, code, "human mode refuses too")
+	require.Contains(t, stderr, "--force")
+	require.DirExists(t, path)
+}
+
+func TestPruneApplySurfacesEvaluationWarnings(t *testing.T) {
+	f := newPruneFixture(t)
+	path := f.addGitWorktree("feature/a", "feature-a")
+	_, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	file, _ := generateCandidates(t, f)
+	require.NoError(t, os.Remove(filepath.Join(gitRun(t, path, "rev-parse", "--absolute-git-dir"), "logs", "HEAD")))
+	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--dry-run")...)
+	require.Equal(t, 0, code, stderr)
+	result := applyResults(t, envelope)["feature-a"]
+	require.Equal(t, "would_remove", result["outcome"])
+	requireListContains(t, result, "warnings", "reflog unavailable")
+}
+
+func TestPruneCandidatesPreparationIsRecentActivity(t *testing.T) {
+	f := newPruneFixture(t)
+	f.addGitWorktree("feature/prepared", "feature-prepared")
+	// ensure records a preparation (finished now) without touching files.
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature-prepared")
+	require.Equal(t, 0, code, stderr)
+	backdate(t, f)
+	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "candidates", "--recent", "10m")...)
+	require.Equal(t, 0, code, stderr)
+	requireBlocked(t, candidateEntries(t, envelope["data"])["feature-prepared"], "recent activity: preparation")
 }

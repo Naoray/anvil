@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -85,6 +86,8 @@ func TestAdoptAllSkipsMainAndMissingWorktrees(t *testing.T) {
 	main := entries[filepath.Base(f.repo)]
 	require.Equal(t, "skipped", main["action"])
 	require.Contains(t, main["reason"], "main checkout")
+	require.Equal(t, "unknown", field(t, entries["feature-gone"], "worktree", "identity_status"))
+	require.Equal(t, "missing", field(t, main, "worktree", "identity_status"), "a skipped existing worktree is summarized")
 	require.NoFileExists(t, filepath.Join(f.repo, ".anvil.local"))
 
 	envelope, stderr, code = f.runJSON(f.repo, "adopt", "--all")
@@ -190,4 +193,17 @@ func TestAdoptDryRunWithTokenButNoLease(t *testing.T) {
 	require.Equal(t, "adopted", entry["action"])
 	require.Equal(t, "none", field(t, entry, "lease", "state"))
 	require.NoFileExists(t, filepath.Join(path, ".anvil.local"))
+}
+
+func TestAdoptAllPrefixesLeaseWarningsWithPath(t *testing.T) {
+	f := newAgentFixture(t, "scaffold:\n  override: true\n", nil)
+	leased := f.addGitWorktree("feature/leased", "feature-leased")
+	f.addGitWorktree("feature/free", "feature-free")
+	_, stderr, code := f.runJSON(f.repo, "adopt", "feature-leased", "--lease-owner", "codex")
+	require.Equal(t, 0, code, stderr)
+	envelope, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	warnings := field(t, envelope, "warnings").([]any)
+	require.Len(t, warnings, 1)
+	require.True(t, strings.HasPrefix(warnings[0].(string), leased+": "), warnings[0])
 }

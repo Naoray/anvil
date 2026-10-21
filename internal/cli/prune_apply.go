@@ -40,6 +40,8 @@ type pruneApplyResult struct {
 	Code     string          `json:"code,omitempty"`
 	Reason   string          `json:"reason,omitempty"`
 	Blockers []string        `json:"blockers,omitempty"`
+	// Warnings are the latest evaluation's nonfatal findings.
+	Warnings []string `json:"warnings"`
 }
 
 type pruneApplyData struct {
@@ -82,7 +84,8 @@ is refused. Process-detection gaps are those of 'anvil prune candidates'.
 
 Removal uses the same lifecycle as 'anvil remove' (lease, checks,
 preparation and database borrower checks included); --ignore-lease is never
-applied and branches are kept. Per-entry outcome: removed, would_remove
+applied and branches are kept. Without --dry-run, --force is required
+(invalid_arguments otherwise), as for 'anvil remove --json'. Per-entry outcome: removed, would_remove
 (--dry-run), skipped (with code and reason) or failed.
 
 Residual race: a process that starts using a worktree outside Anvil after
@@ -99,6 +102,7 @@ Anvil commands (ensure, check, lease) are excluded by the lifecycle gate.`,
 	addPruneEvidenceFlags(command)
 	command.Flags().String("from", "", "Candidate file written by 'anvil prune candidates --output'")
 	command.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
+	command.Flags().BoolP("force", "f", false, "Required to remove anything (never prompts); preview with --dry-run instead")
 	return command
 }
 
@@ -157,6 +161,9 @@ func runPruneApply(cmd *cobra.Command) (agentResult, error) {
 	if _, err := parseRecentWindow(cmd); err != nil {
 		return agentResult{}, err
 	}
+	if !mustGetBool(cmd, "force") && !mustGetBool(cmd, "dry-run") {
+		return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "prune apply removes worktrees: pass --force, or preview with --dry-run")
+	}
 	doc, err := readCandidateFile(from)
 	if err != nil {
 		return agentResult{}, err
@@ -204,12 +211,13 @@ func runPruneApply(cmd *cobra.Command) (agentResult, error) {
 	var targets []git.Worktree
 	index := map[string]int{}
 	for i, entry := range doc.Worktrees {
-		data.Results[i] = pruneApplyResult{Worktree: entry.Worktree}
+		data.Results[i] = pruneApplyResult{Worktree: entry.Worktree, Warnings: []string{}}
 		if !entry.Candidate {
 			data.Results[i].skip(&applySkip{code: applyCodeNotCandidate, reason: "not a candidate when the file was generated"})
 			continue
 		}
-		target, skip := recheckApplyTarget(pc, scan, entry, worktrees)
+		target, warnings, skip := recheckApplyTarget(pc, scan, entry, worktrees)
+		data.Results[i].Warnings = append(data.Results[i].Warnings, warnings...)
 		if skip != nil {
 			data.Results[i].skip(skip)
 			continue
@@ -229,7 +237,10 @@ func runPruneApply(cmd *cobra.Command) (agentResult, error) {
 		i := index[target.Path]
 		entry := doc.Worktrees[i]
 		ui.PrintStep(fmt.Sprintf("Removing %s...", entry.Worktree.Name))
-		err := applyRemoval(pc, scan, entry, target, removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet}, keepDB, deps)
+		warnings, err := applyRemoval(pc, scan, entry, target, removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet}, keepDB, deps)
+		if warnings != nil {
+			data.Results[i].Warnings = warnings
+		}
 		var skip *applySkip
 		switch {
 		case errors.As(err, &skip):
@@ -282,30 +293,35 @@ func (r *pruneApplyResult) skip(skip *applySkip) {
 
 // applyRemoval removes one revalidated target through the remove lifecycle,
 // rechecking target and evidence again under the exclusive gate.
-func applyRemoval(pc *ProjectContext, scan pruneScan, entry pruneCandidate, target git.Worktree, options removeLifecycleOptions, keepDB bool, deps removeLifecycleDependencies) error {
+// It returns the in-gate evaluation's warnings (nil when it did not run).
+func applyRemoval(pc *ProjectContext, scan pruneScan, entry pruneCandidate, target git.Worktree, options removeLifecycleOptions, keepDB bool, deps removeLifecycleDependencies) ([]string, error) {
 	cleanupOpts, messages, err := planWorktreeCleanup(target.Path, keepDB, options.DryRun, false, deps.readLocalState)
 	if err != nil {
-		return removeRefusal{code: agentapi.CodeCleanupBlocked, err: err}
+		return nil, removeRefusal{code: agentapi.CodeCleanupBlocked, err: err}
 	}
+	var warnings []string
 	options.IgnoreLease = false
 	options.Recheck = func() error {
 		worktrees, err := git.ListWorktrees(pc.GitDir)
 		if err != nil {
 			return agentapi.Wrap(agentapi.CodeGitFailed, err)
 		}
-		if _, skip := recheckApplyTarget(pc, scan, entry, worktrees); skip != nil {
+		_, current, skip := recheckApplyTarget(pc, scan, entry, worktrees)
+		warnings = append([]string{}, current...)
+		if skip != nil {
 			return skip
 		}
 		return nil
 	}
-	return runRemoveLifecycle(pc, target, options, cleanupOpts, messages, deps)
+	err = runRemoveLifecycle(pc, target, options, cleanupOpts, messages, deps)
+	return warnings, err
 }
 
 // recheckApplyTarget validates one file entry against the current
 // repository and collects all evidence again.
-func recheckApplyTarget(pc *ProjectContext, scan pruneScan, entry pruneCandidate, worktrees []git.Worktree) (*git.Worktree, *applySkip) {
-	mismatch := func(format string, args ...any) (*git.Worktree, *applySkip) {
-		return nil, &applySkip{code: applyCodeTargetChanged, reason: fmt.Sprintf(format, args...)}
+func recheckApplyTarget(pc *ProjectContext, scan pruneScan, entry pruneCandidate, worktrees []git.Worktree) (*git.Worktree, []string, *applySkip) {
+	mismatch := func(format string, args ...any) (*git.Worktree, []string, *applySkip) {
+		return nil, nil, &applySkip{code: applyCodeTargetChanged, reason: fmt.Sprintf(format, args...)}
 	}
 	path := entry.Worktree.Path
 	if path == "" || !filepath.IsAbs(path) {
@@ -345,21 +361,22 @@ func recheckApplyTarget(pc *ProjectContext, scan pruneScan, entry pruneCandidate
 		return mismatch("worktree ID %q in the file does not match the current identity %s", entry.Worktree.ID, current)
 	}
 	if target.Branch != entry.Worktree.Branch || target.Detached != entry.Worktree.Detached {
-		return nil, &applySkip{code: applyCodeChanged, reason: fmt.Sprintf("branch changed since the candidate file was generated (was %q, now %q)", entry.Worktree.Branch, target.Branch)}
+		return nil, nil, &applySkip{code: applyCodeChanged, reason: fmt.Sprintf("branch changed since the candidate file was generated (was %q, now %q)", entry.Worktree.Branch, target.Branch)}
 	}
 	head, err := git.HeadCommit(canonical)
 	if err != nil {
-		return nil, &applySkip{code: applyCodeBlocked, reason: "evidence unavailable: HEAD: " + err.Error()}
+		return nil, nil, &applySkip{code: applyCodeBlocked, reason: "evidence unavailable: HEAD: " + err.Error()}
 	}
 	if head != entry.Worktree.Head {
-		return nil, &applySkip{code: applyCodeChanged, reason: fmt.Sprintf("HEAD changed since the candidate file was generated (was %s, now %s)", entry.Worktree.Head, head)}
+		return nil, nil, &applySkip{code: applyCodeChanged, reason: fmt.Sprintf("HEAD changed since the candidate file was generated (was %s, now %s)", entry.Worktree.Head, head)}
 	}
-	summary, _ := summarizeWorktree(*target)
+	summary, warnings := summarizeWorktree(*target)
 	current := scan.evaluate(*target, main, summary)
+	warnings = append(warnings, current.Warnings...)
 	if !current.Candidate {
-		return nil, &applySkip{code: applyCodeBlocked, reason: "blocked by current evidence: " + strings.Join(current.Blockers, "; "), blockers: current.Blockers}
+		return nil, warnings, &applySkip{code: applyCodeBlocked, reason: "blocked by current evidence: " + strings.Join(current.Blockers, "; "), blockers: current.Blockers}
 	}
-	return target, nil
+	return target, warnings, nil
 }
 
 func printPruneApplyHuman(result agentResult) error {
