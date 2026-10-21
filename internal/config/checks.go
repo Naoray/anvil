@@ -33,6 +33,9 @@ type CheckConfig struct {
 	// Toolchain commands (e.g. "cargo --version") whose output is recorded
 	// and becomes part of the result identity.
 	Toolchain []string `yaml:"toolchain" json:"toolchain,omitempty"`
+	// Resources names shared resources (resources.shared) whose identity
+	// becomes part of the result identity. Undeclared resources never do.
+	Resources []string `yaml:"resources" json:"resources,omitempty"`
 }
 
 // CheckCommand is one ordered command of a check. A plain string is
@@ -84,6 +87,15 @@ func (c *Config) FindCheck(name string) (*CheckConfig, bool) {
 	return nil, false
 }
 
+func (c *Config) findShared(name string) (*SharedResource, bool) {
+	for i := range c.Resources.Shared {
+		if c.Resources.Shared[i].Name == name {
+			return &c.Resources.Shared[i], true
+		}
+	}
+	return nil, false
+}
+
 // ParseOptionalDuration parses an empty or Go-syntax duration.
 func ParseOptionalDuration(value string) (time.Duration, error) {
 	if value == "" {
@@ -128,6 +140,20 @@ func (c *Config) validateChecks() error {
 		for _, lock := range check.Locks {
 			if !resourceNamePattern.MatchString(lock) {
 				problems = append(problems, fmt.Errorf("%s: invalid lock name %q", label, lock))
+			}
+		}
+		seenResources := map[string]bool{}
+		for _, name := range check.Resources {
+			if seenResources[name] {
+				problems = append(problems, fmt.Errorf("%s: duplicate resource %q", label, name))
+			}
+			seenResources[name] = true
+			shared, ok := c.findShared(name)
+			switch {
+			case !ok:
+				problems = append(problems, fmt.Errorf("%s: unknown shared resource %q (declare it under resources.shared)", label, name))
+			case shared.Identity == nil:
+				problems = append(problems, fmt.Errorf("%s: shared resource %q declares no identity (set resources.shared identity file, command or directory)", label, name))
 			}
 		}
 		for _, path := range append(append([]string(nil), check.Artifacts...), check.Inputs...) {

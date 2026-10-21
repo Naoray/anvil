@@ -137,6 +137,7 @@ resources:
       path: ~/.cache/seyk/models # absolute, ~ or ${VAR}
       env: SEYK_MODEL_DIR
       required: true             # ensure refuses (before effects) when missing
+      identity: {file: SHA256SUMS}  # how checks that depend on it identify it
 ```
 
 | Variable | Directory |
@@ -164,6 +165,31 @@ currently listening.
 
 **Shared resources** are never copied, written or deleted by Anvil. Read-only
 use is a convention Anvil cannot enforce.
+
+A shared resource that checks depend on declares exactly one `identity`
+method:
+
+| `identity` | Identity |
+|------------|----------|
+| `file: SHA256SUMS` | SHA-256 of that file (relative to the resource path; it must resolve inside the resource, including through symlinks) |
+| `command: "git rev-parse HEAD"` | SHA-256 of the command's stdout, run with `sh -c` in the resource directory under the same supervision and 15-second deadline as toolchain probes, with the inherited process environment only (no worktree variables, inherited `ANVIL_*` values other than `ANVIL_RUNTIME_ROOT` removed, and review worktrees' `env_unset` applied; resource identities are machine-wide unless the output depends on `env_unset` variables). stderr is ignored; a non-zero exit or timeout is an error |
+| `directory: true` | digest of the whole tree: relative paths, type, permission bits, file contents and symlink targets |
+
+`directory` identities cache file digests machine-wide in
+`<runtime root>/cache/resource-identity/<sha256 of the canonical path>.json`,
+keyed by size, mtime, ctime, inode and mode, so unchanged files are not
+re-read; entries whose mtime or ctime is within two seconds of the scan that
+hashed them are never cached, so an edit within the filesystem's timestamp
+granularity is always seen. Only `anvil check` execution writes the cache
+(atomically: temporary file + rename, only when it changed; temporary files
+abandoned for over an hour are removed); `check --list` and `status` only read
+it. The cache is best-effort: an unreadable, corrupt or foreign cache is
+ignored and rebuilt, and a failed write is a warning, never an identity
+failure. Where ctime and inode are unavailable (Windows), the cache is
+disabled and every file is hashed.
+Symlinks inside the tree are not followed: their target text is hashed, and a
+link whose fully resolved target lies outside the resource, or does not
+exist, fails identification (its target's content could change unseen). Sockets, FIFOs and devices fail identification too.
 
 ## Managed processes
 
@@ -210,6 +236,7 @@ checks:
         timeout: 5m
     timeout: 15m
     toolchain: [cargo --version, uv --version]  # output recorded in the identity
+    resources: [models]      # shared resources whose identity is recorded
   benchmark:
     expensive: true          # never implicit; needs --allow-expensive
     reusable: true           # allows --reuse of a current passing result
@@ -247,6 +274,17 @@ nanosecond timestamp). A result records:
 - declared input digests. Inputs must remain inside the worktree or runtime
   directory. Symlinks below either root, including ancestor directories, fail
   identification;
+- the identity of each declared shared resource (`identity.resources[]`:
+  `name`, `path`, `state` `present`/`absent`, `method`, `source`, `digest`, and
+  `resources_digest`). Only resources named in the check's `resources` count;
+  every other shared resource can change freely. A check may only name
+  resources that declare an `identity` (a presence-only dependency would let a
+  changed resource reuse a stale pass). A missing optional resource is a valid
+  `absent` identity; a missing `required` one, a failing or timed-out identity
+  command, or an unreadable file or tree is an error: `anvil check` refuses
+  before running or reusing anything, and `--list`/`status` report
+  `identity unavailable: …` (never current). Checks that declare no resources
+  keep the identity digest of earlier Anvil versions;
 - status (`passed`, `failed`, `timed_out`, `interrupted`, `error`), exit code,
   timings, the commands with their logs, and file artifacts with SHA-256 and size.
   Directory artifacts fail the run and cannot be reused. File patterns such as
@@ -256,6 +294,7 @@ nanosecond timestamp). A result records:
 `assessment.current`, `assessment.passing_and_current` and `stale_reasons`
 (`commit changed`, `uncommitted changes differ`, `check definition changed`,
 `toolchain changed`, `environment changed`, `inputs changed`,
+`shared resource "<name>" changed` / `appeared` / `disappeared`,
 `platform changed`). Only `passing_and_current` may be treated as a pass.
 Ignored files are not part of the working-tree identity; declare them as
 `inputs` when results depend on them. A check that modifies tracked files makes
