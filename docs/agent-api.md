@@ -34,8 +34,8 @@ Rules:
 - Diagnostics, progress and child process output go to **stderr**. stdout
   carries only the envelope, with no ANSI escapes.
 - `--json` never prompts. Agent commands never use partial name matching.
-- Secrets are never included. Error messages keep only the first line of a
-  failing step's error; full command output is not echoed into JSON.
+- Secrets are never included. Preparation errors use a classified summary;
+  failing child output is available only on stderr, never in JSON.
 
 ## Exit codes and error codes
 

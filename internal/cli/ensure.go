@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -138,9 +139,10 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
+		fmt.Fprintf(os.Stderr, "preparation failed: %v\n", runErr)
 		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
 			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("preparation failed: %v", runErr),
+			Message: "preparation failed; see stderr for diagnostics",
 			Cause:   runErr,
 		}
 	}
