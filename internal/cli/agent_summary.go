@@ -16,6 +16,10 @@ type worktreeSummary struct {
 	Branch         string `json:"branch,omitempty"`
 	Detached       bool   `json:"detached"`
 	Head           string `json:"head,omitempty"`
+	// Managed is true iff Anvil holds a valid identity for this path
+	// (identity_status ok or moved): the worktree was prepared or adopted by
+	// Anvil. Agents must not infer it from names or locations.
+	Managed bool `json:"managed"`
 }
 
 // summarizeWorktree reads identity and HEAD without writing anything.
@@ -35,6 +39,7 @@ func summarizeWorktree(wt git.Worktree) (worktreeSummary, []string) {
 		warnings = append(warnings, "cannot read worktree identity: "+err.Error())
 	} else {
 		summary.IdentityStatus = string(status)
+		summary.Managed = status == wtstate.IdentityOK || status == wtstate.IdentityMoved
 		if identity != nil && status != wtstate.IdentityCopied {
 			summary.ID = identity.ID
 		}

@@ -73,6 +73,7 @@ Codes are stable and never reused for a different meaning.
 | `anvil prune candidates --json [--output FILE]` | no | Per-worktree prune candidacy with reasons, blockers and evidence (never fetches unless `--fetch`; never rewrites indexes) |
 | `anvil prune apply --from FILE --json` (`--force` or `--dry-run`) | yes | Recheck and remove the file's candidates |
 | `anvil run [WT] -- CMD` | no (state) | Exec in the worktree environment; child stdio and exit status are the child's own |
+| `anvil version --json` | no | Version, commit, build date, Go version and platform |
 
 Read-only commands never write `.anvil.local`, allocate ports or create
 directories. `check --list` and `status` run only the declared toolchain probe
@@ -100,7 +101,8 @@ key Anvil uses for ownership. Branch names are not unique identifiers.
   "path": "/Users/me/worktrees/app/feature-auth",
   "branch": "feature/auth",
   "detached": false,
-  "head": "<40-hex commit>"
+  "head": "<40-hex commit>",
+  "managed": true
 }
 ```
 
@@ -110,6 +112,18 @@ could not be read, for example a missing directory or a bare entry), `moved`
 (another directory holds the same ID; the copy receives a new ID and drops the
 original's lease and process records on the next `ensure` or `adopt`, and is
 never treated as their owner).
+
+`managed` is `true` iff Anvil holds a valid identity for this path
+(`identity_status` `ok` or `moved`). It is `false` for `missing` (never
+prepared or adopted: for example the main checkout or a plain
+`git worktree add` worktree, until `anvil ensure` adopts it) and for `copied`,
+and when the identity cannot be read (with a warning). Decide whether a
+worktree is Anvil's from `managed`, never from its name or location.
+
+Every payload that describes a worktree (`ensure`, `context`, `status` and
+each `status --all` entry) uses this `worktree` object, the same `lease`
+object (see [Leases](#leases)) and the same readiness semantics (see
+[`anvil status`](#anvil-status---json)).
 
 ## `anvil ensure [WORKTREE] --json` (mutating)
 
@@ -135,7 +149,12 @@ never treated as their owner).
 Step `result` is `ran`, `up_to_date`, `skipped` (with `reason`), `failed` or
 `not_reached`. `prepare.status` is `complete`, `failed`, `running`,
 `interrupted` (a previous run died; the next `ensure` resumes) or `unprepared`.
-`ready` is `true` only when status is `complete`. A failure returns `ok: false`,
+`ready` is `true` only when status is `complete`. `data.ready` has the same
+semantics as `status` and `context`: preparation refuses unmet component
+requirements and missing required shared resources, and with
+`--skip-prepare` they are evaluated read-only (a reason is added to
+`warnings`; when they cannot be evaluated, `ready` is `false` with a
+warning). A failure returns `ok: false`,
 `error.code: "prepare_failed"` (with `details.failed_step`), exit status 6 and
 the partial `data`. The error message only names the failing step: step errors
 embed command output, which goes to stderr and is never written to JSON or
@@ -487,6 +506,11 @@ is not detected; Anvil's own users are excluded by the lifecycle gate.
 ```
 
 `state` is `active`, `stale` (not renewed before `expires_at`) or `none`.
+`context`, `status`, `status --all` and `ensure` report this object without
+`token` (which appears only in the response that issued it). `state` is always
+present; when the lease record cannot be read, `status --all` reports
+`{"state": "unknown"}` with a warning (single-worktree commands fail with
+`internal_error`), never `none`.
 Acquire, renew, release and break are atomic read-modify-writes under the
 worktree's state lock; concurrent acquisitions have exactly one winner. Only
 the token's SHA-256 is stored. `lease_held` (active, other owner),
@@ -526,10 +550,67 @@ concurrent callers use the same lock even during deletion.
 ```
 
 `ready` requires complete preparation, satisfied component requirements and
-present required shared resources. With `--all`, a value that cannot be read
-for a worktree (`role`, `lease`, `prepare`) is reported as `unknown` with a
-warning, never as absent. Process `state` is `running`, `exited`,
-`reused` (PID recycled — never signaled), `unknown` or `foreign`.
+present required shared resources. `prepare.status` is as for `ensure`;
+`failed_step`, `error` (a classified summary, never child output) and
+`finished_at` are present when recorded. Process `state` is `running`,
+`exited`, `reused` (PID recycled — never signaled), `unknown` or `foreign`.
+
+Single `status` fails with `internal_error` when the preparation record
+cannot be read. `anvil context --json` reports the same `ready` and `prepare`
+next to `worktree`, `metadata` and `lease`, but degrades instead of failing:
+an unreadable preparation record is reported as `prepare.status: "unknown"`,
+`ready: false` and a warning.
+
+### `anvil status --all --json`
+
+```json
+"data": {
+  "worktrees": [
+    {
+      "worktree": {"...": "see Worktree identity", "managed": true},
+      "ready": true,
+      "role": "implementation",
+      "task": {"id": "SOLO-7"},
+      "lease": {"state": "active", "owner": "codex", "task_id": "SOLO-7", "expires_at": "…"},
+      "prepare": {"status": "complete", "ready": true, "finished_at": "…"},
+      "dirty": false
+    }
+  ]
+}
+```
+
+Entries use the same `worktree`, `lease` and `ready` semantics as single
+`status`. `prepare` is summarized: it carries `status`, `ready`,
+`failed_step` and `finished_at` but never `error`, so a list of many
+worktrees stays small; read the error with `anvil status WORKTREE`. `ready` is
+evaluated (components and shared resources) only for worktrees whose
+preparation is complete; why such a worktree is not ready is added to
+`warnings` (prefixed with its path), and when the evaluation fails (for
+example an invalid `anvil.yaml` in that worktree) it is `false` with a
+"readiness unavailable" warning while the command still succeeds. A value that cannot be read for a worktree is reported as `unknown`
+with a warning, never as absent: `role: "unknown"`, `lease.state: "unknown"`,
+`prepare.status: "unknown"`. `dirty` is omitted when the working state cannot
+be read.
+
+**Compatibility.** Before this release `status --all` entries reported
+`lease` and `prepare` as bare strings. They are now the objects used by
+single `status`: read `lease.state` instead of `lease`, and `prepare.status`
+instead of `prepare` (values are unchanged). This redefinition would normally
+bump the schema; it is deliberately kept under `anvil.agent/v1` to keep one
+contract version, and is called out here and in the changelog. `ready` and
+`worktree.managed` are additive.
+
+## `anvil version --json`
+
+`anvil version` and `anvil --version` (`-v`) print the same line,
+`anvil version X (commit: C, built: D)`, exit 0, never prompt and never run
+first-run setup; `version` takes no arguments (`invalid_arguments`, exit 2).
+The machine-readable form is `anvil version --json` (read-only);
+`anvil --version --json` is not supported.
+
+```json
+"data": {"version": "1.13.0", "commit": "<sha>", "build_date": "…", "go_version": "go1.24.4", "os": "darwin", "arch": "arm64"}
+```
 
 ## Integrations
 

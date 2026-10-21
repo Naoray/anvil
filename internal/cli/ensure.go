@@ -84,6 +84,7 @@ type prepareSummary struct {
 type ensureData struct {
 	Worktree   worktreeSummary              `json:"worktree"`
 	Created    bool                         `json:"created"`
+	Ready      bool                         `json:"ready"`
 	Metadata   wtstate.Metadata             `json:"metadata"`
 	Lease      *leaseView                   `json:"lease"`
 	Prepare    prepareSummary               `json:"prepare"`
@@ -175,6 +176,17 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
 		data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
+		if data.Prepare.Ready {
+			// Without preparation, readiness is evaluated read-only with
+			// the same semantics as status and context.
+			wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Role: opts.Role})
+			if err != nil {
+				warnings = append(warnings, "readiness unavailable: "+err.Error())
+			} else {
+				data.Ready = worktreeReady(statusPrepare{Ready: true}, wenv)
+				warnings = append(warnings, notReadyReasons(wenv)...)
+			}
+		}
 		return agentResult{Data: data, Warnings: warnings}, nil
 	}
 
@@ -290,6 +302,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
+	data.Ready = data.Prepare.Ready
 	return agentResult{Data: data, Warnings: warnings}, nil
 }
 

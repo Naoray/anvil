@@ -23,7 +23,7 @@ func TestStatusAllReportsMalformedLeaseAsUnknown(t *testing.T) {
 	for _, entry := range field(t, envelope, "data", "worktrees").([]any) {
 		if field(t, entry, "worktree", "name") == "broken-lease" {
 			found = true
-			require.Equal(t, "unknown", field(t, entry, "lease"))
+			require.Equal(t, "unknown", field(t, entry, "lease", "state"))
 		}
 	}
 	require.True(t, found)

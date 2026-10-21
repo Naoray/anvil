@@ -22,7 +22,8 @@ var contextCmd = &cobra.Command{
 	Use:   "context [WORKTREE]",
 	Short: "Describe a worktree's environment and capabilities (read-only)",
 	Long: `Describe everything an agent needs to work in a worktree without knowing
-its stack: identity, role and task metadata, lease, exported environment
+its stack: identity (worktree.managed), readiness and preparation status,
+role and task metadata, lease, exported environment
 variables (secret values redacted), components and their status, runtime
 directories, ports, shared resources, declared processes and checks.
 
@@ -45,7 +46,9 @@ pinned commit), lease, managed processes with verified state, port
 reservations, latest check results with currency, and a cleanup preview of
 what 'anvil remove' would stop, release and delete — or what blocks it.
 
---all summarizes every worktree of the project. Read-only.`,
+--all summarizes every worktree of the project: identity (worktree.managed),
+ready, role, task, lease, preparation status and dirty state, using the same
+lease and prepare objects as single status. Read-only.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -89,6 +92,8 @@ type capabilitiesView struct {
 
 type contextData struct {
 	Worktree     worktreeSummary              `json:"worktree"`
+	Ready        bool                         `json:"ready"`
+	Prepare      statusPrepare                `json:"prepare"`
 	Metadata     wtstate.Metadata             `json:"metadata"`
 	Lease        *leaseView                   `json:"lease"`
 	Environment  []workenv.Variable           `json:"environment"`
@@ -136,9 +141,17 @@ func runContext(_ *cobra.Command, args []string) (agentResult, error) {
 	if wenv.ComponentErr != nil {
 		warnings = append(warnings, wenv.ComponentErr.Error())
 	}
+	// An unreadable preparation record is reported as unknown (never as
+	// unprepared) and makes the worktree not ready.
+	prepare, err := readPrepareView(wenv.Worktree.Path)
+	if err != nil {
+		warnings = append(warnings, "preparation state unavailable: "+err.Error())
+		prepare = statusPrepare{Status: statusUnknown}
+	}
 	cfg := wenv.PC.Config
 	data := contextData{
-		Worktree: summary, Metadata: wenv.Metadata, Lease: newLeaseView(wenv.Lease, time.Now(), ""),
+		Worktree: summary, Ready: worktreeReady(prepare, wenv), Prepare: prepare,
+		Metadata: wenv.Metadata, Lease: newLeaseView(wenv.Lease, time.Now(), ""),
 		Environment: wenv.Env.Redacted(), EnvUnset: append([]string{}, wenv.Unset...),
 		Components: wenv.Components, Resources: resourcesOf(wenv),
 		Processes: []declaredProcess{}, Checks: []declaredCheck{},
@@ -205,6 +218,42 @@ type statusData struct {
 	Cleanup   cleanupPreview        `json:"cleanup"`
 }
 
+// readPrepareView reads the preparation record with the reader-facing
+// status (interrupted runs are detected through the preparation lock).
+func readPrepareView(path string) (statusPrepare, error) {
+	state, err := wtstate.ReadPrepare(path)
+	if err != nil {
+		return statusPrepare{}, err
+	}
+	view := statusPrepare{}
+	if view.Status, err = wtstate.EffectivePrepareStatus(path, state); err != nil {
+		return statusPrepare{}, err
+	}
+	if state != nil {
+		view.FailedStep, view.Error, view.FinishedAt = state.FailedStep, state.Error, state.FinishedAt
+	}
+	view.Ready = view.Status == wtstate.PrepareComplete
+	return view, nil
+}
+
+// worktreeReady is the readiness every agent payload reports: complete
+// preparation, satisfied component requirements and present required shared
+// resources.
+func worktreeReady(prepare statusPrepare, wenv *worktreeEnv) bool {
+	return prepare.Ready && wenv.ComponentErr == nil && wenv.SharedErr == nil
+}
+
+// notReadyReasons explains why a prepared worktree is not ready.
+func notReadyReasons(wenv *worktreeEnv) []string {
+	var reasons []string
+	for _, err := range []error{wenv.ComponentErr, wenv.SharedErr} {
+		if err != nil {
+			reasons = append(reasons, err.Error())
+		}
+	}
+	return reasons
+}
+
 func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 	wenv, err := inspectTarget(args)
 	if err != nil {
@@ -229,19 +278,10 @@ func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 		}
 	}
 
-	prepare, err := wtstate.ReadPrepare(wenv.Worktree.Path)
-	if err != nil {
+	if data.Prepare, err = readPrepareView(wenv.Worktree.Path); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	data.Prepare.Status, err = wtstate.EffectivePrepareStatus(wenv.Worktree.Path, prepare)
-	if err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
-	}
-	if prepare != nil {
-		data.Prepare.FailedStep, data.Prepare.Error, data.Prepare.FinishedAt = prepare.FailedStep, prepare.Error, prepare.FinishedAt
-	}
-	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
-	data.Ready = data.Prepare.Ready && wenv.ComponentErr == nil && wenv.SharedErr == nil
+	data.Ready = worktreeReady(data.Prepare, wenv)
 
 	records, err := wtstate.ReadProcesses(wenv.Worktree.Path)
 	if err != nil {
@@ -321,12 +361,16 @@ func previewCleanup(wenv *worktreeEnv, now time.Time, warnings *[]string) cleanu
 	return preview
 }
 
+// statusAllEntry summarizes one worktree. lease and prepare use the same
+// objects as single status; prepare omits the error text (summarized: read
+// it from 'anvil status WORKTREE').
 type statusAllEntry struct {
 	Worktree worktreeSummary `json:"worktree"`
+	Ready    bool            `json:"ready"`
 	Role     string          `json:"role,omitempty"`
 	Task     wtstate.Task    `json:"task"`
-	Lease    string          `json:"lease"`
-	Prepare  string          `json:"prepare"`
+	Lease    *leaseView      `json:"lease"`
+	Prepare  statusPrepare   `json:"prepare"`
 	Dirty    *bool           `json:"dirty,omitempty"`
 }
 
@@ -351,7 +395,7 @@ func runStatusAll() (agentResult, error) {
 		}
 		summary, summaryWarnings := summarizeWorktree(wt)
 		warnings = append(warnings, summaryWarnings...)
-		entry := statusAllEntry{Worktree: summary, Lease: wtstate.LeaseNone, Prepare: wtstate.PrepareNone}
+		entry := statusAllEntry{Worktree: summary, Lease: newLeaseView(nil, now, ""), Prepare: statusPrepare{Status: wtstate.PrepareNone}}
 		// A failed observation is reported as unknown with a warning, never
 		// as the absence of a role, lease or preparation.
 		unreadable := func(what string, err error) {
@@ -365,17 +409,28 @@ func runStatusAll() (agentResult, error) {
 		}
 		if lease, err := wtstate.ReadLease(wt.Path); err != nil {
 			unreadable("lease", err)
-			entry.Lease = statusUnknown
+			entry.Lease = &leaseView{State: statusUnknown}
 		} else {
-			entry.Lease = lease.State(now)
+			entry.Lease = newLeaseView(lease, now, "")
 		}
-		prepare, err := wtstate.ReadPrepare(wt.Path)
-		if err == nil {
-			entry.Prepare, err = wtstate.EffectivePrepareStatus(wt.Path, prepare)
-		}
-		if err != nil {
+		if prepare, err := readPrepareView(wt.Path); err != nil {
 			unreadable("preparation state", err)
-			entry.Prepare = statusUnknown
+			entry.Prepare = statusPrepare{Status: statusUnknown}
+		} else {
+			entry.Prepare = prepare
+			entry.Prepare.Error = ""
+		}
+		if entry.Prepare.Ready {
+			// Readiness also requires satisfied components and shared
+			// resources; when they cannot be evaluated it is not ready.
+			if wenv, err := loadWorktreeEnv(pc, wt, worktreeEnvOptions{}); err != nil {
+				unreadable("readiness", err)
+			} else {
+				entry.Ready = worktreeReady(entry.Prepare, wenv)
+				for _, reason := range notReadyReasons(wenv) {
+					warnings = append(warnings, fmt.Sprintf("%s: not ready: %s", wt.Path, reason))
+				}
+			}
 		}
 		if state, err := git.ReadWorkingState(wt.Path); err != nil {
 			unreadable("working state", err)
@@ -419,7 +474,7 @@ func printStatusHuman(result agentResult) error {
 		}
 	case map[string]any:
 		for _, entry := range data["worktrees"].([]statusAllEntry) {
-			fmt.Printf("%-32s role=%-14s prepare=%-11s lease=%s\n", entry.Worktree.Name, entry.Role, entry.Prepare, entry.Lease)
+			fmt.Printf("%-32s role=%-14s prepare=%-11s ready=%-5t managed=%-5t lease=%s\n", entry.Worktree.Name, entry.Role, entry.Prepare.Status, entry.Ready, entry.Worktree.Managed, entry.Lease.State)
 		}
 	}
 	return nil
