@@ -418,7 +418,8 @@ func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 	resolvedPreset := resolvedRemoveTestPreset()
 	removeCalls := 0
 	deps := pruneProjectDependencies{
-		fetchOrigin: func(string) error { return nil },
+		fetchOrigin:     func(string) error { return nil },
+		remoteRefExists: func(string, string) bool { return true },
 		listWorktrees: func(string) ([]git.Worktree, error) {
 			return []git.Worktree{{Path: worktreePath, Branch: "feature-dry"}}, nil
 		},

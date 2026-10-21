@@ -397,6 +397,13 @@ func BranchExists(gitDir, branch string) bool {
 	return cmd.Run() == nil
 }
 
+// RemoteRefExists reports whether the remote-tracking ref (for example
+// origin/main) resolves to a commit, without contacting the remote.
+func RemoteRefExists(gitDir, ref string) bool {
+	cmd := exec.Command("git", "-C", gitDir, "rev-parse", "--verify", "--quiet", "refs/remotes/"+ref+"^{commit}")
+	return cmd.Run() == nil
+}
+
 // DeleteBranch deletes a branch from the repository
 func DeleteBranch(gitDir, branch string, force bool) error {
 	args := []string{"branch"}

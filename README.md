@@ -142,8 +142,15 @@ anvil list
 # Remove a worktree when done
 anvil remove feature/user-auth
 
+# Preview a removal: never prompts, needs no --force, changes nothing
+anvil remove feature-user-auth --dry-run
+anvil remove feature-user-auth --dry-run --json   # one anvil.agent/v1 plan document
+
 # Clean up merged worktrees
 anvil prune
+
+# Preview every merged worktree without prompting or fetching
+anvil prune --dry-run
 
 # Run scaffold steps on an existing worktree
 anvil scaffold main
@@ -471,7 +478,7 @@ processes:
 ```bash
 anvil start feature-x --json     # detached, logs in $ANVIL_LOG_DIR
 anvil stop feature-x             # verified PID + start-time identity only
-anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs
+anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs (add --json for a plan)
 ```
 
 Named checks with trustworthy provenance:
@@ -620,6 +627,13 @@ Removing a borrower drops only its owned resources. An owner with active borrowe
 cannot be removed destructively, even with `--force`; `--keep-db` preserves its
 databases and permits removal. Borrowers retain the binding and never adopt
 ownership. Malformed or unreadable sibling state blocks destructive cleanup.
+A registered sibling whose directory was deleted from disk cannot hold a
+binding: it is skipped with a warning suggesting `git worktree prune` (or
+`git worktree repair` if it was moved). An **unlocked** worktree on an
+unmounted volume looks the same and is treated as deleted, so lock worktrees on
+removable media with `git worktree lock`: a locked worktree that is absent
+blocks destructive cleanup until it is reconnected, or unlocked and pruned. A
+dangling symlink or any other uninspectable sibling path also blocks.
 Prune and `unlink --clean` remove selected borrowers before selected owners.
 `unlink --clean` uses guarded cleanup and preserves unregistered files.
 
@@ -749,7 +763,17 @@ anvil remove feature-x --keep-db
 ```
 
 `--dry-run` prints one `Would drop database: <name>` line per database and
-never drops databases or removes the worktree. `--keep-db` prints the
+never drops databases or removes the worktree. It needs neither confirmation
+nor `--force` and leaves the worktree, branch, `.anvil.local`, runtime
+directory, ports and processes untouched (it still takes the coordination lock
+files). It never starts a database service: parallel-worker databases are
+enumerated only when the service is already running; otherwise the exact
+recorded names are listed with `parallel-worker databases not enumerated:
+service not running`.
+`anvil prune --dry-run` previews every merged worktree without prompting and
+without fetching origin; merge status reflects the current remote-tracking refs
+(it fails if `origin/<default>` has never been fetched).
+`anvil unlink --clean --dry-run` likewise never prompts. `--keep-db` prints the
 preserved names (parallel-worker databases are kept too; drop them manually
 when done). If ownership or sibling state is unreadable or invalid, destructive cleanup
 stops before site unlink or worktree deletion. `--force` does not bypass borrower
