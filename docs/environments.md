@@ -204,7 +204,9 @@ other platforms without a verifiable identity (`unsupported_platform`).
    stop, ports to release and the runtime directory to delete),
 2. stop verified owned processes first (failure keeps the worktree),
 3. after the worktree is removed, release its ports and delete its runtime
-   directory only when `owner.json` names exactly this worktree ID and path.
+   directory only when `owner.json` names this worktree's verified ID and is
+   unchanged since step 1 (a worktree moved with `git worktree move` keeps its
+   ID, so its old path in `owner.json` still matches).
 
 Shared resources, files outside the runtime directory and other worktrees'
 resources are never touched. A worktree whose `.anvil.local` was copied from

@@ -170,17 +170,23 @@ func TestDirectoriesOwnershipAndRemoval(t *testing.T) {
 	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idB, WorktreePath: "/b"}))
 	_, _, err = ProvisionDirectories(root, idA, "/a", cfg)
 	require.ErrorContains(t, err, "belongs to")
-	removed, err := RemoveDirectories(root, idA, "/a")
+	removed, err := RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/a"})
 	require.Error(t, err)
 	require.False(t, removed)
 	require.DirExists(t, dirs.Root)
 
-	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idA, WorktreePath: "/a"}))
-	removed, err = RemoveDirectories(root, idA, "/a")
+	// An owner record that changed since it was validated is left alone.
+	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idA, WorktreePath: "/moved"}))
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/a"})
+	require.ErrorContains(t, err, "leaving it in place")
+	require.False(t, removed)
+
+	// The validated record matches even when it names an old path.
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/moved"})
 	require.NoError(t, err)
 	require.True(t, removed)
 	require.NoDirExists(t, dirs.Root)
-	removed, err = RemoveDirectories(root, idA, "/a")
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/moved"})
 	require.NoError(t, err)
 	require.False(t, removed)
 

@@ -227,3 +227,24 @@ func TestStopNeverSignalsUnrelatedGroupOfExitedLeader(t *testing.T) {
 	_, err = procs.StartIdentity(victimChild)
 	require.NoError(t, err, "unrelated group member must survive")
 }
+
+// TestRemoveMovedWorktreeCleansRuntimeDirectory reproduces review finding
+// 4904: after `git worktree move`, owner.json still names the old path, and
+// remove must still delete the runtime directory owned by the same ID.
+func TestRemoveMovedWorktreeCleansRuntimeDirectory(t *testing.T) {
+	f := newAgentFixture(t, resourcesFixtureYAML, nil)
+	f.env = subprocessEnvFrom(append(f.env, "ANVIL_TEST_SHARED="+t.TempDir(), "ANVIL_PORT_RANGE=43500-43599"))
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/m")
+	require.Equal(t, 0, code, stderr)
+	runtimeDir := envValue(t, f, "feature-m", "ANVIL_RUNTIME_DIR")[0]
+	require.DirExists(t, runtimeDir)
+
+	moved := filepath.Join(filepath.Dir(f.worktreePath("feature-m")), "feature-m2")
+	gitRun(t, f.repo, "worktree", "move", f.worktreePath("feature-m"), moved)
+
+	stdout, stderr, code := f.run(f.repo, "remove", "feature-m2", "--force")
+	require.Equal(t, 0, code, stdout+stderr)
+	require.NotContains(t, stdout+stderr, "runtime cleanup failed")
+	require.NoDirExists(t, moved)
+	require.NoDirExists(t, runtimeDir, "runtime directory of the moved worktree removed")
+}

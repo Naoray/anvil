@@ -23,6 +23,9 @@ type runtimeCleanupPlan struct {
 	// Skipped explains why runtime resources are left untouched.
 	Skipped string `json:"skipped,omitempty"`
 	root    string
+	// runtimeOwner is the owner record validated against the verified
+	// identity before any effect; release deletes only if it is unchanged.
+	runtimeOwner resources.Owner
 }
 
 // planRuntimeCleanup inspects owned runtime resources without changing them.
@@ -79,8 +82,11 @@ func planRuntimeCleanup(worktreePath string) (*runtimeCleanupPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The identity is verified (ok or moved), so the owner record matches by
+	// ID: a moved worktree's record still names its old path.
 	if owner, err := resources.ReadOwner(dir); err == nil && owner.WorktreeID == identity.ID {
 		plan.RuntimeDir = dir
+		plan.runtimeOwner = owner
 	}
 	return plan, nil
 }
@@ -129,7 +135,7 @@ func (p *runtimeCleanupPlan) release() error {
 		}
 	}
 	if p.RuntimeDir != "" {
-		if _, err := resources.RemoveDirectories(p.root, p.WorktreeID, p.WorktreePath); err != nil {
+		if _, err := resources.RemoveDirectories(p.root, p.runtimeOwner); err != nil {
 			problems = append(problems, err)
 		}
 	}
