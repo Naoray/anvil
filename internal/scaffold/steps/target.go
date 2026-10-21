@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
@@ -32,10 +34,11 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 		if err := config.ValidateRelativePath(t.dir); err != nil {
 			return "", nil, err
 		}
-		dir = filepath.Join(ctx.WorktreePath, t.dir)
-		if err := config.CheckResolvedContained(ctx.WorktreePath, dir, t.dir); err != nil {
+		resolved, err := config.ResolveContainedPath(ctx.WorktreePath, filepath.Join(ctx.WorktreePath, t.dir))
+		if err != nil {
 			return "", nil, err
 		}
+		dir = resolved
 		info, err := os.Stat(dir)
 		if err != nil {
 			return "", nil, fmt.Errorf("step directory %s: %w", t.dir, err)
@@ -51,32 +54,62 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 // inherited/worktree values plus the component identity. It is shared by
 // execution and preparation cache identities.
 func CommandEnvironment(worktreeEnv, stepEnv map[string]string) map[string]string {
+	return commandEnvironment(worktreeEnv, stepEnv, runtime.GOOS == "windows")
+}
+
+func commandEnvironment(worktreeEnv, stepEnv map[string]string, caseInsensitive bool) map[string]string {
 	if len(worktreeEnv) == 0 && len(stepEnv) == 0 {
 		return nil
+	}
+	normalize := func(name string) string {
+		if caseInsensitive {
+			return strings.ToUpper(name)
+		}
+		return name
 	}
 	base := make(map[string]string)
 	for _, entry := range os.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
-			base[key] = value
+			base[normalize(key)] = value
 		}
 	}
 	env := make(map[string]string, len(worktreeEnv)+len(stepEnv))
-	for key, value := range worktreeEnv {
-		base[key] = value
+	spellings := make(map[string]string)
+	set := func(key, value string) {
+		name := normalize(key)
+		if previous, ok := spellings[name]; ok && previous != key {
+			delete(env, previous)
+		}
+		spellings[name] = key
 		env[key] = value
+	}
+	for _, key := range environmentNames(worktreeEnv) {
+		value := worktreeEnv[key]
+		base[normalize(key)] = value
+		set(key, value)
 	}
 	for _, key := range []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"} {
 		if value, ok := stepEnv[key]; ok {
-			base[key] = value
+			base[normalize(key)] = value
 		}
 	}
-	for key, value := range stepEnv {
+	for _, key := range environmentNames(stepEnv) {
+		value := stepEnv[key]
 		if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
-			env[key] = value
+			set(key, value)
 		} else {
-			env[key] = os.Expand(value, func(name string) string { return base[name] })
+			set(key, os.Expand(value, func(name string) string { return base[normalize(name)] }))
 		}
 	}
 	return env
+}
+
+func environmentNames(values map[string]string) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

@@ -400,6 +400,7 @@ anvil ensure feature/auth --skip-prepare
 ID (`wt_…`); partial matches are never used. When nothing matches, it is treated
 as a branch name and created exactly as `anvil work` would (`--base`, `--no-track`
 apply). Concurrent `ensure` calls for the same branch converge on one worktree.
+`--dry-run` is rejected before any worktree, identity or preparation changes.
 
 Preparation runs the same steps as `anvil scaffold` (preset defaults plus
 `scaffold.steps`) under a per-worktree lock and records each completed step in
@@ -407,7 +408,7 @@ Preparation runs the same steps as `anvil scaffold` (preset defaults plus
 `up_to_date` when its definition is unchanged, its declared `inputs` hash to the
 same digest and its declared `outputs` still exist. Steps without `inputs` run
 once per definition. Database steps (`db.create`, `db.migrate`, `db.destroy`),
-`herd`/`yerd`, `store_as` producers and `always: true` steps run every time under
+`herd`/`yerd`, `env.read`, `store_as` producers and `always: true` steps run every time under
 their own safety policies. A failed or interrupted run resumes at the first
 incomplete step. `anvil scaffold` and `anvil work` keep their run-everything
 behavior but also record completions, so a later `ensure` builds on them.
@@ -1240,6 +1241,13 @@ All steps support these configuration options:
 | `always` | boolean | Rerun on every `anvil ensure` |
 
 Steps execute in the order they appear in the configuration file.
+
+Step directories, declared inputs/outputs and file conditions must remain inside
+the canonical worktree root, including through symlinks. Existing escaping links
+are rejected before preparation changes state or runs any step. Internal links
+are allowed. Step environment values all expand against the same worktree and
+inherited environment snapshot; another override in the same step does not
+change that snapshot.
 
 ### Conditions
 

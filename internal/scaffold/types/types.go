@@ -54,7 +54,7 @@ type ScaffoldStep interface {
 }
 
 func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]any) (bool, error) {
-	if err := ValidateConditions(conditions); err != nil {
+	if err := ValidateConditionPaths(ctx.WorktreePath, ctx.WorktreePath, conditions); err != nil {
 		return false, err
 	}
 	return ctx.evaluateCondition(ctx.WorktreePath, conditions)
@@ -64,7 +64,7 @@ func (ctx *ScaffoldContext) EvaluateCondition(conditions map[string]any) (bool, 
 // instead of the worktree root. Steps with a configured working directory use
 // it so component conditions read their own files.
 func (ctx *ScaffoldContext) EvaluateConditionAt(root string, conditions map[string]any) (bool, error) {
-	if err := ValidateConditions(conditions); err != nil {
+	if err := ValidateConditionPaths(ctx.WorktreePath, root, conditions); err != nil {
 		return false, err
 	}
 	return ctx.evaluateCondition(root, conditions)

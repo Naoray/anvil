@@ -38,8 +38,8 @@ Rules:
   `invalid_arguments` envelope when `--json` appears anywhere before `--`.
 - Mutating commands without a side-effect-free mode refuse `--dry-run` with
   `invalid_arguments` before any effect; inspect with read-only commands.
-- Secrets are never included. Error messages keep only the first line of a
-  failing step's error; full command output is not echoed into JSON.
+- Secrets are never included. Preparation errors use a classified summary;
+  failing child output is available only on stderr, never in JSON.
 
 ## Exit codes and error codes
 
@@ -81,6 +81,8 @@ same ID; the copy receives a new ID and drops the original's lease and process
 records on the next `ensure`, and is never treated as their owner).
 
 ## `anvil ensure [WORKTREE] --json` (mutating)
+
+`--dry-run` returns `invalid_arguments` (exit 2) before any changes.
 
 ```json
 "data": {

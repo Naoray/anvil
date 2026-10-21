@@ -125,7 +125,7 @@ func planComponent(worktreePath string, component config.Component, selected boo
 	// A component directory that escapes through a symlink is refused
 	// regardless of on_missing: commands would run outside the worktree.
 	if dir != "" {
-		if err := config.CheckContained(worktreePath, dir); err != nil {
+		if _, err := config.ResolveContainedPath(worktreePath, absDir); err != nil {
 			return skipped(plan, err.Error()), fmt.Errorf("component %q: %w", component.Name, err)
 		}
 	}

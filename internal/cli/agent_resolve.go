@@ -35,7 +35,7 @@ func worktreeMatchesExactly(wt git.Worktree, query string) bool {
 	}
 	if strings.HasPrefix(query, "wt_") {
 		identity, status, err := wtstate.ReadIdentity(wt.Path)
-		return err == nil && identity != nil && status == wtstate.IdentityOK && identity.ID == query
+		return err == nil && identity != nil && (status == wtstate.IdentityOK || status == wtstate.IdentityMoved) && identity.ID == query
 	}
 	return false
 }
