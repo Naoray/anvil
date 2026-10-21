@@ -245,7 +245,10 @@ func collectArtifacts(req RunRequest, result *Result) error {
 				return err
 			}
 			if info.IsDir() {
-				continue
+				return fmt.Errorf("directory artifacts are unsupported: %s; declare file patterns instead", match)
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("unsupported artifact type: %s", match)
 			}
 			sum, size, err := fileDigest(match)
 			if err != nil {

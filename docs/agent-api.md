@@ -155,3 +155,6 @@ inside input directories) are rejected with a diagnostic; they cannot be reused.
 Dirty submodules and nested repositories are rejected when their recursive
 state cannot be identified from the parent checkout. Clean them before running
 or reusing checks; two unidentifiable dirty states never share a passing result.
+
+Artifact patterns must match regular files. Directory artifacts fail the run
+with a diagnostic and disable reuse; use a file glob such as `bundle/*` instead.

@@ -96,3 +96,33 @@ func TestCheckRejectsDirtyNestedRepositoryIdentity(t *testing.T) {
 		require.Contains(t, field(t, envelope, "error", "message"), "dirty submodule or nested repository")
 	}
 }
+
+func TestCheckRejectsDirectoryArtifacts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix checks")
+	}
+	f := newAgentFixture(t, `checks:
+  bundle:
+    reusable: true
+    commands: ['mkdir -p "$ANVIL_ARTIFACTS_DIR/bundle"; echo good > "$ANVIL_ARTIFACTS_DIR/bundle/result"']
+    artifacts: ['${ANVIL_ARTIFACTS_DIR}/bundle']
+`, nil)
+	for i := 0; i < 4; i++ {
+		envelope, stderr, code := f.runJSON(f.repo, "check", "bundle", "--reuse")
+		require.Equal(t, 1, code, stderr)
+		result := field(t, envelope, "data", "results", 0)
+		require.Equal(t, false, field(t, result, "reused"))
+		require.Contains(t, field(t, result, "error"), "directory artifacts are unsupported")
+		bundles, err := filepath.Glob(filepath.Join(f.runtimeRoot(), "worktrees", "*", "artifacts", "bundle"))
+		require.NoError(t, err)
+		require.Len(t, bundles, 1)
+		switch i {
+		case 0:
+			require.NoError(t, os.WriteFile(filepath.Join(bundles[0], "result"), []byte("tampered"), 0o600))
+		case 1:
+			require.NoError(t, os.Remove(filepath.Join(bundles[0], "result")))
+		case 2:
+			require.NoError(t, os.WriteFile(filepath.Join(bundles[0], "added"), []byte("extra"), 0o600))
+		}
+	}
+}
