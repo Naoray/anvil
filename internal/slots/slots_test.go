@@ -28,6 +28,9 @@ func mustAcquire(t *testing.T, m *Manager, req Request) *Held {
 	t.Helper()
 	held, err := m.Acquire(context.Background(), req)
 	require.NoError(t, err)
+	// Release before TempDir removal even when the test fails early: Windows
+	// cannot delete a lock file that is still open.
+	t.Cleanup(func() { require.NoError(t, held.Release()) })
 	return held
 }
 
@@ -201,7 +204,7 @@ func TestStaleTicketsAreRemoved(t *testing.T) {
 
 	held, err := m.Acquire(context.Background(), Request{Weight: 1, Check: "live", Wait: 2 * time.Second})
 	require.NoError(t, err, "stale tickets never block the queue")
-	state, err := m.readState()
+	state, err := lockedState(m)
 	require.NoError(t, err)
 	require.Empty(t, state.Tickets, "participants delete stale tickets")
 	require.NoError(t, held.Release())
@@ -220,7 +223,7 @@ func TestUnresponsiveTicketLosesHeadOfLineButStays(t *testing.T) {
 	}}))
 	held, err := m.Acquire(context.Background(), Request{Weight: 1, Check: "live", Wait: 2 * time.Second})
 	require.NoError(t, err)
-	state, err := m.readState()
+	state, err := lockedState(m)
 	require.NoError(t, err)
 	require.Len(t, state.Tickets, 1, "a live but unresponsive ticket is kept")
 	status, err := m.Snapshot()

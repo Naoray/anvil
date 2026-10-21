@@ -61,6 +61,9 @@ const (
 // that times out simply retries at its next poll.
 var queueLockWait = 2 * time.Second
 
+// fileAccessHook observes queue.json and holder-record accesses (tests).
+var fileAccessHook func(op, path string)
+
 // errQueueBusy reports a queue lock that stayed held for queueLockWait.
 var errQueueBusy = errors.New("slot queue is busy")
 
@@ -241,8 +244,9 @@ func (m *Manager) slotRecord(i int) string {
 // Held is acquired slot capacity. Its locks may be inherited by supervised
 // commands, which then keep the capacity until they terminate.
 type Held struct {
-	locks   []*lockfile.Lock
-	records []string
+	locks     []*lockfile.Lock
+	records   []string
+	queueLock string
 }
 
 // Locks returns the held slot locks (nil for a nil Held).
@@ -253,14 +257,35 @@ func (h *Held) Locks() []*lockfile.Lock {
 	return append([]*lockfile.Lock(nil), h.locks...)
 }
 
-// Release removes the holder records, then unlocks. It is safe on nil and
-// idempotent.
+// Release removes the holder records under queue.lock, then unlocks. It is
+// safe on nil and idempotent. If queue.lock stays busy the records are left
+// behind: they are only reported while their slot lock is held, and the next
+// holder replaces them.
 func (h *Held) Release() error {
-	if h == nil {
+	if h == nil || len(h.locks) == 0 {
 		return nil
 	}
+	queue, err := lockfile.AcquireTimeout(h.queueLock, queueLockWait)
+	if errors.Is(err, lockfile.ErrLocked) {
+		h.records = make([]string, len(h.locks)) // keep the records
+		return h.releaseLocked()
+	}
+	if err != nil {
+		return errors.Join(fmt.Errorf("locking slot queue: %w", err), h.releaseLocked())
+	}
+	return errors.Join(h.releaseLocked(), queue.Release())
+}
+
+// releaseLocked removes the records and unlocks; the caller holds
+// queue.lock (or has decided to keep the records by blanking their paths).
+func (h *Held) releaseLocked() error {
 	var problems []error
 	for i := len(h.locks) - 1; i >= 0; i-- {
+		if h.records[i] == "" {
+			problems = append(problems, h.locks[i].Release())
+			continue
+		}
+		observe("remove", h.records[i])
 		if err := os.Remove(h.records[i]); err != nil && !errors.Is(err, os.ErrNotExist) {
 			problems = append(problems, err)
 		}
@@ -362,7 +387,14 @@ func (m *Manager) acquire(ctx context.Context, req Request, once bool) (*Held, e
 		}
 		last = progress
 		if waited := time.Since(start); req.Wait > 0 && waited >= req.Wait {
-			holders, inUse, holdersErr := m.holders()
+			var holders []Holder
+			var inUse int
+			var holdersErr error
+			queueErr := m.withQueue(context.Background(), nil, func(*queueState) (bool, error) {
+				holders, inUse, holdersErr = m.holdersLocked()
+				return false, nil
+			})
+			holdersErr = errors.Join(holdersErr, queueErr)
 			busy := &BusyError{WaitingFor: progress.WaitingFor, Position: progress.Position, Queued: progress.Queued,
 				Capacity: m.Capacity, InUse: inUse, Waited: waited, Holders: holders}
 			if busy.WaitingFor == "" {
@@ -454,7 +486,7 @@ func (m *Manager) attempt(ctx context.Context, own *Ticket, gate *loadGate, req 
 
 // take acquires req.Weight free slots, all or nothing.
 func (m *Manager) take(req Request, now time.Time) (*Held, error) {
-	held := &Held{}
+	held := &Held{queueLock: filepath.Join(m.Dir, queueLock)}
 	var slots []int
 	for i := 0; i < m.Capacity && len(held.locks) < req.Weight; i++ {
 		lock, err := lockfile.TryAcquire(m.slotLock(i))
@@ -462,20 +494,20 @@ func (m *Manager) take(req Request, now time.Time) (*Held, error) {
 			continue
 		}
 		if err != nil {
-			return nil, errors.Join(err, held.Release())
+			return nil, errors.Join(err, held.releaseLocked())
 		}
 		held.locks = append(held.locks, lock)
 		held.records = append(held.records, m.slotRecord(i))
 		slots = append(slots, i)
 	}
 	if len(held.locks) < req.Weight {
-		return nil, held.Release()
+		return nil, held.releaseLocked()
 	}
 	for i, slot := range slots {
 		record := Holder{Slot: slot, Weight: req.Weight, PID: os.Getpid(), Check: req.Check, Worktree: req.Worktree,
 			WorktreeID: req.WorktreeID, RunID: req.RunID, Priority: req.Priority, Since: now}
 		if err := writeJSON(held.records[i], record); err != nil {
-			return nil, errors.Join(err, held.Release())
+			return nil, errors.Join(err, held.releaseLocked())
 		}
 	}
 	return held, nil
@@ -599,6 +631,7 @@ func (e *CorruptQueueError) recovered() queueState { return queueState{} }
 // hand out numbers that collide with rejoining tickets.
 func (m *Manager) readState() (queueState, error) {
 	path := filepath.Join(m.Dir, queueFile)
+	observe("read", path)
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return queueState{}, nil
@@ -623,9 +656,11 @@ func (m *Manager) writeState(state queueState) error {
 	return writeJSON(filepath.Join(m.Dir, queueFile), state)
 }
 
-// holders reports every held slot, including slots beyond the current
-// capacity left by a participant configured with a larger one.
-func (m *Manager) holders() ([]Holder, int, error) {
+// holdersLocked reports every held slot, including slots beyond the current
+// capacity left by a participant configured with a larger one. The caller
+// holds queue.lock, which serializes record reads with their replacement
+// and removal (Windows refuses to replace or delete an open file).
+func (m *Manager) holdersLocked() ([]Holder, int, error) {
 	holders := []Holder{}
 	matches, err := filepath.Glob(filepath.Join(m.Dir, "slot-*.lock"))
 	if err != nil {
@@ -650,6 +685,7 @@ func (m *Manager) holders() ([]Holder, int, error) {
 			continue
 		}
 		holder := Holder{Slot: index}
+		observe("read", m.slotRecord(index))
 		if content, err := os.ReadFile(m.slotRecord(index)); err == nil {
 			if err := json.Unmarshal(content, &holder); err != nil {
 				holder = Holder{Slot: index}
@@ -662,21 +698,36 @@ func (m *Manager) holders() ([]Holder, int, error) {
 }
 
 // Snapshot reports capacity, load, holders and the live queue without
-// creating or changing anything; dead tickets are omitted, not deleted.
+// changing anything; dead tickets are omitted, not deleted. It reads under
+// queue.lock like every other participant and creates nothing when no slot
+// has ever been used.
 func (m *Manager) Snapshot() (Status, error) {
-	status := Status{Capacity: m.Capacity, Queue: []QueueEntry{},
+	status := Status{Capacity: m.Capacity, Queue: []QueueEntry{}, Holders: []Holder{},
 		Load: LoadStatus{Max: m.MaxLoad, WaitSeconds: m.LoadWait.Seconds()}}
-	holders, inUse, holdersErr := m.holders()
-	status.Holders, status.InUse = holders, inUse
 	if value, err := m.readLoad(); err == nil {
 		status.Load.Supported, status.Load.Value = true, &value
 	} else {
 		status.Load.UnsupportedNote = err.Error()
 	}
-	state, err := m.readState()
+	if _, err := os.Stat(m.Dir); errors.Is(err, os.ErrNotExist) {
+		return status, nil
+	}
+	lock, err := lockfile.AcquireTimeout(filepath.Join(m.Dir, queueLock), queueLockWait)
+	if errors.Is(err, lockfile.ErrLocked) {
+		return status, errQueueBusy
+	}
 	if err != nil {
+		return status, fmt.Errorf("locking slot queue: %w", err)
+	}
+	holders, inUse, holdersErr := m.holdersLocked()
+	state, stateErr := m.readState()
+	if err := lock.Release(); err != nil {
+		return status, errors.Join(holdersErr, stateErr, err)
+	}
+	status.Holders, status.InUse = holders, inUse
+	if stateErr != nil {
 		// A corrupt queue has no recoverable order; report it as a diagnostic.
-		return status, errors.Join(holdersErr, err)
+		return status, errors.Join(holdersErr, stateErr)
 	}
 	now := time.Now().UTC()
 	live := make([]Ticket, 0, len(state.Tickets))
@@ -697,7 +748,14 @@ func (m *Manager) Snapshot() (Status, error) {
 	return status, holdersErr
 }
 
+func observe(op, path string) {
+	if fileAccessHook != nil {
+		fileAccessHook(op, path)
+	}
+}
+
 func writeJSON(path string, value any) (err error) {
+	observe("replace", path)
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err

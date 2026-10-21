@@ -25,6 +25,7 @@ func TestQueueResetDoesNotStallWaiters(t *testing.T) {
 		} else {
 			lock, err := lockfile.Acquire(m.slotLock(0)) // a holder that never queued here
 			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, lock.Release()) })
 			holder = lock
 		}
 		var mu sync.Mutex
@@ -43,7 +44,7 @@ func TestQueueResetDoesNotStallWaiters(t *testing.T) {
 		}
 		go waiter("before-reset")
 		waitQueued(t, m, 1)
-		require.NoError(t, os.Remove(filepath.Join(m.Dir, queueFile)))
+		removeQueueFile(t, m)
 		require.Eventually(t, func() bool { // the first waiter rejoins the empty queue
 			_, err := os.Stat(filepath.Join(m.Dir, queueFile))
 			return err == nil
@@ -54,7 +55,7 @@ func TestQueueResetDoesNotStallWaiters(t *testing.T) {
 		require.NoError(t, <-errs)
 		require.NoError(t, <-errs)
 		require.Equal(t, []string{"before-reset", "after-reset"}, order, "a rejoining waiter keeps its place")
-		state, err := m.readState()
+		state, err := lockedState(m)
 		require.NoError(t, err)
 		require.Empty(t, state.Tickets)
 	}
@@ -109,7 +110,7 @@ func TestMalformedQueueIsTreatedAsEmpty(t *testing.T) {
 		require.NoError(t, err, "a corrupt queue only resets ordering; capacity is enforced by slot locks")
 		require.Len(t, warnings, 1)
 		require.Contains(t, warnings[0], "malformed slot queue")
-		state, err := m.readState()
+		state, err := lockedState(m)
 		require.NoError(t, err, "the next write repairs the queue")
 		require.Empty(t, state.Tickets)
 		require.NoError(t, held.Release())
