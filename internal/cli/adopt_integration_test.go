@@ -197,7 +197,7 @@ func TestAdoptDryRunWithTokenButNoLease(t *testing.T) {
 
 func TestAdoptAllPrefixesLeaseWarningsWithPath(t *testing.T) {
 	f := newAgentFixture(t, "scaffold:\n  override: true\n", nil)
-	leased := f.addGitWorktree("feature/leased", "feature-leased")
+	f.addGitWorktree("feature/leased", "feature-leased")
 	f.addGitWorktree("feature/free", "feature-free")
 	_, stderr, code := f.runJSON(f.repo, "adopt", "feature-leased", "--lease-owner", "codex")
 	require.Equal(t, 0, code, stderr)
@@ -205,5 +205,8 @@ func TestAdoptAllPrefixesLeaseWarningsWithPath(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	warnings := field(t, envelope, "warnings").([]any)
 	require.Len(t, warnings, 1)
+	// Git may spell paths differently from the OS (C:/ vs C:\); the warning
+	// must name the leased worktree exactly as its JSON entry reports it.
+	leased := field(t, adoptEntries(t, envelope)["feature-leased"], "worktree", "path").(string)
 	require.True(t, strings.HasPrefix(warnings[0].(string), leased+": "), warnings[0])
 }

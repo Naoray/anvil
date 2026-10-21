@@ -111,8 +111,8 @@ func runAdopt(cmd *cobra.Command, args []string) (agentResult, error) {
 		entry, entryWarnings, err := adoptOne(pc, wt, all && isMainWorktree(pc, wt, index), opts, dryRun)
 		for _, warning := range entryWarnings {
 			if all {
-				// Several worktrees report; name the one each warning is about.
-				warning = wt.Path + ": " + warning
+				// Several worktrees report; name each warning by its entry's reported path.
+				warning = entry.Worktree.Path + ": " + warning
 			}
 			warnings = append(warnings, warning)
 		}
