@@ -77,7 +77,7 @@ func TestWorkingStateDistinguishesDirtyFromHead(t *testing.T) {
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir, "-c", "protocol.file.allow=always"}, args...)...).CombinedOutput()
+	out, err := exec.Command("git", append([]string{"-C", dir, "-c", "protocol.file.allow=always", "-c", "user.email=t@e.st", "-c", "user.name=T"}, args...)...).CombinedOutput()
 	require.NoError(t, err, string(out))
 }
 
