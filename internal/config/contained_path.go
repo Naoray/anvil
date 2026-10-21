@@ -31,7 +31,7 @@ func ResolveContainedPath(worktreePath, path string) (string, error) {
 		return "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("path %q leaves the worktree", path)
+		return "", fmt.Errorf("path %q resolves outside the worktree", path)
 	}
 	return resolved, nil
 }

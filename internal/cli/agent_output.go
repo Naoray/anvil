@@ -23,6 +23,8 @@ type agentResult struct {
 type agentCommand struct {
 	Name     string
 	Mutating bool
+	// DryRun marks commands that implement a side-effect-free preview.
+	DryRun bool
 	// Human renders a successful result for terminals; nil prints nothing.
 	Human func(result agentResult) error
 }
@@ -33,6 +35,11 @@ type agentCommand struct {
 // stable exit statuses in both modes.
 func runAgentCommand(cmd *cobra.Command, spec agentCommand, fn func() (agentResult, error)) error {
 	jsonMode := mustGetBool(cmd, "json")
+	if spec.Mutating && !spec.DryRun && mustGetBool(cmd, "dry-run") {
+		fn = func() (agentResult, error) {
+			return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "%s does not support --dry-run", spec.Name)
+		}
+	}
 	if !jsonMode {
 		result, err := fn()
 		for _, warning := range result.Warnings {

@@ -65,9 +65,6 @@ type ensureData struct {
 }
 
 func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
-	if mustGetBool(cmd, "dry-run") {
-		return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "ensure does not support --dry-run")
-	}
 	jsonMode := mustGetBool(cmd, "json")
 	verbose := mustGetBool(cmd, "verbose")
 	quiet := mustGetBool(cmd, "quiet") || jsonMode
@@ -142,15 +139,28 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
-		fmt.Fprintf(os.Stderr, "preparation failed: %v\n", runErr)
-		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: "preparation failed; see stderr for diagnostics",
-			Cause:   runErr,
-		}
+		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
+}
+
+// prepareFailure names the failed step without copying child output into JSON.
+func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
+	fmt.Fprintf(os.Stderr, "preparation failed: %v\n", runErr)
+	step, key := "a step", ""
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+			key = outcome.Key
+		}
+	}
+	return &agentapi.Error{
+		Code:    agentapi.CodePrepareFailed,
+		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
+		Details: map[string]any{"failed_step": key},
+		Cause:   runErr,
+	}
 }
 
 // ensureWorktreeExists resolves the target, creating it under the
