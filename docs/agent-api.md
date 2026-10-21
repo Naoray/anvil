@@ -178,6 +178,9 @@ Recorded roles and pins are never changed implicitly (`invalid_arguments`).
 Re-ensuring a review by name, path, ID or from its directory preserves its
 minimal preparation policy without repeating `--review`. Scaffold steps still
 require `--full-prepare` or `roles.review.scaffold`.
+An existing worktree without role metadata cannot become a review, even when
+its HEAD matches the requested commit. This includes the main checkout and
+legacy branch worktrees. `--review` creates a separate detached worktree.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases

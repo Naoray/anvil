@@ -154,7 +154,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, err
 	}
-	if err := checkRoleCompatible(target.Path, opts); err != nil {
+	if err := checkRoleCompatible(target.Path, opts, created); err != nil {
 		return agentResult{}, err
 	}
 	metadata, err := wtstate.ReadMetadata(target.Path)
@@ -324,7 +324,7 @@ func reviewComponents(wenv *worktreeEnv, role string) []capabilities.ComponentPl
 
 // checkRoleCompatible refuses before any write when flags contradict the
 // recorded role or pin.
-func checkRoleCompatible(path string, opts ensureOptions) error {
+func checkRoleCompatible(path string, opts ensureOptions, created bool) error {
 	metadata, err := wtstate.ReadMetadata(path)
 	if err != nil {
 		return agentapi.Wrap(agentapi.CodeInternal, err)
@@ -335,12 +335,8 @@ func checkRoleCompatible(path string, opts ensureOptions) error {
 	if opts.ReviewCommit != "" && metadata.PinnedCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
 		return agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
 	}
-	if opts.ReviewCommit != "" && metadata.Role == "" {
-		// An existing worktree named for a review must be one Anvil created.
-		head, err := git.HeadCommit(path)
-		if err != nil || head != opts.ReviewCommit {
-			return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree of %s", path, opts.ReviewCommit)
-		}
+	if opts.ReviewCommit != "" && metadata.Role == "" && !created {
+		return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; create a new detached review instead", path)
 	}
 	return nil
 }
