@@ -21,7 +21,7 @@ Every command run with `--json` writes **exactly one** JSON document to stdout:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `schema` | string | Contract version. Additive fields keep the version; renamed, removed or redefined fields bump it. |
+| `schema` | string | Contract version. Additive fields keep the version; renamed, removed or redefined fields bump it (one deliberate exception: `status --all` entry `lease`/`prepare` became objects within v1 — see the compatibility note under `anvil status --all --json`). |
 | `command` | string | The command that produced the document. |
 | `ok` | bool | `true` only when the operation fully succeeded. Incomplete preparation is never `ok`. |
 | `mutating` | bool | Whether the command may change worktrees, state or processes. Read-only commands never write `.anvil.local`. |
@@ -35,7 +35,9 @@ Rules:
   carries only the envelope, with no ANSI escapes.
 - `--json` never prompts. Agent commands never use partial name matching.
 - Argument and flag errors (unknown flags, extra arguments) also produce one
-  `invalid_arguments` envelope when `--json` appears anywhere before `--`.
+  `invalid_arguments` envelope when `--json` appears anywhere before `--` on a
+  command that supports `--json`. The root command does not: `anvil --version
+  --json` is a plain flag error; use `anvil version --json`.
 - Mutating commands without a side-effect-free mode refuse `--dry-run` with
   `invalid_arguments` before any effect; inspect with read-only commands.
 - Secrets are never included. Preparation errors use a classified summary;
@@ -133,6 +135,8 @@ object (see [Leases](#leases)) and the same readiness semantics (see
 "data": {
   "worktree": { "...": "see above" },
   "created": false,
+  "ready": true,
+  "lease": {"state": "none"},
   "prepare": {
     "status": "complete",
     "ready": true,
