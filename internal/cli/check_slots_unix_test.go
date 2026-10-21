@@ -302,3 +302,54 @@ func TestSlotsCommandReportsLoadAndCapacity(t *testing.T) {
 	require.Equal(t, 5, code)
 	require.Equal(t, "config_invalid", field(t, envelope, "error", "code"))
 }
+
+const nestedYAML = `checks:
+  outer:
+    expensive: true
+    commands:
+      - BIN check inner --allow-expensive --json > TRACE/unbounded.json; echo $? > TRACE/unbounded.code; true
+      - BIN check inner --allow-expensive --json --slot-wait 300ms > TRACE/bounded.json; echo $? > TRACE/bounded.code; true
+  inner:
+    expensive: true
+    commands: ["true"]
+`
+
+// TestNestedGatedCheckFailsFastInsteadOfDeadlocking: a gated check started
+// from a command of a check that holds a slot would wait forever at full
+// capacity; with the default unbounded --slot-wait it is refused.
+func TestNestedGatedCheckFailsFastInsteadOfDeadlocking(t *testing.T) {
+	f, trace, wts := slotFixture(t, 1, strings.ReplaceAll(nestedYAML, "BIN", getAnvilBinary(t)), "a")
+	cmd := exec.Command(f.bin, "check", "outer", "--allow-expensive", "--json")
+	cmd.Dir, cmd.Env = wts["a"], f.env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Start())
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err, stderr.String())
+	case <-time.After(30 * time.Second):
+		require.NoError(t, cmd.Process.Kill())
+		<-done
+		t.Fatal("nested gated check deadlocked")
+	}
+	readCode := func(name string) string {
+		content, err := os.ReadFile(filepath.Join(trace, name+".code"))
+		require.NoError(t, err)
+		return strings.TrimSpace(string(content))
+	}
+	readError := func(name string) map[string]any {
+		var envelope map[string]any
+		content, err := os.ReadFile(filepath.Join(trace, name+".json"))
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(content, &envelope))
+		return envelope["error"].(map[string]any)
+	}
+	require.Equal(t, "5", readCode("unbounded"))
+	unbounded := readError("unbounded")
+	require.Equal(t, "config_invalid", unbounded["code"])
+	require.Contains(t, unbounded["message"], "inside check \"outer\"")
+	require.Equal(t, "7", readCode("bounded"), "an explicit bound keeps queueing behavior")
+	require.Equal(t, "resource_busy", readError("bounded")["code"])
+}

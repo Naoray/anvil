@@ -380,6 +380,13 @@ overridden by `ANVIL_CHECK_SLOTS`, `ANVIL_CHECK_MAX_LOAD` and
 gating is off unless `max_load` is set. A check whose weight exceeds the capacity
 fails before anything runs with `config_invalid` (exit 5).
 
+Capacity is enforced per runtime root: processes that share
+`ANVIL_RUNTIME_ROOT` (by default one per user) share the slots; another user
+or root has its own. Each participant takes slots among the first `capacity`
+slot files it is configured with, so if participants are configured with
+different capacities the effective machine-wide cap is the largest of them.
+Keep `checks.slots` and `ANVIL_CHECK_SLOTS` consistent.
+
 - **Order.** Waiters are admitted strictly head-of-line: higher
   `--priority N` first, then arrival. Only the head may take slots, so a
   request never overtakes an earlier request of equal or higher priority,
@@ -402,10 +409,13 @@ fails before anything runs with `config_invalid` (exit 5).
   worktree's shared lifecycle gate and the check's active lock, so the
   worktree cannot be removed (`cleanup_blocked`) and the same check cannot
   start again there while it waits.
-- **Nesting.** A slot-gated check whose command runs another slot-gated
-  `anvil check` waits for a second slot while holding the first: at capacity
-  1 with the default unbounded `--slot-wait` this never completes. Do not nest
-  expensive checks, or bound the inner wait.
+- **Nesting.** Commands of a check that holds a slot receive
+  `ANVIL_CHECK_SLOT_HOLDER=<check>`. A slot-gated `anvil check` started there
+  would wait for capacity its own ancestor holds, which never frees at full
+  capacity, so with the default unbounded `--slot-wait` it is refused before
+  queueing with `config_invalid` (exit 5) naming both checks. An explicit
+  `--slot-wait D` queues as usual and fails with `resource_busy` when the
+  bound elapses.
 - **Queue state.** `queue.json` only orders waiters. If it is lost or
   malformed it is reset with a warning; capacity stays enforced by the slot
   lock files. Writes are atomic and synced.
@@ -539,7 +549,8 @@ concurrent callers use the same lock even during deletion.
   "capacity": 2, "in_use": 1,
   "load": {"supported": true, "value": 3.12, "max": 6, "wait_seconds": 120},
   "holders": [{"slot": 0, "weight": 1, "pid": 4242, "check": "bench", "worktree": "…", "worktree_id": "wt_…", "run_id": "…", "priority": 0, "since": "…"}],
-  "queue": [{"position": 1, "waiting_for": "slot", "priority": 5, "weight": 2, "check": "e2e", "worktree": "…", "worktree_id": "wt_…", "pid": 4310, "enqueued_at": "…", "heartbeat": "…", "responsive": true}]
+  "queue": [{"position": 1, "waiting_for": "slot", "priority": 5, "weight": 2, "check": "e2e", "worktree": "…", "worktree_id": "wt_…", "pid": 4310, "enqueued_at": "…", "heartbeat": "…", "responsive": true}],
+  "queue_busy": false
 }
 ```
 
@@ -548,6 +559,10 @@ off; `load.value` is `null` (and `supported` false) where the load average is
 unavailable, and `load.error` then says why (omitted otherwise). `queue` is in admission order and omits tickets of dead or
 recycled PIDs; only position 1 can be `waiting_for: "load"`. Holders are
 reported only while their slot lock is held. The view creates nothing.
+`queue_busy: true` (with a warning) means the queue lock stayed busy: `in_use`
+is still exact, probed from the slot locks, but `holders` and `queue` are
+`null` (unavailable), never reported as empty. The `slots` objects of
+`check --list` and `status` carry the same `queue_busy` flag.
 
 ## `anvil status --json`
 

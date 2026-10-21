@@ -65,7 +65,8 @@ machine-wide slot semaphore across every project and worktree (see
 'anvil slots'). They queue strictly in order, higher --priority first, then
 arrival; --slot-wait bounds the wait and fails with resource_busy. Unlike
 --lock-wait, --slot-wait 0 (the default) waits until interrupted. While queued, progress lines go to stderr. A --reuse hit
-executes nothing and never queues.
+executes nothing and never queues. A slot-gated check started from a command
+of a check that holds a slot is refused unless --slot-wait bounds its wait.
 
 Child output streams to stdout (stderr with --json). With --json the
 envelope carries the results; the exit status is the first failing
