@@ -39,6 +39,10 @@ type RunRequest struct {
 	Now          func() time.Time
 	Reuse        bool
 	ReuseMiss    func(string)
+	// Resources are the declared shared resources (see IdentityRequest).
+	Resources []SharedResource
+	// Warn receives nonfatal problems found while identifying the run.
+	Warn func(string)
 }
 
 // ErrAlreadyRunning reports a concurrent run of the same check in the same worktree.
@@ -88,7 +92,8 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	defer func() { err = errors.Join(err, locks.release()) }()
 
 	guards := append([]*lockfile.Lock{gate, active}, locks...)
-	identityReq := IdentityRequest{Guards: guards, WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
+	identityReq := IdentityRequest{Guards: guards, WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv,
+		Resources: req.Resources, RuntimeRoot: req.RuntimeRoot, CacheWrite: true, Warn: req.Warn}
 	targets, err := resolveTargets(identityReq)
 	if err != nil {
 		return nil, err

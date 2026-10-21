@@ -217,6 +217,49 @@ type SharedResource struct {
 	Path     string `yaml:"path"`
 	Env      string `yaml:"env"`
 	Required bool   `yaml:"required"`
+	// Identity says how checks that declare this resource identify its
+	// contents. Checks may only depend on resources that declare one.
+	Identity *SharedIdentity `yaml:"identity"`
+}
+
+// SharedIdentity selects exactly one way to identify a shared resource's
+// contents for check results.
+type SharedIdentity struct {
+	// File is hashed by content (for example a SHA256SUMS manifest); it is
+	// relative to the resource path and must stay inside it.
+	File string `yaml:"file" json:"file,omitempty"`
+	// Command runs in the resource directory; its stdout is the identity.
+	Command string `yaml:"command" json:"command,omitempty"`
+	// Directory hashes the whole resource tree (cached by file metadata).
+	Directory bool `yaml:"directory" json:"directory,omitempty"`
+}
+
+// Shared resource identity methods.
+const (
+	IdentityFile      = "file"
+	IdentityCommand   = "command"
+	IdentityDirectory = "directory"
+)
+
+// Method names the single declared method, or "" when none or several are set.
+func (i *SharedIdentity) Method() string {
+	if i == nil {
+		return ""
+	}
+	var methods []string
+	if i.File != "" {
+		methods = append(methods, IdentityFile)
+	}
+	if strings.TrimSpace(i.Command) != "" {
+		methods = append(methods, IdentityCommand)
+	}
+	if i.Directory {
+		methods = append(methods, IdentityDirectory)
+	}
+	if len(methods) != 1 {
+		return ""
+	}
+	return methods[0]
 }
 
 // ProcessConfig declares one managed development process.
@@ -272,6 +315,16 @@ func (c *Config) validateResources() error {
 		}
 		if shared.Env != "" && !IsValidEnvName(shared.Env) {
 			problems = append(problems, fmt.Errorf("resources.shared %q: invalid env name %q", shared.Name, shared.Env))
+		}
+		if shared.Identity != nil {
+			switch shared.Identity.Method() {
+			case "":
+				problems = append(problems, fmt.Errorf("resources.shared %q: identity must set exactly one of file, command or directory", shared.Name))
+			case IdentityFile:
+				if err := ValidateRelativePath(shared.Identity.File); err != nil {
+					problems = append(problems, fmt.Errorf("resources.shared %q: identity file: %w", shared.Name, err))
+				}
+			}
 		}
 	}
 	names("shared", sharedNames)
