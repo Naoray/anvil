@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `anvil check --reuse` reuses a clean passing result from another worktree of the same repository at the same content identity (HEAD tree, check definition, inputs, toolchain, platform, declared shared resources and declared environment with worktree paths, IDs, ports and database names normalized; agent session variables ignored, `identity_env` for named inherited ones). The reusing worktree records the result with `reused_from`; every result records its `producer` (worktree, role, lease owner). `--reuse-trust same-worktree|same-role|any`, `--reuse-exclude-role` and `roles.<role>.reuse_trust` / `reuse_exclude_roles` restrict producers (default `any`). Run output and `check --list`/`status` report `assessment.reused_from`.
+
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.

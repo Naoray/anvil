@@ -157,5 +157,11 @@ func (p *runtimeCleanupPlan) release() error {
 			problems = append(problems, err)
 		}
 	}
+	// Reuse index entries point into the released runtime directory.
+	if p.root != "" {
+		if err := checks.ForgetWorktree(p.root, p.WorktreeID); err != nil {
+			problems = append(problems, fmt.Errorf("removing reuse index entries: %w", err))
+		}
+	}
 	return errors.Join(problems...)
 }

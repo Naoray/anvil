@@ -24,6 +24,10 @@ const (
 	SourceComponent = "component"
 	SourceDatabase  = "database"
 	SourceResource  = "resource"
+	// SourceInherited marks a value taken from the invoking process
+	// environment rather than declared or set by Anvil (agent sessions,
+	// shells, CI). Only check identities distinguish it.
+	SourceInherited = "inherited"
 )
 
 // Variable is one exported environment value.

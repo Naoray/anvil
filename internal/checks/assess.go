@@ -15,6 +15,9 @@ type Assessment struct {
 	PassingAndCurrent bool `json:"passing_and_current"`
 	// Reasons lists every identity component that changed.
 	Reasons []string `json:"stale_reasons"`
+	// ReusedFrom names the run that produced the result when it was reused
+	// rather than executed (null for an executed result).
+	ReusedFrom *ReusedFrom `json:"reused_from"`
 }
 
 // Assess compares a stored result with the current identity.
@@ -24,6 +27,7 @@ func Assess(result *Result, current Identity) Assessment {
 		assessment.Reasons = append(assessment.Reasons, "never run")
 		return assessment
 	}
+	assessment.ReusedFrom = result.ReusedFrom
 	recorded := result.Identity
 	add := func(changed bool, reason string) {
 		if changed {

@@ -63,3 +63,38 @@ func TestCheckSharedResourceValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckReuseConfigDecodes(t *testing.T) {
+	cfg, err := loadYAML(t, `roles:
+  implementation:
+    reuse_trust: same-worktree
+  review:
+    env_unset: [DEPLOY_TOKEN]
+    reuse_trust: same-role
+    reuse_exclude_roles: [implementation]
+checks:
+  fast:
+    commands: ["true"]
+    identity_env: [FEATURE_FLAG]
+`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"FEATURE_FLAG"}, cfg.Checks[0].IdentityEnv)
+	require.Equal(t, RoleReuseConfig{ReuseTrust: ReuseTrustSameWorktree}, cfg.Roles.Reuse("implementation"))
+	require.Equal(t, RoleReuseConfig{ReuseTrust: ReuseTrustSameRole, ReuseExcludeRoles: []string{"implementation"}}, cfg.Roles.Reuse("review"))
+	require.Equal(t, []string{"DEPLOY_TOKEN"}, cfg.Roles.Review.EnvUnset)
+	require.Equal(t, RoleReuseConfig{}, cfg.Roles.Reuse(""), "unlabelled worktrees use the default")
+}
+
+func TestCheckReuseConfigValidation(t *testing.T) {
+	for name, tc := range map[string]struct{ yaml, want string }{
+		"trust":        {"roles:\n  review:\n    reuse_trust: everyone\n", `roles.review.reuse_trust: invalid value "everyone"`},
+		"exclude role": {"roles:\n  implementation:\n    reuse_exclude_roles: [qa]\n", `roles.implementation.reuse_exclude_roles: unknown role "qa"`},
+		"identity_env": {"checks:\n  fast:\n    commands: [\"true\"]\n    identity_env: [\"BAD-NAME\"]\n", `identity_env: invalid variable name "BAD-NAME"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadYAML(t, tc.yaml)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}

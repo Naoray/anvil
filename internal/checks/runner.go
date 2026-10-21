@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/lifecycle"
 	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/workenv"
@@ -39,6 +40,15 @@ type RunRequest struct {
 	Now          func() time.Time
 	Reuse        bool
 	ReuseMiss    func(string)
+	// Producer describes this worktree (role, lease owner) on every result
+	// it records; its ID and path default to Worktree's.
+	Producer Producer
+	// ReusePolicy restricts which producers' results --reuse returns.
+	ReusePolicy ReusePolicy
+	// CommonDir is the canonical Git common directory shared by the
+	// project's worktrees. It enables the cross-worktree reuse index under
+	// RuntimeRoot ("" limits reuse to this worktree).
+	CommonDir string
 	// Resources are the declared shared resources (see IdentityRequest).
 	Resources []SharedResource
 	// Warn receives nonfatal problems found while identifying the run.
@@ -47,6 +57,21 @@ type RunRequest struct {
 
 // ErrAlreadyRunning reports a concurrent run of the same check in the same worktree.
 var ErrAlreadyRunning = errors.New("this check is already running in this worktree")
+
+func (r RunRequest) producer() *Producer {
+	producer := r.Producer
+	if producer.WorktreeID == "" {
+		producer.WorktreeID = r.Worktree.ID
+	}
+	if producer.Path == "" {
+		producer.Path = r.Worktree.Path
+	}
+	return &producer
+}
+
+func (r RunRequest) reuseIndex() ReuseIndex {
+	return ReuseIndex{Root: r.RuntimeRoot, CommonDir: r.CommonDir}
+}
 
 func (r RunRequest) now() time.Time {
 	if r.Now != nil {
@@ -105,13 +130,17 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 
 	if req.Reuse {
-		reused, reason, err := store.reusable(req.Check, identity)
+		lookup := reuseLookup{Store: store, Index: req.reuseIndex(), Self: *req.producer(), Policy: req.ReusePolicy}
+		reused, from, reason, err := findReusable(ctx, lookup, req.Check, identity)
 		if err != nil {
 			return nil, err
 		}
-		if reused != nil {
-			reused.Reused = true
+		if reused != nil && reused.Worktree.ID == req.Worktree.ID {
+			reused.Reused, reused.ReusedFrom = true, from
 			return reused, nil
+		}
+		if reused != nil {
+			return recordReuse(req, store, identity, reused, from, runID, started)
 		}
 		if req.ReuseMiss != nil {
 			req.ReuseMiss(reason)
@@ -133,7 +162,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 		Schema: ResultSchema, RunID: runID, Check: req.Check.Name, Status: StatusRunning,
 		StartedAt: started, Worktree: req.Worktree, Identity: identity,
 		Commands: []CommandResult{}, Artifacts: []Artifact{}, Locks: append([]string{}, req.Check.Locks...),
-		AnvilVersion: req.AnvilVersion, RunDir: runDir,
+		AnvilVersion: req.AnvilVersion, RunDir: runDir, Producer: req.producer(),
 	}
 	if err := store.save(result); err != nil {
 		return nil, err
@@ -169,7 +198,27 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	if err := store.save(result); err != nil {
 		return result, err
 	}
+	if req.Check.Reusable && result.Identity.ContentDigest != "" && result.Status == StatusPassed {
+		if err := indexIfUnchanged(req, result, finished); err != nil && req.Warn != nil {
+			req.Warn(fmt.Sprintf("check %s: not offered for reuse across worktrees: %v", req.Check.Name, err))
+		}
+	}
 	return result, store.prune(req.Check.Name)
+}
+
+// indexIfUnchanged offers a passing result to other worktrees only when the
+// checkout still has the state the identity recorded before the commands
+// ran: a run that modified tracked or untracked files validated a state
+// nobody else has, so it stays usable only in this worktree.
+func indexIfUnchanged(req RunRequest, result *Result, finished time.Time) error {
+	state, err := git.ReadWorkingState(req.Worktree.Path)
+	if err != nil {
+		return fmt.Errorf("re-reading the working tree: %w", err)
+	}
+	if state.Digest != result.Identity.Git.Digest || state.Dirty {
+		return errors.New("the run changed the working tree")
+	}
+	return req.reuseIndex().record(result, finished)
 }
 
 // Run-specific variables give runners stable cache keys.

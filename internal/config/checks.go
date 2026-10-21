@@ -36,6 +36,10 @@ type CheckConfig struct {
 	// Resources names shared resources (resources.shared) whose identity
 	// becomes part of the result identity. Undeclared resources never do.
 	Resources []string `yaml:"resources" json:"resources,omitempty"`
+	// IdentityEnv names inherited (process) variables whose values become
+	// part of the content identity used for reuse across worktrees. Declared
+	// and Anvil-set variables always are; other inherited ones never are.
+	IdentityEnv []string `yaml:"identity_env" json:"identity_env,omitempty"`
 }
 
 // CheckCommand is one ordered command of a check. A plain string is
@@ -154,6 +158,11 @@ func (c *Config) validateChecks() error {
 				problems = append(problems, fmt.Errorf("%s: unknown shared resource %q (declare it under resources.shared)", label, name))
 			case shared.Identity == nil:
 				problems = append(problems, fmt.Errorf("%s: shared resource %q declares no identity (set resources.shared identity file, command or directory)", label, name))
+			}
+		}
+		for _, name := range check.IdentityEnv {
+			if !IsValidEnvName(name) {
+				problems = append(problems, fmt.Errorf("%s: identity_env: invalid variable name %q", label, name))
 			}
 		}
 		for _, path := range append(append([]string(nil), check.Artifacts...), check.Inputs...) {
