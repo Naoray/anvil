@@ -6,8 +6,11 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/naoray/anvil/internal/lockfile"
 )
 
 const crossReuseFixtureYAML = `env:
@@ -222,6 +225,39 @@ func TestRemoveForgetsReuseIndexEntries(t *testing.T) {
 	found, err = filepath.Glob(pattern)
 	require.NoError(t, err)
 	require.Empty(t, found)
+}
+
+// A stuck holder of the reuse index lock never fails or hangs a removal; the
+// leftover entries are reported and ignored by later lookups.
+func TestRemoveWarnsWhenReuseIndexIsBusy(t *testing.T) {
+	skipWithoutCheckExecution(t)
+	f := withEnv(newAgentFixture(t, crossReuseFixtureYAML, nil), "RUN_LOG="+filepath.Join(t.TempDir(), "runs.log"), "CHECK_MODE=fast")
+	envelope, stderr, code := f.runJSON(f.repo, "ensure", "author", "--role", "implementation")
+	require.Equal(t, 0, code, stderr)
+	author := field(t, envelope, "data", "worktree", "path").(string)
+	_, stderr, code = f.runJSON(author, "check", "fast")
+	require.Equal(t, 0, code, stderr)
+	locks, err := filepath.Glob(filepath.Join(f.runtimeRoot(), "reuse", "*", "fast", ".lock"))
+	require.NoError(t, err)
+	require.Len(t, locks, 1)
+	held, err := lockfile.Acquire(locks[0])
+	require.NoError(t, err)
+	defer func() { require.NoError(t, held.Release()) }()
+
+	done := make(chan struct{})
+	var stdout string
+	go func() {
+		defer close(done)
+		stdout, stderr, code = f.run(f.repo, "remove", "author", "--force")
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("remove blocked on the reuse index lock")
+	}
+	require.Equal(t, 0, code, stdout+stderr)
+	require.Contains(t, stdout+stderr, "reuse index")
+	require.NoDirExists(t, author)
 }
 
 // skipWithoutCheckExecution skips scenarios that execute check commands:

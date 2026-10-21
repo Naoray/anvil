@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/slots"
 	"github.com/naoray/anvil/internal/workenv"
 	"github.com/naoray/anvil/internal/wtstate"
@@ -561,4 +562,107 @@ func TestCrossWorktreeHitAfterQueueingRecordsQueueTime(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, result.QueuedMS, stored.QueuedMS)
 	require.Equal(t, result.StartedAt, stored.StartedAt)
+}
+
+// finishesWithin fails the test if fn has not returned after limit (a
+// hang). fn must not call t.FailNow; assertions follow the call.
+func finishesWithin(t *testing.T, limit time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(limit):
+		t.Fatalf("still blocked after %s", limit)
+	}
+}
+
+// A stopped holder of the reuse index lock never blocks a check, a lookup
+// or a removal: each waits a bounded time and degrades to a warning or miss.
+func TestReuseIndexLockWaitIsBounded(t *testing.T) {
+	skipWithoutCheckExecution(t)
+	old := indexLockWait
+	indexLockWait = 200 * time.Millisecond
+	t.Cleanup(func() { indexLockWait = old })
+	f := newCrossFixture(t)
+	author := f.add("author", wtstate.RoleImplementation, 41001)
+	review := f.add("review", wtstate.RoleReview, 41002)
+	produced, _ := f.run(author, reusableCheck())
+	locks, err := filepath.Glob(filepath.Join(f.root, "reuse", "*", "fast", ".lock"))
+	require.NoError(t, err)
+	require.Len(t, locks, 1)
+	held, err := lockfile.Acquire(locks[0])
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, held.Release()) })
+
+	// Recording: the check still passes; the index is skipped with a warning.
+	var warnings []string
+	var result *Result
+	finishesWithin(t, 5*time.Second, func() {
+		request := f.request(author, reusableCheck(), nil)
+		request.Reuse = false
+		request.Warn = func(message string) { warnings = append(warnings, message) }
+		result, err = Run(context.Background(), request)
+	})
+	require.NoError(t, err)
+	require.Equal(t, StatusPassed, result.Status)
+	require.Contains(t, strings.Join(warnings, "\n"), "reuse index")
+
+	// Lookup that would remove a vanished entry: a miss with a reason.
+	entries, err := filepath.Glob(filepath.Join(f.root, "reuse", "*", "fast", "*", author.id+".json"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	content, err := os.ReadFile(entries[0])
+	require.NoError(t, err)
+	var entry reuseIndexEntry
+	require.NoError(t, json.Unmarshal(content, &entry))
+	require.NoError(t, os.RemoveAll(filepath.Dir(entry.Result)))
+	var misses []string
+	finishesWithin(t, 5*time.Second, func() {
+		result, err = Run(context.Background(), f.request(review, reusableCheck(), &misses))
+	})
+	require.NoError(t, err)
+	require.False(t, result.Reused)
+	require.Contains(t, strings.Join(misses, "\n"), "index lock")
+
+	// Removal: forgetting the worktree reports the busy lock instead of hanging.
+	finishesWithin(t, 5*time.Second, func() { err = ForgetWorktree(f.root, author.id) })
+	require.ErrorContains(t, err, "index lock")
+	require.NotEmpty(t, produced.RunID)
+}
+
+// Temporary files left by a crashed writer do not keep a content directory
+// alive once its last entry is removed.
+func TestReuseIndexRemovesStaleTemporaryFiles(t *testing.T) {
+	skipWithoutCheckExecution(t)
+	f := newCrossFixture(t)
+	author := f.add("author", wtstate.RoleImplementation, 41001)
+	f.run(author, reusableCheck())
+	entries, err := filepath.Glob(filepath.Join(f.root, "reuse", "*", "fast", "*", author.id+".json"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	digestDir := filepath.Dir(entries[0])
+	stale := filepath.Join(digestDir, ".result-123")
+	fresh := filepath.Join(digestDir, ".result-456")
+	for _, path := range []string{stale, fresh} {
+		require.NoError(t, os.WriteFile(path, []byte("partial"), 0o600))
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	require.NoError(t, ForgetWorktree(f.root, author.id))
+	require.NoFileExists(t, stale, "stale temporary files are removed")
+	require.FileExists(t, fresh, "an in-flight write is left alone")
+	require.NoError(t, os.Chtimes(fresh, old, old))
+	rerun := f.request(author, reusableCheck(), nil)
+	rerun.Reuse = false // execute and record again: recording cleans the directory it writes to
+	result, err := Run(context.Background(), rerun)
+	require.NoError(t, err)
+	require.Equal(t, StatusPassed, result.Status)
+	require.NoFileExists(t, fresh)
+	require.NoError(t, ForgetWorktree(f.root, author.id))
+	require.NoDirExists(t, digestDir, "the empty content directory is removed")
 }

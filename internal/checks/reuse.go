@@ -132,6 +132,11 @@ func (x ReuseIndex) dir(check, digest string) string {
 	return filepath.Join(x.checkDir(check), digest)
 }
 
+// indexLockWait bounds every wait for a reuse index lock, so a stopped or
+// wedged holder never blocks a check, a lookup or a removal: recording
+// degrades to a warning, a lookup to a miss and forgetting to a warning.
+var indexLockWait = 2 * time.Second
+
 // lockIndex serializes changes to one check's index entries (writes and
 // removals; readers need no lock because entries are replaced atomically).
 // It is a leaf lock: nothing else is acquired while it is held.
@@ -139,7 +144,40 @@ func lockIndex(checkDir string) (*lockfile.Lock, error) {
 	if err := os.MkdirAll(checkDir, 0o700); err != nil {
 		return nil, err
 	}
-	return lockfile.Acquire(filepath.Join(checkDir, ".lock"))
+	path := filepath.Join(checkDir, ".lock")
+	lock, err := lockfile.AcquireTimeout(path, indexLockWait)
+	if errors.Is(err, lockfile.ErrLocked) {
+		return nil, fmt.Errorf("reuse index lock %s is busy (held by another Anvil process for more than %s)", path, indexLockWait)
+	}
+	return lock, err
+}
+
+// removeStaleTemps deletes writeJSON temporary files older than staleTempAge
+// (left behind by a crashed writer) in an index content directory (called with the index lock held). Newer
+// ones may belong to a write in progress elsewhere and are left alone.
+func removeStaleTemps(dir string, now time.Time) error {
+	temps, err := filepath.Glob(filepath.Join(dir, ".result-*"))
+	if err != nil {
+		return err
+	}
+	var problems []error
+	for _, temp := range temps {
+		info, err := os.Lstat(temp)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		if !info.Mode().IsRegular() || now.Sub(info.ModTime()) < staleTempAge {
+			continue
+		}
+		if err := os.Remove(temp); err != nil && !errors.Is(err, os.ErrNotExist) {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
 }
 
 // record points the index at a clean passing result this worktree executed.
@@ -153,10 +191,14 @@ func (x ReuseIndex) record(result *Result, now time.Time) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, lock.Release()) }()
-	return writeJSON(filepath.Join(x.dir(result.Check, digest), result.Worktree.ID+".json"), reuseIndexEntry{
+	cleanErr := removeStaleTemps(x.dir(result.Check, digest), time.Now())
+	if errors.Is(cleanErr, os.ErrNotExist) {
+		cleanErr = nil
+	}
+	return errors.Join(cleanErr, writeJSON(filepath.Join(x.dir(result.Check, digest), result.Worktree.ID+".json"), reuseIndexEntry{
 		Schema: reuseIndexSchema, Check: result.Check, ContentDigest: digest, WorktreeID: result.Worktree.ID, WorktreePath: result.Worktree.Path,
 		RunID: result.RunID, Result: filepath.Join(result.RunDir, "result.json"), RecordedAt: now.UTC(),
-	})
+	}))
 }
 
 // forgetVanished removes an entry whose result file no longer exists (pruned
@@ -187,9 +229,13 @@ func (x ReuseIndex) forgetVanished(entry reuseIndexEntry) (err error) {
 	return removeEntry(path)
 }
 
-// removeEntry deletes an index entry and its content directory once empty.
+// removeEntry deletes an index entry, stale temporary files next to it and
+// its content directory once empty.
 func removeEntry(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := removeStaleTemps(filepath.Dir(path), time.Now()); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) && !isNotEmpty(err) {

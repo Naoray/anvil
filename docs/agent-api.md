@@ -312,6 +312,13 @@ result file no longer exists (pruned run) is removed by the lookup, and
 removing a worktree (`remove`, `prune`, `unlink` runtime cleanup) removes all
 of its entries. Index changes take a per-check index lock (a leaf lock;
 lookups read entries without it because entries are replaced atomically).
+Every wait for that lock is bounded (2s), so a stopped holder never blocks
+anything: recording an entry is then skipped with a warning, removing a
+vanished entry during a lookup becomes part of the miss reason, and removing a
+worktree's entries is a warning (`remove` still succeeds; the leftover
+entries are ignored by lookups). Temporary files of crashed index writes
+(`.result-*` older than an hour) are deleted when entries are written or
+removed next to them, so empty content directories can be removed.
 
 Trust model: the index and the results it points at are trusted as written by
 the same user's Anvil processes. Validation guards against stale state and
@@ -323,9 +330,17 @@ A cross-worktree hit runs nothing and writes a record into the consumer's own
 store: the consumer's identity, `status: "passed"`, no `commands`, the
 producer's `artifacts`, the consumer as `producer`, and
 `reused_from: {worktree_id, path, role, lease_owner, run_id, check}` naming the
-producing run. `check --list` and `status` in the consumer therefore report it
-current with `assessment.reused_from`; a later `--reuse` there returns that
-record (if the policy still admits its producer).
+producing run. `check --list` and `status` in the consumer assess that record
+like any other: against the **exact** identity (`identity_digest`), which
+includes the inherited environment. Run from the same shell environment they
+report it current with `assessment.reused_from`; from a shell whose inherited
+variables differ (another agent session) they report it stale with
+`environment changed`, even though `--reuse` there would still hit, because
+reuse across worktrees compares the content identity, which ignores most
+inherited variables. A later `--reuse` in the consumer returns that record when
+its exact identity is current (and the policy still admits its producer),
+otherwise it finds the producer again through the index and writes a new
+record.
 
 Where `reused_from` appears: run output (`check --reuse`) carries
 `assessment.reused_from` whenever `reused` is true, including same-worktree
