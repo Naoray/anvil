@@ -185,6 +185,9 @@ Every review re-ensure checks that the checkout remains detached at its recorded
 pin, including calls without `--review` and calls with `--skip-prepare`.
 A moved or branch-attached HEAD returns `invalid_arguments` before state or
 preparation changes. Anvil preserves reviewer edits and never resets the checkout.
+`roles.review.components` limits component preparation and requirement checks.
+Excluded components appear as skipped in `ensure` and `context`; their missing
+tools or directories do not block review readiness. `status` uses the same scope.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases

@@ -39,6 +39,9 @@ type Options struct {
 	// Selected names opt-in components to include. Naming a component also
 	// makes missing requirements fatal for it.
 	Selected []string
+	// Scope restricts applicability before requirements are evaluated. Empty
+	// means all declared components. Excluded components remain visible as skipped.
+	Scope    []string
 	GOOS     string
 	LookPath func(string) (string, error)
 }
@@ -87,6 +90,9 @@ func planComponent(worktreePath string, component config.Component, selected boo
 	}
 	if plan.Path == "" {
 		plan.Path = "."
+	}
+	if len(opts.Scope) > 0 && !contains(opts.Scope, component.Name) {
+		return skipped(plan, "outside role component scope"), nil
 	}
 
 	contributions := make([]Contribution, 0, len(component.Uses))

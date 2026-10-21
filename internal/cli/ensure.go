@@ -190,12 +190,12 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected})
+	envOptions := worktreeEnvOptions{Selected: selected, Role: effectiveRole}
+	wenv, err := loadWorktreeEnv(pc, *target, envOptions)
 	if err != nil {
 		return agentResult{}, err
 	}
 	reviewMinimal := effectiveRole == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
-	components := reviewComponents(wenv, effectiveRole)
 	data.Components = wenv.Components
 	if failure := environmentPreconditions(wenv); failure != nil {
 		summary, summaryWarnings := summarizeWorktree(*target)
@@ -206,7 +206,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	extraSteps := capabilities.Steps(components)
+	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
 	prepareConfig, defaultSteps := targetPC.Config, resolvedPreset.DefaultSteps()
 	presetName := resolvedPreset.Name()
@@ -227,13 +227,13 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
-	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
 		return agentResult{}, err
 	}
 	if err := provisionResources(wenv); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
-	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
 		return agentResult{}, err
 	}
 	// Match the naming used by the command that would otherwise have run:
@@ -301,25 +301,6 @@ func environmentPreconditions(wenv *worktreeEnv) error {
 		}
 	}
 	return nil
-}
-
-// reviewComponents applies roles.review.components to the plan.
-func reviewComponents(wenv *worktreeEnv, role string) []capabilities.ComponentPlan {
-	allowed := wenv.PC.Config.Roles.Review.Components
-	if role != wtstate.RoleReview || len(allowed) == 0 {
-		return wenv.Components
-	}
-	keep := map[string]bool{}
-	for _, name := range allowed {
-		keep[name] = true
-	}
-	var out []capabilities.ComponentPlan
-	for _, plan := range wenv.Components {
-		if keep[plan.Name] {
-			out = append(out, plan)
-		}
-	}
-	return out
 }
 
 // checkRoleCompatible refuses before any write when flags contradict the

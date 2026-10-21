@@ -47,6 +47,8 @@ type worktreeEnv struct {
 }
 
 type worktreeEnvOptions struct {
+	// Role supplies the effective role before a new worktree records metadata.
+	Role string
 	// Component selects one component for its directory and environment.
 	Component string
 	// Selected opt-in components to include in the plan.
@@ -80,8 +82,14 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	if result.Lease, err = wtstate.ReadLease(wt.Path); err != nil {
 		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	if result.Metadata.Role == wtstate.RoleReview {
+	role := opts.Role
+	if role == "" {
+		role = result.Metadata.Role
+	}
+	var scope []string
+	if role == wtstate.RoleReview {
 		result.Unset = append([]string(nil), target.Config.Roles.Review.EnvUnset...)
+		scope = target.Config.Roles.Review.Components
 	}
 
 	selected := append([]string(nil), opts.Selected...)
@@ -90,6 +98,7 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	}
 	result.Components, result.ComponentErr = capabilities.Plan(result.Worktree.Path, target.Config, capabilities.Options{
 		Selected: selected,
+		Scope:    scope,
 		GOOS:     runtime.GOOS,
 		LookPath: exec.LookPath,
 	})
