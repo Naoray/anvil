@@ -434,8 +434,9 @@ anvil run -- npm test                                     # current worktree and
 Exports `ANVIL_*` identity variables (`ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE`, …),
 recorded database names as `ANVIL_DB_DATABASE`/`ANVIL_TEST_DB_DATABASE`, and the
 project `env`. It never sets `DB_DATABASE`; use `anvil exec` for the Laravel test
-database. Child exit status passes through. Warns when preparation is incomplete;
-`--require-ready` refuses instead.
+database. Child exit status passes through. COMMAND is resolved on the exported
+`PATH`, so component-local tools win. Warns when preparation (including the
+selected component's) is incomplete; `--require-ready` refuses instead.
 
 ### Components (cross-stack projects)
 
@@ -1258,7 +1259,7 @@ All steps support these configuration options:
 | `args` | array | Arguments passed to the step (e.g., `["--prefix", "app"]`) |
 | `store_as` | string | Store command output as template variable (trimmed, on success only) |
 | `dir` | string | Worktree-relative working directory for `command.run`, `bash.run` and binary steps; file conditions are evaluated relative to it |
-| `env` | map | Extra environment for command steps; `${VAR}` expands against Anvil's worktree environment, then the inherited environment |
+| `env` | map | Extra environment for command steps; `${VAR}` expands against Anvil's worktree environment, then the inherited environment (never against other values of the same step) |
 | `inputs` | array | Worktree-relative files, directories or globs that identify a completed step for `anvil ensure` |
 | `outputs` | array | Paths that must still exist for a recorded step to count as complete |
 | `always` | boolean | Rerun on every `anvil ensure` |

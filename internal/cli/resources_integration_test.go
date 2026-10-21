@@ -98,6 +98,15 @@ func TestResourcesPortsDirectoriesProcessesAndCleanup(t *testing.T) {
 	require.Equal(t, 0, code)
 	require.Equal(t, "already_running", field(t, envelope, "data", "processes", 0, "result"))
 
+	// start has no side-effect-free mode; stop previews with --dry-run.
+	_, _, code = f.runJSON(f.repo, "start", "feature-a", "--dry-run")
+	require.Equal(t, 2, code)
+	envelope, _, code = f.runJSON(f.repo, "stop", "feature-a", "--dry-run")
+	require.Equal(t, 0, code)
+	require.Equal(t, "would_stop", field(t, envelope, "data", "processes", 0, "result"))
+	_, err := procs.StartIdentity(pid)
+	require.NoError(t, err, "dry-run never signals")
+
 	envelope, stderr, code = f.runJSON(f.repo, "stop", "feature-a")
 	require.Equal(t, 0, code, stderr)
 	require.Equal(t, "terminated", field(t, envelope, "data", "processes", 0, "result"))

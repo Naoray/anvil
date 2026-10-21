@@ -198,6 +198,16 @@ func (m *ScaffoldManager) Validate(request ScaffoldRequest) error {
 	if _, err := m.stepsFromConfig(stepConfigs); err != nil {
 		return fmt.Errorf("getting scaffold steps: %w", err)
 	}
+	return checkContainment(request.WorktreePath, stepConfigs)
+}
+
+// ValidateSteps creates steps without running them, validating their
+// options and conditions. Unlike Validate it checks no paths, so it can
+// cover steps of components that do not apply on this machine.
+func (m *ScaffoldManager) ValidateSteps(configs []config.StepConfig) error {
+	if _, err := m.stepsFromConfig(configs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
 	return nil
 }
 
@@ -232,6 +242,9 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	stepsList, err := m.stepsFromConfig(stepConfigs)
 	if err != nil {
 		return nil, fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	if err := checkContainment(worktreePath, stepConfigs); err != nil {
+		return nil, err
 	}
 
 	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
@@ -287,6 +300,7 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	opts.CopyMode = request.Warm.CopyMode
 
 	plan, planDigest := buildPlan(stepConfigs)
+	applyEnvDigests(plan, ctx.Env, sortedEnvKeys(cfg.Env))
 	recorder := &prepareRecorder{
 		worktreePath:  worktreePath,
 		plan:          plan,
@@ -330,6 +344,20 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 		}
 	}
 	return report, execErr
+}
+
+// checkContainment rejects steps whose directories or declared files escape
+// the worktree through symlinks, before any effect.
+func checkContainment(worktreePath string, configs []config.StepConfig) error {
+	if worktreePath == "" {
+		return nil
+	}
+	for _, cfg := range configs {
+		if err := config.CheckStepContainment(worktreePath, cfg); err != nil {
+			return fmt.Errorf("getting scaffold steps: %w", err)
+		}
+	}
+	return nil
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {
@@ -675,4 +703,13 @@ func (m *ScaffoldManager) checkMissingFiles(ctx *types.ScaffoldContext, value an
 	}
 
 	return missing, errors
+}
+
+func sortedEnvKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

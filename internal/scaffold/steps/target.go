@@ -24,8 +24,8 @@ func newExecTarget(cfg config.StepConfig) execTarget {
 
 // resolve returns the absolute working directory and the extra environment.
 // Extra values are Anvil's worktree environment (ctx.Env) plus the step's own
-// values, which may reference ${VAR} from either the worktree or inherited
-// environment.
+// values, which may reference ${VAR} from the worktree or inherited
+// environment (not other step values).
 func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]string, error) {
 	dir := ctx.WorktreePath
 	if t.dir != "" {
@@ -33,6 +33,9 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 			return "", nil, err
 		}
 		dir = filepath.Join(ctx.WorktreePath, t.dir)
+		if err := config.CheckResolvedContained(ctx.WorktreePath, dir, t.dir); err != nil {
+			return "", nil, err
+		}
 		info, err := os.Stat(dir)
 		if err != nil {
 			return "", nil, fmt.Errorf("step directory %s: %w", t.dir, err)
@@ -44,14 +47,34 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 	if len(ctx.Env) == 0 && len(t.env) == 0 {
 		return dir, nil, nil
 	}
-	env := make(map[string]string, len(ctx.Env)+len(t.env))
-	for key, value := range ctx.Env {
+	return dir, ResolveEnv(ctx.Env, t.env), nil
+}
+
+// componentVariables are seeded into the expansion base first so component
+// values can reference their own component's identity.
+var componentVariables = []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"}
+
+// ResolveEnv returns the extra environment a step receives: the worktree
+// environment plus the step's own values. Step values expand against the
+// worktree environment, the step's component identity and the inherited
+// environment only — never against each other — so results do not depend
+// on map iteration order.
+func ResolveEnv(base, stepEnv map[string]string) map[string]string {
+	expansion := make(map[string]string, len(base)+len(componentVariables))
+	for key, value := range base {
+		expansion[key] = value
+	}
+	for _, key := range componentVariables {
+		if value, ok := stepEnv[key]; ok {
+			expansion[key] = value
+		}
+	}
+	env := make(map[string]string, len(base)+len(stepEnv))
+	for key, value := range base {
 		env[key] = value
 	}
-	// Step values expand against the worktree environment only, never
-	// against each other, so the result is independent of map order.
-	for key, value := range t.env {
-		env[key] = utils.ExpandEnv(value, ctx.Env)
+	for key, value := range stepEnv {
+		env[key] = utils.ExpandEnv(value, expansion)
 	}
-	return dir, env, nil
+	return env
 }

@@ -72,7 +72,8 @@ type IdentityRequest struct {
 	Guards       []*lockfile.Lock
 }
 
-const probeTimeout = 15 * time.Second
+var probeTimeout = 15 * time.Second
+
 const maxProbeOutput = 200
 
 func digestFields(fields ...string) string {
@@ -187,7 +188,9 @@ func probeToolchain(ctx context.Context, dir string, commands []string, env *wor
 		}
 		cmd.Dir = dir
 		cmd.Env = env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
-		out, err := cmd.CombinedOutput()
+		output := &boundedBuffer{limit: 64 << 10}
+		cmd.Stdout, cmd.Stderr = output, output
+		err = cmd.Run()
 		if closeErr := finish(); closeErr != nil {
 			cancel()
 			return nil, closeErr
@@ -200,7 +203,7 @@ func probeToolchain(ctx context.Context, dir string, commands []string, env *wor
 		if probeErr != nil {
 			return nil, fmt.Errorf("toolchain probe timed out: %w", probeErr)
 		}
-		probe := ToolProbe{Command: command, Output: firstLine(string(out))}
+		probe := ToolProbe{Command: command, Output: firstLine(output.String())}
 		var exitErr *exec.ExitError
 		switch {
 		case errors.As(err, &exitErr):
@@ -391,3 +394,21 @@ func validateCheckPath(worktreePath, runtimeDir, path string) error {
 	}
 	return nil
 }
+
+// boundedBuffer keeps the first limit bytes written and discards the rest.
+type boundedBuffer struct {
+	limit int
+	data  []byte
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - len(b.data); room > 0 {
+		if len(p) < room {
+			room = len(p)
+		}
+		b.data = append(b.data, p[:room]...)
+	}
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string { return string(b.data) }

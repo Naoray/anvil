@@ -34,6 +34,10 @@ Rules:
 - Diagnostics, progress and child process output go to **stderr**. stdout
   carries only the envelope, with no ANSI escapes.
 - `--json` never prompts. Agent commands never use partial name matching.
+- Argument and flag errors (unknown flags, extra arguments) also produce one
+  `invalid_arguments` envelope when `--json` appears anywhere before `--`.
+- Mutating commands without a side-effect-free mode refuse `--dry-run` with
+  `invalid_arguments` before any effect; inspect with read-only commands.
 - Secrets are never included. Error messages keep only the first line of a
   failing step's error; full command output is not echoed into JSON.
 
@@ -99,7 +103,18 @@ Step `result` is `ran`, `up_to_date`, `skipped` (with `reason`), `failed` or
 `not_reached`. `prepare.status` is `complete`, `failed`, `running`,
 `interrupted` (a previous run died; the next `ensure` resumes) or `unprepared`.
 `ready` is `true` only when status is `complete`. A failure returns `ok: false`,
-`error.code: "prepare_failed"`, exit status 6 and the partial `data`.
+`error.code: "prepare_failed"` (with `details.failed_step`), exit status 6 and
+the partial `data`. The error message only names the failing step: step errors
+embed command output, which goes to stderr and is never written to JSON or
+`.anvil.local`.
+
+A step that runs again (`--refresh`, changed definition, declared environment,
+inputs or outputs)
+first has its completion record removed, so a failed or interrupted rerun can
+never leave the earlier success in place. `env.read` (which sets template
+variables without `store_as`) always runs, like `store_as` producers. Step
+directories and declared `inputs`/`outputs` must resolve inside the worktree,
+including through symlinks; escapes are refused before any effect.
 
 ## `anvil check [CHECK...] --json` (mutating) and `anvil check --list --json` (read-only)
 
@@ -111,7 +126,7 @@ Run:
   "results": [
     {
       "schema": "anvil.check-result/v1",
-      "run_id": "20261020T201500Z-1a2b3c4d",
+      "run_id": "20261020T201500.123456789Z-1a2b3c4d",
       "check": "fast",
       "status": "passed",
       "exit_code": 0,
@@ -135,7 +150,10 @@ Run:
 
 A non-passing check sets `ok: false`, `error.code: "check_failed"` with
 `details.{check,status,run_id}`, and exits with the failing command's status
-(124 timeout, 130 interrupted). Child output never appears in stdout with
+(124 timeout, 130 interrupted). Interrupted while waiting for a resource lock,
+nothing runs: `check_failed`, exit 130 and no result. A check cannot start
+while its worktree is being removed
+(`cleanup_blocked`). Child output never appears in stdout with
 `--json`; it streams to stderr and is kept in the logs.
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
@@ -168,7 +186,8 @@ gate from startup through completion. Remove, prune and unlink cleanup take the
 exclusive gate before any safety inspection and retain it through deletion and
 runtime release. A conflict fails closed (`cleanup_blocked`, exit 7). Cleanup
 also retains the preparation lock and refuses an existing preparation holder.
-Gate files live in the common Git directory and are never deleted.
+Gate and preparation lock files live in a per-user directory outside the
+worktree and its Git directory. Gate files are never deleted.
 
 Lock order is lifecycle gate → preparation lock → repository database lock →
 check active lock → resource locks sorted by name → run lock → `.anvil.local`

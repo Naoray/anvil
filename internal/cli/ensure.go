@@ -3,7 +3,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -110,6 +112,16 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		return agentResult{}, err
 	}
 	data.Components = wenv.Components
+	// Every component's conditions are validated, including components
+	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
+	// configuration is refused before any effect.
+	validation, err := capabilities.ValidationSteps(wenv.Worktree.Path, wenv.PC.Config, runtime.GOOS)
+	if err == nil {
+		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
+	}
+	if err != nil {
+		return agentResult{Data: data}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
 	if wenv.ComponentErr != nil {
 		summary, warnings := summarizeWorktree(*target)
 		data.Worktree = summary
@@ -134,7 +146,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	}
 	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
-	request := scaffold.ScaffoldRequest{Config: targetPC.Config, DefaultSteps: resolvedPreset.DefaultSteps(), ExtraSteps: extraSteps}
+	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: targetPC.Config, DefaultSteps: resolvedPreset.DefaultSteps(), ExtraSteps: extraSteps}
 	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
@@ -187,14 +199,38 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
-		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("preparation failed: %v", runErr),
-			Cause:   runErr,
-		}
+		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
+}
+
+// prepareFailure returns a JSON-safe error. Step errors embed the command's
+// combined output, which may contain secrets, so only the failing step is
+// named; the full diagnostics go to stderr.
+func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
+	fmt.Fprintf(os.Stderr, "preparation failed:\n%v\n", runErr)
+	step := "a step"
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+		}
+	}
+	return &agentapi.Error{
+		Code:    agentapi.CodePrepareFailed,
+		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
+		Details: map[string]any{"failed_step": failedKey(report)},
+		Cause:   runErr,
+	}
+}
+
+func failedKey(report *scaffold.PrepareReport) string {
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			return outcome.Key
+		}
+	}
+	return ""
 }
 
 // ensureWorktreeExists resolves the target, creating it under the

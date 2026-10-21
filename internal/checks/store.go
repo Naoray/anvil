@@ -92,7 +92,7 @@ func newRunID(now time.Time) (string, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	return now.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(buf), nil
+	return now.UTC().Format("20060102T150405.000000000Z") + "-" + hex.EncodeToString(buf), nil
 }
 
 func runLockPath(runDir string) string { return filepath.Join(runDir, "run.lock") }

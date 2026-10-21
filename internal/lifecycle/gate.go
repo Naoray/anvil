@@ -2,28 +2,14 @@
 package lifecycle
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"path/filepath"
-
 	"github.com/naoray/anvil/internal/config"
-	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/lockfile"
 )
 
-// Path is stable for a worktree across private Git-directory deletion. Gate
-// files must never be removed: waiters must keep using the same inode.
+// Path stays outside the worktree and its Git directory, including during
+// deletion. Gate files are retained so waiters always contend on one inode.
 func Path(worktreePath string) (string, error) {
-	canonical, err := dblifecycle.Canonical(worktreePath)
-	if err != nil {
-		return "", err
-	}
-	common, err := dblifecycle.CommonDir(canonical)
-	if err != nil {
-		return config.WorktreeLockPath(canonical, "anvil-lifecycle.lock"), nil
-	}
-	sum := sha256.Sum256([]byte(canonical))
-	return filepath.Join(common, "anvil-lifecycle", hex.EncodeToString(sum[:])+".lock"), nil
+	return config.WorktreeExternalLockPath(worktreePath, "anvil-lifecycle.lock"), nil
 }
 
 // AcquireShared fails fast during cleanup. Hold it before startup state reads

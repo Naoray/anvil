@@ -70,7 +70,7 @@ port they listen on. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "stop", Mutating: true, Human: printProcessesHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, agentCommand{Name: "stop", Mutating: true, DryRun: true, Human: printProcessesHuman}, func() (agentResult, error) {
 			return runStop(cmd, args)
 		})
 	},

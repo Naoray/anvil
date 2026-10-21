@@ -48,6 +48,9 @@ func Assess(result *Result, current Identity) Assessment {
 // ArtifactsIntact reports whether every recorded artifact still has its
 // recorded digest; reuse is refused otherwise.
 func ArtifactsIntact(result *Result) (bool, string) {
+	if result.Status != StatusPassed {
+		return false, "the run did not pass"
+	}
 	if len(result.MissingArtifacts) > 0 {
 		return false, "declared artifacts were missing when recorded"
 	}

@@ -274,3 +274,25 @@ func TestInputsUnderRuntimeDirAffectIdentity(t *testing.T) {
 		Check: config.CheckConfig{Name: "x", Commands: cmds("true"), Inputs: []string{"/etc/passwd"}}})
 	require.ErrorContains(t, err, "must stay inside")
 }
+
+func TestResolvePathsRejectsSymlinkEscapes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	f := newFixture(t)
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("s"), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(f.worktree, "escape")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret"), filepath.Join(f.worktree, "leak")))
+
+	for _, pattern := range []string{"escape/secret", "escape/*", "leak"} {
+		_, err := ResolvePaths(f.worktree, f.runtime, []string{pattern}, nil)
+		require.ErrorContains(t, err, "symlink", pattern)
+	}
+
+	inside := filepath.Join(f.worktree, "real")
+	require.NoError(t, os.MkdirAll(inside, 0o755))
+	require.NoError(t, os.Symlink(inside, filepath.Join(f.worktree, "alias")))
+	_, err := ResolvePaths(f.worktree, f.runtime, []string{"alias"}, nil)
+	require.ErrorContains(t, err, "symlink", "inside-root aliases also fail closed")
+}
