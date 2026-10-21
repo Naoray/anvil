@@ -23,8 +23,8 @@ func newExecTarget(cfg config.StepConfig) execTarget {
 
 // resolve returns the absolute working directory and the extra environment.
 // Extra values are Anvil's worktree environment (ctx.Env) plus the step's own
-// values, which may reference ${VAR} from either the worktree or inherited
-// environment.
+// values, which may reference ${VAR} from the worktree or inherited
+// environment (not other step values).
 func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]string, error) {
 	dir := ctx.WorktreePath
 	if t.dir != "" {
@@ -32,6 +32,9 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 			return "", nil, err
 		}
 		dir = filepath.Join(ctx.WorktreePath, t.dir)
+		if err := config.CheckResolvedContained(ctx.WorktreePath, dir, t.dir); err != nil {
+			return "", nil, err
+		}
 		info, err := os.Stat(dir)
 		if err != nil {
 			return "", nil, fmt.Errorf("step directory %s: %w", t.dir, err)
@@ -47,8 +50,11 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 	for key, value := range ctx.Env {
 		env[key] = value
 	}
+	// Step values expand against the worktree environment and the inherited
+	// environment only — never against each other — so results do not
+	// depend on map iteration order.
 	for key, value := range t.env {
-		env[key] = ExpandEnv(value, env)
+		env[key] = ExpandEnv(value, ctx.Env)
 	}
 	return dir, env, nil
 }

@@ -222,6 +222,9 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	if err != nil {
 		return nil, fmt.Errorf("getting scaffold steps: %w", err)
 	}
+	if err := checkContainment(worktreePath, stepConfigs); err != nil {
+		return nil, err
+	}
 
 	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
 		found := false
@@ -313,6 +316,20 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 		}
 	}
 	return report, execErr
+}
+
+// checkContainment rejects steps whose directories or declared files escape
+// the worktree through symlinks, before any effect.
+func checkContainment(worktreePath string, configs []config.StepConfig) error {
+	if worktreePath == "" {
+		return nil
+	}
+	for _, cfg := range configs {
+		if err := config.CheckStepContainment(worktreePath, cfg); err != nil {
+			return fmt.Errorf("getting scaffold steps: %w", err)
+		}
+	}
+	return nil
 }
 
 func prepareDbSuffix(ctx *types.ScaffoldContext, worktreePath string, dryRun bool) error {

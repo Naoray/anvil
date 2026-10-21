@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -135,14 +136,38 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
-		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("preparation failed: %v", runErr),
-			Cause:   runErr,
-		}
+		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
+}
+
+// prepareFailure returns a JSON-safe error. Step errors embed the command's
+// combined output, which may contain secrets, so only the failing step is
+// named; the full diagnostics go to stderr.
+func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
+	fmt.Fprintf(os.Stderr, "preparation failed:\n%v\n", runErr)
+	step := "a step"
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+		}
+	}
+	return &agentapi.Error{
+		Code:    agentapi.CodePrepareFailed,
+		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
+		Details: map[string]any{"failed_step": failedKey(report)},
+		Cause:   runErr,
+	}
+}
+
+func failedKey(report *scaffold.PrepareReport) string {
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			return outcome.Key
+		}
+	}
+	return ""
 }
 
 // ensureWorktreeExists resolves the target, creating it under the
