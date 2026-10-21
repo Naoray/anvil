@@ -90,27 +90,40 @@ func TestOpenFileSnapshotFindsFileDescriptorHolder(t *testing.T) {
 	}
 }
 
+// fixtureRoot returns an absolute directory in the platform's native form,
+// so the platform-independent matching and parsing tests hold on Windows too
+// (a POSIX literal such as /w/app is not absolute there).
+func fixtureRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "w")
+}
+
 func TestOpenFileSnapshotIgnoresSiblingPrefix(t *testing.T) {
-	snapshot := Snapshot{Method: MethodProcfs, processes: []processPaths{{pid: 7, command: "x", paths: map[string][]string{"/w/app-2/f": {"fd"}}}}}
-	if got := snapshot.Holders("/w/app"); len(got) != 0 {
+	root := fixtureRoot(t)
+	app, sibling := filepath.Join(root, "app"), filepath.Join(root, "app-2")
+	snapshot := Snapshot{Method: MethodProcfs, processes: []processPaths{{pid: 7, command: "x", paths: map[string][]string{}}}}
+	snapshot.processes[0].add(filepath.Join(sibling, "f"), "fd")
+	if got := snapshot.Holders(app); len(got) != 0 {
 		t.Fatalf("a sibling sharing a name prefix is not beneath the directory: %+v", got)
 	}
-	if got := snapshot.Holders("/w/app-2"); len(got) != 1 {
+	if got := snapshot.Holders(sibling); len(got) != 1 {
 		t.Fatalf("holders = %+v", got)
 	}
 }
 
 func TestParseLsofOutput(t *testing.T) {
-	output := "p101\ncvim\nfcwd\nn/w/app\nf3\nn/w/app/main.go\np202\ncbash\nfcwd\nn/home/me\n"
+	root := fixtureRoot(t)
+	app, home := filepath.Join(root, "app"), filepath.Join(root, "home", "me")
+	output := "p101\ncvim\nfcwd\nn" + app + "\nf3\nn" + filepath.Join(app, "main.go") + "\np202\ncbash\nfcwd\nn" + home + "\n"
 	snapshot, err := parseLsof([]byte(output), 999)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := snapshot.Holders("/w/app")
+	got := snapshot.Holders(app)
 	if len(got) != 1 || got[0].PID != 101 || got[0].Command != "vim" {
 		t.Fatalf("holders = %+v", got)
 	}
-	if len(snapshot.Holders("/home/me")) != 1 {
+	if len(snapshot.Holders(home)) != 1 {
 		t.Fatalf("cwd holder missing")
 	}
 	if _, err := parseLsof([]byte("pnotanumber\n"), 999); err == nil {
@@ -119,11 +132,12 @@ func TestParseLsofOutput(t *testing.T) {
 }
 
 func TestParseLsofOutputSkipsSelf(t *testing.T) {
-	snapshot, err := parseLsof([]byte("p5\ncanvil\nn/w/app\n"), 5)
+	app := filepath.Join(fixtureRoot(t), "app")
+	snapshot, err := parseLsof([]byte("p5\ncanvil\nn"+app+"\np6\ncvim\nn"+app+"\n"), 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := snapshot.Holders("/w/app"); len(got) != 0 {
-		t.Fatalf("own process must be skipped: %+v", got)
+	if got := snapshot.Holders(app); len(got) != 1 || got[0].PID != 6 {
+		t.Fatalf("own process must be skipped, others kept: %+v", got)
 	}
 }

@@ -332,7 +332,9 @@ func TestPruneApplyRemovesOnlyStillSafeCandidates(t *testing.T) {
 	results := applyResults(t, envelope)
 	require.Equal(t, "removed", results["feature-a"]["outcome"], "%v", results["feature-a"])
 	require.NoDirExists(t, paths["a"])
-	require.NotContains(t, gitRun(t, f.repo, "worktree", "list"), paths["a"])
+	// Git for Windows lists C:/... paths; compare in native form so the
+	// assertion cannot pass vacuously there.
+	require.NotContains(t, filepath.FromSlash(gitRun(t, f.repo, "worktree", "list")), paths["a"])
 
 	requireListContains(t, results["feature-b"], "blockers", `active lease by "codex"`)
 	requireListContains(t, results["feature-c"], "blockers", "hold files open")
