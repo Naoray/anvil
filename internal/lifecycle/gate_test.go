@@ -3,8 +3,9 @@ package lifecycle
 import (
 	"testing"
 
-	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/stretchr/testify/require"
+
+	"github.com/naoray/anvil/internal/lockfile"
 )
 
 func TestGateAllowsConcurrentUsersAndExcludesCleanup(t *testing.T) {

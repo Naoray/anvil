@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/naoray/anvil/internal/wtstate"
 	"github.com/stretchr/testify/require"
+
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 // cleanupBarrierHelper signals cleanup entry, then blocks on the parent's

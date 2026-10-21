@@ -3,8 +3,9 @@ package capabilities
 import (
 	"testing"
 
-	"github.com/naoray/anvil/internal/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 func TestPlanScopesRequirementsBeforeEvaluation(t *testing.T) {

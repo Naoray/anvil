@@ -8,8 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestCompletionInstallPath(t *testing.T) {
@@ -256,14 +257,14 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 
 	stderrFD := int(os.Stderr.Fd())
-	originalFD, err := syscall.Dup(stderrFD)
+	originalFD, err := unix.Dup(stderrFD)
 	if err != nil {
 		reportCleanupError(t, "close stderr reader after duplicating stderr", reader.Close())
 		reportCleanupError(t, "close stderr writer after duplicating stderr", writer.Close())
 		t.Fatalf("duplicate stderr: %v", err)
 	}
-	if err := syscall.Dup2(int(writer.Fd()), stderrFD); err != nil {
-		reportCleanupError(t, "close duplicated stderr after redirect failure", syscall.Close(originalFD))
+	if err := unix.Dup2(int(writer.Fd()), stderrFD); err != nil {
+		reportCleanupError(t, "close duplicated stderr after redirect failure", unix.Close(originalFD))
 		reportCleanupError(t, "close stderr reader after redirect failure", reader.Close())
 		reportCleanupError(t, "close stderr writer after redirect failure", writer.Close())
 		t.Fatalf("redirect stderr: %v", err)
@@ -274,7 +275,7 @@ func captureStderr(t *testing.T, fn func()) string {
 		if restored {
 			return nil
 		}
-		if err := syscall.Dup2(originalFD, stderrFD); err != nil {
+		if err := unix.Dup2(originalFD, stderrFD); err != nil {
 			return err
 		}
 		restored = true
@@ -283,7 +284,7 @@ func captureStderr(t *testing.T, fn func()) string {
 
 	defer func() {
 		reportCleanupError(t, "restore stderr during capture cleanup", restoreStderr())
-		reportCleanupError(t, "close duplicated stderr", syscall.Close(originalFD))
+		reportCleanupError(t, "close duplicated stderr", unix.Close(originalFD))
 		reportCleanupError(t, "close captured stderr reader", reader.Close())
 		reportCleanupError(t, "close captured stderr writer", writer.Close())
 	}()
