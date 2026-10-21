@@ -352,6 +352,9 @@ func runStatusAll() (agentResult, error) {
 		}
 		if lease, err := wtstate.ReadLease(wt.Path); err == nil {
 			entry.Lease = lease.State(now)
+		} else {
+			entry.Lease = "unknown"
+			warnings = append(warnings, fmt.Sprintf("%s: reading lease: %v", wt.Path, err))
 		}
 		if prepare, err := wtstate.ReadPrepare(wt.Path); err == nil {
 			if status, err := wtstate.EffectivePrepareStatus(wt.Path, prepare); err == nil {

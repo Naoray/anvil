@@ -233,6 +233,8 @@ only warns.
 `ready` requires complete preparation, satisfied component requirements and
 present required shared resources. Process `state` is `running`, `exited`,
 `reused` (PID recycled — never signaled), `unknown` or `foreign`.
+`status --all` reports a lease as `unknown` when its record cannot be decoded,
+and includes the worktree path and read error in `warnings`.
 
 ## Integrations
 
