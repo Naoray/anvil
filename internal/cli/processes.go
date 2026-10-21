@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,7 +122,20 @@ func runStart(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err := provisionResources(wenv); err != nil {
 		return agentResult{}, err
 	}
+	lock, err := wtstate.AcquireRunLock(wt.Path)
+	if err != nil {
+		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	result, err := startLocked(pc, wt, wenv, selected)
+	if releaseErr := lock.Release(); releaseErr != nil && err == nil {
+		return result, agentapi.Wrap(agentapi.CodeInternal, releaseErr)
+	}
+	return result, err
+}
 
+// startLocked launches the selected processes that are not already running.
+// The caller holds the worktree run lock.
+func startLocked(pc *ProjectContext, wt *git.Worktree, wenv *worktreeEnv, selected []config.ProcessConfig) (agentResult, error) {
 	records, err := wtstate.ReadProcesses(wt.Path)
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
@@ -189,12 +203,19 @@ func startProcess(pc *ProjectContext, wt git.Worktree, process config.ProcessCon
 
 // stopRecordedProcesses stops verified processes for a worktree, removing
 // their records. It returns per-process outcomes.
-func stopRecordedProcesses(worktreePath, worktreeID string, cfg *config.Config, names map[string]bool, dryRun bool) ([]processStatus, error) {
+func stopRecordedProcesses(worktreePath, worktreeID string, cfg *config.Config, names map[string]bool, dryRun bool) (statuses []processStatus, err error) {
+	if !dryRun {
+		lock, lockErr := wtstate.AcquireRunLock(worktreePath)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		defer func() { err = errors.Join(err, lock.Release()) }()
+	}
 	records, err := wtstate.ReadProcesses(worktreePath)
 	if err != nil {
 		return nil, err
 	}
-	statuses := []processStatus{}
+	statuses = []processStatus{}
 	for _, record := range records {
 		if names != nil && !names[record.Name] {
 			continue
