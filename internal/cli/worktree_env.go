@@ -27,6 +27,7 @@ type worktreeEnv struct {
 	ComponentErr error
 	Component    *capabilities.ComponentPlan
 	Env          *workenv.Environment
+	PrepareEnv   *workenv.Environment
 }
 
 type worktreeEnvOptions struct {
@@ -86,12 +87,21 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	if result.Identity != nil && result.IdentityStatus != wtstate.IdentityCopied {
 		identity.ID = result.Identity.ID
 	}
-	result.Env = workenv.Build(workenv.Options{
+	result.PrepareEnv = workenv.Build(workenv.Options{
 		Identity:  identity,
 		Config:    target.Config,
 		State:     result.State,
-		Component: component,
 		Resources: opts.Resources,
 	})
+	result.Env = result.PrepareEnv
+	if component != nil {
+		result.Env = workenv.Build(workenv.Options{
+			Identity:  identity,
+			Config:    target.Config,
+			State:     result.State,
+			Component: component,
+			Resources: opts.Resources,
+		})
+	}
 	return result, nil
 }

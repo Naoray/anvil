@@ -279,7 +279,7 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	opts.WarmSource = request.Warm.Source
 	opts.CopyMode = request.Warm.CopyMode
 
-	plan, planDigest := buildPlan(stepConfigs)
+	plan, planDigest := buildPlan(stepConfigs, request.Env)
 	recorder := &prepareRecorder{
 		worktreePath:  worktreePath,
 		plan:          plan,

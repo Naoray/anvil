@@ -75,9 +75,12 @@ capability only contributes its requirements.
 | `swift` | `Package.swift` | `swift package resolve` | `Package.swift`, `Package.resolved` | defaults to `platforms: [darwin]` |
 
 Anvil does not build projects by default (no `cargo build`, `tauri build`,
-`swift build`); declare such commands in `prepare` when you want them. Toolchain
-versions are not part of a step's identity — use `anvil ensure --refresh` after
-upgrading a toolchain.
+`swift build`); declare such commands in `prepare` when you want them.
+
+The exported preparation environment is hashed into step identities; changing
+project env values invalidates completion records without storing their raw
+values in local state. Toolchain versions are not part of a step's identity —
+use `anvil ensure --refresh` after upgrading a toolchain.
 
 The Laravel/PHP presets are unchanged and keep running through `scaffold`
 steps; components may be combined with a preset in one repository.

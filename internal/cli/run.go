@@ -84,7 +84,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if status == wtstate.PrepareComplete && wenv.Component != nil {
 		ready := false
 		if wenv.Component.Status == capabilities.StatusActive {
-			ready, err = scaffold.StepsPrepared(wenv.Worktree.Path, wenv.Component.Steps, state)
+			ready, err = scaffold.StepsPrepared(wenv.Worktree.Path, wenv.Component.Steps, wenv.PrepareEnv.Map(), state)
 			if err != nil {
 				return agentapi.Wrap(agentapi.CodeInternal, err)
 			}
