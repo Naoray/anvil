@@ -283,6 +283,18 @@ type GlobalConfig struct {
 	SetupComplete       bool                    `mapstructure:"setup_complete"`
 	DefaultProjectsRoot string                  `mapstructure:"default_projects_root"`
 	SiteDriver          SiteDriver              `mapstructure:"site_driver"`
+	Checks              GlobalChecksConfig      `mapstructure:"checks"`
+}
+
+// GlobalChecksConfig limits expensive checks machine-wide (see
+// internal/slots). Zero values select the defaults.
+type GlobalChecksConfig struct {
+	// Slots is the machine-wide capacity shared by expensive or slot-weighted checks.
+	Slots int `mapstructure:"slots"`
+	// MaxLoad gates admission on the 1-minute load average (0 disables).
+	MaxLoad float64 `mapstructure:"max_load"`
+	// LoadWait bounds how long load gating waits (Go duration, e.g. 2m).
+	LoadWait string `mapstructure:"load_wait"`
 }
 
 // ResolveSiteDriver returns the configured site driver, or detects one from PATH.
@@ -726,6 +738,20 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 
 	if config.SiteDriver != "" {
 		configMap["site_driver"] = config.SiteDriver
+	}
+
+	if config.Checks != (GlobalChecksConfig{}) {
+		checks := map[string]any{}
+		if config.Checks.Slots != 0 {
+			checks["slots"] = config.Checks.Slots
+		}
+		if config.Checks.MaxLoad != 0 {
+			checks["max_load"] = config.Checks.MaxLoad
+		}
+		if config.Checks.LoadWait != "" {
+			checks["load_wait"] = config.Checks.LoadWait
+		}
+		configMap["checks"] = checks
 	}
 
 	if config.Projects != nil {

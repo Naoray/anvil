@@ -56,16 +56,19 @@ type WorktreeRef struct {
 
 // Result is the persisted provenance of one check run.
 type Result struct {
-	Reused           bool            `json:"-"`
-	Schema           string          `json:"schema"`
-	RunID            string          `json:"run_id"`
-	Check            string          `json:"check"`
-	Status           string          `json:"status"`
-	ExitCode         int             `json:"exit_code"`
-	Error            string          `json:"error,omitempty"`
-	StartedAt        time.Time       `json:"started_at"`
-	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
-	DurationMS       int64           `json:"duration_ms"`
+	Reused     bool       `json:"-"`
+	Schema     string     `json:"schema"`
+	RunID      string     `json:"run_id"`
+	Check      string     `json:"check"`
+	Status     string     `json:"status"`
+	ExitCode   int        `json:"exit_code"`
+	Error      string     `json:"error,omitempty"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	DurationMS int64      `json:"duration_ms"`
+	// QueuedMS is the time spent waiting for a machine-wide check slot,
+	// excluded from StartedAt and DurationMS.
+	QueuedMS         int64           `json:"queued_ms"`
 	Worktree         WorktreeRef     `json:"worktree"`
 	Identity         Identity        `json:"identity"`
 	Commands         []CommandResult `json:"commands"`
