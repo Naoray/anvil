@@ -10,6 +10,7 @@ import (
 
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/capabilities"
+	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/wtstate"
 )
 
@@ -79,6 +80,18 @@ func runRun(cmd *cobra.Command, args []string) error {
 	status, err := wtstate.EffectivePrepareStatus(wenv.Worktree.Path, state)
 	if err != nil {
 		return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if status == wtstate.PrepareComplete && wenv.Component != nil {
+		ready := false
+		if wenv.Component.Status == capabilities.StatusActive {
+			ready, err = scaffold.StepsPrepared(wenv.Worktree.Path, wenv.Component.Steps, state)
+			if err != nil {
+				return agentapi.Wrap(agentapi.CodeInternal, err)
+			}
+		}
+		if !ready {
+			status = wtstate.PrepareNone
+		}
 	}
 	if status != wtstate.PrepareComplete {
 		if mustGetBool(cmd, "require-ready") {

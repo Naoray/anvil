@@ -241,3 +241,36 @@ func TestRunResolvesComponentExecutableOnExportedPath(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	require.Equal(t, "local-tool\n", stdout)
 }
+func TestRunRequireReadyChecksSelectedComponent(t *testing.T) {
+	f := newAgentFixture(t, "components:\n  - name: extras\n    path: extras\n    opt_in: true\n    requires: [optional-tool]\n    prepare:\n      - run: echo run >> ready.count\n        inputs: [deps.lock]\n        outputs: [ready.count]\n", map[string]string{"extras/deps.lock": "v1"})
+	fakeToolchain(t, f, "optional-tool")
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/ready")
+	require.Equal(t, 0, code, stderr)
+	wt := f.worktreePath("feature-ready")
+	run := func(want int) {
+		t.Helper()
+		_, stderr, code := f.run(f.repo, "run", "feature-ready", "--component", "extras", "--require-ready", "--", "sh", "-c", "touch child-ran")
+		require.Equal(t, want, code, stderr)
+		if want != 0 {
+			require.Contains(t, stderr, "preparation")
+			require.NoFileExists(t, filepath.Join(wt, "extras", "child-ran"))
+		} else {
+			require.NoError(t, os.Remove(filepath.Join(wt, "extras", "child-ran")))
+		}
+	}
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	run(0)
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "extras", "deps.lock"), []byte("v2"), 0o644))
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	run(0)
+	require.NoError(t, os.Remove(filepath.Join(wt, "extras", "ready.count")))
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	f.env = subprocessEnvFrom(append(f.env, "PATH=/usr/bin:/bin"))
+	run(6)
+}

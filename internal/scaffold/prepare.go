@@ -271,3 +271,39 @@ func buildReport(plan []planEntry, planDigest string, results []ExecutionResult,
 	}
 	return report
 }
+
+// StepsPrepared checks the current applicable steps against successful
+// preparation records without writing state or executing commands.
+func StepsPrepared(worktreePath string, configs []config.StepConfig, state *wtstate.PrepareState) (bool, error) {
+	if state == nil {
+		return false, nil
+	}
+	plan, _ := buildPlan(configs)
+	ctx := &types.ScaffoldContext{WorktreePath: worktreePath}
+	for _, entry := range plan {
+		root := stepRoot(worktreePath, entry.cfg)
+		applicable, err := ctx.EvaluateConditionAt(root, entry.cfg.Condition)
+		if err != nil {
+			return false, err
+		}
+		if !applicable {
+			continue
+		}
+		record, ok := state.Steps[entry.key]
+		if !ok || record.Definition != entry.definition {
+			return false, nil
+		}
+		inputs, err := InputsDigest(root, entry.cfg.Inputs)
+		if err != nil {
+			return false, err
+		}
+		if inputs != record.Inputs {
+			return false, nil
+		}
+		present, _, err := OutputsPresent(root, entry.cfg.Outputs)
+		if err != nil || !present {
+			return false, err
+		}
+	}
+	return true, nil
+}

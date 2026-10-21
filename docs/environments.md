@@ -105,6 +105,10 @@ anvil run feature-x --require-ready -- make lint
 `--` is required. The child replaces Anvil (exit status passes through; 127 =
 not found, 126 = not executable). `run` is read-only and works whether or not a
 testing database exists. `anvil exec` keeps its database-specific semantics.
+With `--component --require-ready`, the selected component must have satisfied
+requirements and matching preparation records for its current applicable steps,
+including their declared inputs and outputs. Prepare opt-in components explicitly
+with `anvil ensure --component NAME` before requiring them to be ready.
 
 ## Platform notes
 
