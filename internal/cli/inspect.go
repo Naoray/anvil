@@ -397,9 +397,12 @@ func runStatusAll() (agentResult, error) {
 		warnings = append(warnings, summaryWarnings...)
 		entry := statusAllEntry{Worktree: summary, Lease: newLeaseView(nil, now, ""), Prepare: statusPrepare{Status: wtstate.PrepareNone}}
 		// A failed observation is reported as unknown with a warning, never
-		// as the absence of a role, lease or preparation.
+		// as the absence of a role, lease or preparation. Warnings name the
+		// worktree by the same canonical path as its entry's worktree.path
+		// (git lists forward-slash paths on Windows) so agents can correlate
+		// them.
 		unreadable := func(what string, err error) {
-			warnings = append(warnings, fmt.Sprintf("%s: %s unavailable: %v", wt.Path, what, err))
+			warnings = append(warnings, fmt.Sprintf("%s: %s unavailable: %v", summary.Path, what, err))
 		}
 		if metadata, err := wtstate.ReadMetadata(wt.Path); err != nil {
 			unreadable("role and task metadata", err)
@@ -428,7 +431,7 @@ func runStatusAll() (agentResult, error) {
 			} else {
 				entry.Ready = worktreeReady(entry.Prepare, wenv)
 				for _, reason := range notReadyReasons(wenv) {
-					warnings = append(warnings, fmt.Sprintf("%s: not ready: %s", wt.Path, reason))
+					warnings = append(warnings, fmt.Sprintf("%s: not ready: %s", summary.Path, reason))
 				}
 			}
 		}

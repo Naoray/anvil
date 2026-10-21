@@ -26,6 +26,17 @@ func statusAllEntryFor(t *testing.T, envelope map[string]any, path string) map[s
 	return nil
 }
 
+// reportedPath returns the worktree.path a status --all entry reports.
+// Per-worktree warnings must name the worktree by this exact string so
+// agents can correlate them with the entry on every platform.
+func reportedPath(t *testing.T, entry map[string]any) string {
+	t.Helper()
+	path, ok := field(t, entry, "worktree", "path").(string)
+	require.True(t, ok, "worktree.path must be a string")
+	require.NotEmpty(t, path)
+	return path
+}
+
 // leaseFrom returns the lease object reported by context, status and
 // status --all for the same worktree.
 func leasesFrom(t *testing.T, f *agentFixture, name string) map[string]map[string]any {
@@ -221,7 +232,7 @@ func TestReadinessHonorsMissingSharedResourceEverywhere(t *testing.T) {
 	entry := statusAllEntryFor(t, all, path)
 	require.Equal(t, false, entry["ready"])
 	require.Equal(t, true, field(t, entry, "prepare", "ready"))
-	require.True(t, warningsContain(t, all, path, "required shared resources are missing"), "status --all names why a prepared worktree is not ready")
+	require.True(t, warningsContain(t, all, reportedPath(t, entry), "required shared resources are missing"), "status --all names why a prepared worktree is not ready")
 }
 
 func TestStatusAllReportsUnavailableReadiness(t *testing.T) {
@@ -239,7 +250,7 @@ func TestStatusAllReportsUnavailableReadiness(t *testing.T) {
 	entry := statusAllEntryFor(t, all, broken)
 	require.Equal(t, false, entry["ready"])
 	require.Equal(t, true, field(t, entry, "prepare", "ready"))
-	require.True(t, warningsContain(t, all, broken, "readiness unavailable"))
+	require.True(t, warningsContain(t, all, reportedPath(t, entry), "readiness unavailable"))
 	good := statusAllEntryFor(t, all, f.worktreePath("feature-good"))
 	require.Equal(t, true, good["ready"])
 }
@@ -266,7 +277,7 @@ func TestMalformedPrepareRecordIsUnknownNotAbsent(t *testing.T) {
 	entry := statusAllEntryFor(t, all, path)
 	require.Equal(t, "unknown", field(t, entry, "prepare", "status"))
 	require.Equal(t, false, entry["ready"])
-	require.True(t, warningsContain(t, all, path, "preparation state unavailable"))
+	require.True(t, warningsContain(t, all, reportedPath(t, entry), "preparation state unavailable"))
 
 	after, err := os.ReadFile(statePath)
 	require.NoError(t, err)

@@ -585,7 +585,7 @@ Entries use the same `worktree`, `lease` and `ready` semantics as single
 worktrees stays small; read the error with `anvil status WORKTREE`. `ready` is
 evaluated (components and shared resources) only for worktrees whose
 preparation is complete; why such a worktree is not ready is added to
-`warnings` (prefixed with its path), and when the evaluation fails (for
+`warnings` (prefixed with the entry's exact `worktree.path`), and when the evaluation fails (for
 example an invalid `anvil.yaml` in that worktree) it is `false` with a
 "readiness unavailable" warning while the command still succeeds. A value that cannot be read for a worktree is reported as `unknown`
 with a warning, never as absent: `role: "unknown"`, `lease.state: "unknown"`,
