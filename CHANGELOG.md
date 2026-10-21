@@ -16,13 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `anvil run [WORKTREE] [--component NAME] -- COMMAND` runs in the worktree environment (`ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE`, project and component env) independent of any testing database; `anvil exec` is unchanged.
 - Per-worktree runtime resources: writable state/tmp/cache/logs/artifacts (and declared) directories outside the working tree, stable collision-free ports from a lock-coordinated machine registry with stale-owner reclamation, and declared shared resources used in place (`ANVIL_*` variables).
 - `anvil start` / `anvil stop` manage declared development processes in their own process groups, verified by PID plus kernel start time so recycled PIDs are never signaled (macOS and Linux).
+- `anvil check [CHECK...]`, `--list` and `--json`: named checks run existing commands with per-command and check timeouts, opt-in `expensive` checks, exclusive machine-wide `locks` (fail fast or `--lock-wait`, recovered only when the holder exits), artifact digests and persisted provenance (commit, exact dirty-state digest, definition, toolchain, environment and input digests). Stale results report why; failed, timed-out and interrupted runs are never recorded as passing; `--reuse` returns a current passing result of a `reusable` check with intact artifacts.
 - Synthetic example repositories under `examples/` (Rust/Python, Node/Rust/Tauri/Swift, Laravel).
 
 ### Changed
 
 - Every `.anvil.local` writer now uses one cross-process lock and atomic replacement, so concurrent Anvil commands cannot lose each other's updates. Symlinked `.anvil.local` files are refused for writes.
 - Laravel/PHP preset installs declare their manifest/lockfile inputs.
-- `remove`, `prune` and `unlink --clean` stop verified owned processes before cleanup, then release ports and delete only the owned runtime directory; `--dry-run` lists them.
+- `remove`, `prune` and `unlink --clean` refuse while a check is running in the worktree, stop verified owned processes before cleanup, then release ports and delete only the owned runtime directory; `--dry-run` lists them.
 
 ### Fixed
 

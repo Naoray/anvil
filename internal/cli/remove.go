@@ -9,13 +9,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/lifecycle"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 func planRemoveCleanup(
@@ -87,6 +91,7 @@ type removeLifecycleOptions struct {
 }
 
 type removeLifecycleDependencies struct {
+	worktreeGate    func(string) (*lockfile.Lock, error)
 	lifecycleLock   func(string) (func() error, error)
 	readLocalState  func(string) (*config.LocalState, error)
 	scaffoldManager func(*ProjectContext) *scaffold.ScaffoldManager
@@ -112,6 +117,26 @@ func runRemoveLifecycle(
 	cleanupMessages []string,
 	deps removeLifecycleDependencies,
 ) (runErr error) {
+	if deps.worktreeGate != nil {
+		gate, err := deps.worktreeGate(worktree.Path)
+		if errors.Is(err, lockfile.ErrLocked) {
+			return agentapi.Errorf(agentapi.CodeCleanupBlocked, "checks are running, preparation is active, or another lifecycle operation owns this worktree; wait before cleanup")
+		}
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, gate.Release()) }()
+		// Retain the preparation lock through deletion, also excluding older callers
+		// which do not yet participate in the shared lifecycle gate.
+		prepare, err := lockfile.TryAcquire(wtstate.PrepareLockPath(worktree.Path))
+		if errors.Is(err, lockfile.ErrLocked) {
+			return agentapi.Errorf(agentapi.CodeCleanupBlocked, "worktree preparation is currently in progress; wait for it to complete")
+		}
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, prepare.Release()) }()
+	}
 	target, err := pc.ForWorktree(worktree.Path)
 	if err != nil {
 		return err
@@ -140,6 +165,9 @@ func runRemoveLifecycle(
 	runtimePlan, err := planRuntimeCleanup(worktree.Path)
 	if err != nil {
 		return fmt.Errorf("inspecting runtime resources: %w", err)
+	}
+	if err := runtimePlan.blocked(); err != nil {
+		return agentapi.Wrap(agentapi.CodeCleanupBlocked, fmt.Errorf("refusing to remove %s: %w", worktree.Path, err))
 	}
 	if options.DryRun {
 		for _, line := range runtimePlan.describe("[DRY RUN] Would ") {
@@ -197,6 +225,7 @@ func runRemoveLifecycle(
 }
 
 type removeCommandDependencies struct {
+	worktreeGate     func(string) (*lockfile.Lock, error)
 	lifecycleLock    func(string) (func() error, error)
 	openProject      func() (*ProjectContext, error)
 	getwd            func() (string, error)
@@ -213,6 +242,7 @@ type removeCommandDependencies struct {
 
 func defaultRemoveCommandDependencies() removeCommandDependencies {
 	return removeCommandDependencies{
+		worktreeGate:     lifecycle.TryExclusive,
 		lifecycleLock:    dblifecycle.Lock,
 		openProject:      OpenProjectFromCWD,
 		getwd:            os.Getwd,
@@ -400,6 +430,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 
 func (deps removeCommandDependencies) lifecycleDependencies() removeLifecycleDependencies {
 	return removeLifecycleDependencies{
+		worktreeGate:    deps.worktreeGate,
 		lifecycleLock:   deps.lifecycleLock,
 		readLocalState:  deps.readLocalState,
 		scaffoldManager: deps.scaffoldManager,

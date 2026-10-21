@@ -51,7 +51,7 @@ type StepRecord struct {
 
 // PrepareLockPath returns the per-worktree preparation lock.
 func PrepareLockPath(worktreePath string) string {
-	return config.WorktreeLockPath(worktreePath, PrepareLockFile)
+	return config.WorktreeExternalLockPath(worktreePath, PrepareLockFile)
 }
 
 // AcquirePrepareLock blocks until this process may prepare the worktree.

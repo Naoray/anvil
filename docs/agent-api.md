@@ -117,3 +117,89 @@ never leave the earlier success in place. `env.read` (which sets template
 variables without `store_as`) always runs, like `store_as` producers. Step
 directories and declared `inputs`/`outputs` must resolve inside the worktree,
 including through symlinks; escapes are refused before any effect.
+
+## `anvil check [CHECK...] --json` (mutating) and `anvil check --list --json` (read-only)
+
+Run:
+
+```json
+"data": {
+  "worktree": { },
+  "results": [
+    {
+      "schema": "anvil.check-result/v1",
+      "run_id": "20261020T201500.123456789Z-1a2b3c4d",
+      "check": "fast",
+      "status": "passed",
+      "exit_code": 0,
+      "started_at": "…", "finished_at": "…", "duration_ms": 812,
+      "worktree": {"id": "wt_…", "path": "…", "branch": "feature/x"},
+      "identity": {
+        "git": {"head": "<sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
+        "definition_digest": "…", "toolchain": [{"command": "cargo --version", "output": "cargo 1.82.0", "exit_code": 0}],
+        "toolchain_digest": "…", "environment_names": ["ANVIL_WORKTREE_ID", "…"], "environment_digest": "…",
+        "inputs": [], "inputs_digest": "…", "platform": {"os": "darwin", "arch": "arm64"},
+        "identity_digest": "…"
+      },
+      "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
+      "artifacts": [{"path": "…", "sha256": "…", "size": 123}],
+      "locks": [], "anvil_version": "…", "run_dir": "…",
+      "reused": false
+    }
+  ]
+}
+```
+
+A non-passing check sets `ok: false`, `error.code: "check_failed"` with
+`details.{check,status,run_id}`, and exits with the failing command's status
+(124 timeout, 130 interrupted). Interrupted while waiting for a resource lock,
+nothing runs: `check_failed`, exit 130 and no result. A check cannot start
+while its worktree is being removed
+(`cleanup_blocked`). Child output never appears in stdout with
+`--json`; it streams to stderr and is kept in the logs.
+
+List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
+`locks`, `commands`, `latest` (a result or `null`), `assessment`
+(`current`, `passing_and_current`, `stale_reasons[]`) and `lock_holders[]`.
+
+Check identities fingerprint each resolved command directory and effective
+non-secret environment, including component values, expanded command overrides
+and inherited process variables. Execution receives the same snapshot. Values
+are never stored. Names marked by `secret_env` or Anvil's secret-name heuristic
+contribute a placeholder, so changing only a secret does not invalidate reuse.
+
+Declared inputs and artifacts must remain inside the worktree or runtime
+root. Symlinks below those roots (including ancestor directories and links
+inside input directories) are rejected with a diagnostic; they cannot be reused.
+
+Dirty submodules and nested repositories are rejected when their recursive
+state cannot be identified from the parent checkout. Clean them before running
+or reusing checks; two unidentifiable dirty states never share a passing result.
+
+Artifact patterns must match regular files. Directory artifacts fail the run
+with a diagnostic and disable reuse; use a file glob such as `bundle/*` instead.
+
+Execution identity and reuse assessment are computed only after all declared
+resource locks are held. Inputs produced by a preceding lock holder are included
+in that identity, which commands receive as `ANVIL_CHECK_IDENTITY`.
+
+Checks (including reuse), ensure and scaffold hold a shared worktree lifecycle
+gate from startup through completion. Remove, prune and unlink cleanup take the
+exclusive gate before any safety inspection and retain it through deletion and
+runtime release. A conflict fails closed (`cleanup_blocked`, exit 7). Cleanup
+also retains the preparation lock and refuses an existing preparation holder.
+Gate and preparation lock files live in a per-user directory outside the
+worktree and its Git directory. Gate files are never deleted.
+
+Lock order is lifecycle gate → preparation lock → repository database lock →
+check active lock → resource locks sorted by name → run lock → `.anvil.local`
+state lock. Never upgrade a shared gate; acquire multiple worktree gates in
+canonical path order. Lease mutations must use the same shared gate.
+
+On Unix, checks and toolchain probes run beneath a separate supervisor which
+inherits the lifecycle, active, resource and run locks. Parent death closes a
+heartbeat, terminates the process group, and retains exclusion until the group
+is gone. Commands must keep descendants in that group rather than daemonizing.
+A group whose termination cannot be established keeps the locks (fail closed).
+Windows check execution and toolchain probes are refused until job-object
+supervision provides the same complete-lifetime guarantee.

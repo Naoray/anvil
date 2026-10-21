@@ -474,6 +474,14 @@ anvil stop feature-x             # verified PID + start-time identity only
 anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs
 ```
 
+Named checks with trustworthy provenance:
+
+```bash
+anvil check fast --json                           # commit, dirty-state digest, toolchain, artifacts
+anvil check --list --json                         # is the latest result still current? why not?
+anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
+```
+
 Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
 `swift`. See [docs/environments.md](docs/environments.md) for the full schema and
 [examples/](examples/) for synthetic Rust/Python, Node/Rust/Tauri/Swift and

@@ -5,6 +5,7 @@
 package lockfile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -28,13 +29,17 @@ type Lock struct {
 // Path returns the lock file path.
 func (l *Lock) Path() string { return l.path }
 
+// File exposes the acquired handle only for exec inheritance. Callers must not
+// close or unlock it; Release remains the owner's responsibility.
+func (l *Lock) File() *os.File { return l.file }
+
 // Acquire blocks until the exclusive lock at path is held.
 func Acquire(path string) (*Lock, error) {
 	file, err := open(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file, true); err != nil {
+	if err := lockFile(file, true, false); err != nil {
 		return nil, errors.Join(fmt.Errorf("locking %s: %w", path, err), file.Close())
 	}
 	return &Lock{file: file, path: path}, nil
@@ -42,12 +47,17 @@ func Acquire(path string) (*Lock, error) {
 
 // TryAcquire attempts the lock once. It returns ErrLocked when another holder
 // owns it.
-func TryAcquire(path string) (*Lock, error) {
+func TryAcquire(path string) (*Lock, error) { return tryAcquire(path, false) }
+
+// TryAcquireShared allows concurrent readers and excludes an exclusive owner.
+func TryAcquireShared(path string) (*Lock, error) { return tryAcquire(path, true) }
+
+func tryAcquire(path string, shared bool) (*Lock, error) {
 	file, err := open(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file, false); err != nil {
+	if err := lockFile(file, false, shared); err != nil {
 		closeErr := file.Close()
 		if isContended(err) {
 			return nil, errors.Join(ErrLocked, closeErr)
@@ -60,19 +70,37 @@ func TryAcquire(path string) (*Lock, error) {
 // AcquireTimeout retries TryAcquire until timeout elapses. A zero timeout
 // tries exactly once; a negative timeout blocks like Acquire.
 func AcquireTimeout(path string, timeout time.Duration) (*Lock, error) {
-	if timeout < 0 {
-		return Acquire(path)
-	}
+	return AcquireContext(context.Background(), path, timeout)
+}
+
+// AcquireContext retries without hiding cancellation. Negative timeouts wait
+// indefinitely, zero tries once; cancellation never starts a later acquisition.
+func AcquireContext(ctx context.Context, path string, timeout time.Duration) (*Lock, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		lock, err := TryAcquire(path)
-		if err == nil || !errors.Is(err, ErrLocked) {
-			return lock, err
-		}
-		if !time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		time.Sleep(pollInterval)
+		lock, err := TryAcquire(path)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.Join(err, lock.Release())
+			}
+			return lock, nil
+		}
+		if !errors.Is(err, ErrLocked) {
+			return nil, err
+		}
+		if timeout >= 0 && !time.Now().Before(deadline) {
+			return nil, err
+		}
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

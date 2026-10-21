@@ -132,6 +132,7 @@ type Config struct {
 	Components []Component       `mapstructure:"-"`
 	Resources  ResourcesConfig   `mapstructure:"-"`
 	Processes  []ProcessConfig   `mapstructure:"-"`
+	Checks     Checks            `mapstructure:"-"`
 }
 
 // environmentDocument holds the case-sensitive environment sections of anvil.yaml.
@@ -141,6 +142,7 @@ type environmentDocument struct {
 	Components []Component       `yaml:"components"`
 	Resources  ResourcesConfig   `yaml:"resources"`
 	Processes  []ProcessConfig   `yaml:"processes"`
+	Checks     Checks            `yaml:"checks"`
 }
 
 func (d environmentDocument) apply(c *Config) {
@@ -149,6 +151,7 @@ func (d environmentDocument) apply(c *Config) {
 	c.Components = d.Components
 	c.Resources = d.Resources
 	c.Processes = d.Processes
+	c.Checks = d.Checks
 }
 
 // SyncConfig represents sync configuration for the sync command
