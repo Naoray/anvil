@@ -126,7 +126,7 @@ Run:
   "results": [
     {
       "schema": "anvil.check-result/v1",
-      "run_id": "20261020T201500Z-1a2b3c4d",
+      "run_id": "20261020T201500.123456789Z-1a2b3c4d",
       "check": "fast",
       "status": "passed",
       "exit_code": 0,
@@ -140,7 +140,7 @@ Run:
         "identity_digest": "…"
       },
       "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
-      "artifacts": [{"path": "…", "sha256": "…", "size": 123}],
+      "artifacts": [{"path": "…", "sha256": "…", "size": 123}, {"path": "…/bundle", "sha256": "…", "size": 456, "kind": "directory"}],
       "locks": [], "anvil_version": "…", "run_dir": "…",
       "reused": false
     }
@@ -150,7 +150,10 @@ Run:
 
 A non-passing check sets `ok: false`, `error.code: "check_failed"` with
 `details.{check,status,run_id}`, and exits with the failing command's status
-(124 timeout, 130 interrupted). Child output never appears in stdout with
+(124 timeout, 130 interrupted). Interrupted while waiting for a resource lock,
+nothing runs: `check_failed`, `details.status: "interrupted"`, exit 130 and no
+result. A check cannot start while its worktree is being removed
+(`resource_busy`). Child output never appears in stdout with
 `--json`; it streams to stderr and is kept in the logs.
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
