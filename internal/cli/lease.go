@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/naoray/anvil/internal/agentapi"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/ui"
 	"github.com/naoray/anvil/internal/wtstate"
 )
@@ -87,25 +88,30 @@ type leaseData struct {
 }
 
 // leaseTarget resolves the worktree and its identity for lease commands.
-func leaseTarget(args []string, mutate bool) (worktreeSummary, string, string, error) {
+func leaseTarget(args []string, mutate bool) (worktreeSummary, string, string, *lockfile.Lock, error) {
 	pc, err := openAgentProject()
 	if err != nil {
-		return worktreeSummary{}, "", "", err
+		return worktreeSummary{}, "", "", nil, err
 	}
 	wt, err := selectAgentWorktree(pc, args)
 	if err != nil {
-		return worktreeSummary{}, "", "", err
+		return worktreeSummary{}, "", "", nil, err
 	}
 	id := ""
+	var gate *lockfile.Lock
 	if mutate {
+		gate, err = acquireWorktreeUse(pc, *wt)
+		if err != nil {
+			return worktreeSummary{}, "", "", nil, err
+		}
 		identity, _, err := wtstate.EnsureIdentity(wt.Path)
 		if err != nil {
-			return worktreeSummary{}, "", "", agentapi.Wrap(agentapi.CodeInternal, err)
+			return worktreeSummary{}, "", "", nil, errors.Join(agentapi.Wrap(agentapi.CodeInternal, err), gate.Release())
 		}
 		id = identity.ID
 	}
 	summary, _ := summarizeWorktree(*wt)
-	return summary, wt.Path, id, nil
+	return summary, wt.Path, id, gate, nil
 }
 
 func leaseSubcommand(use, short, long string, mutating bool, fn func(cmd *cobra.Command, path, id string) (*leaseView, error)) *cobra.Command {
@@ -116,11 +122,12 @@ func leaseSubcommand(use, short, long string, mutating bool, fn func(cmd *cobra.
 		Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 		ValidArgsFunction: completeWorktreeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAgentCommand(cmd, agentCommand{Name: "lease " + use, Mutating: mutating, Human: printLeaseHuman}, func() (agentResult, error) {
-				summary, path, id, err := leaseTarget(args, mutating)
+			return runAgentCommand(cmd, agentCommand{Name: "lease " + use, Mutating: mutating, Human: printLeaseHuman}, func() (result agentResult, runErr error) {
+				summary, path, id, gate, err := leaseTarget(args, mutating)
 				if err != nil {
 					return agentResult{}, err
 				}
+				defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 				view, err := fn(cmd, path, id)
 				return agentResult{Data: leaseData{Worktree: summary, Lease: view}}, err
 			})

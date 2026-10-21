@@ -131,7 +131,7 @@ func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, 
 	return opts, nil
 }
 
-func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
+func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
 	jsonMode := mustGetBool(cmd, "json")
 	verbose := mustGetBool(cmd, "verbose")
 	quiet := mustGetBool(cmd, "quiet") || jsonMode
@@ -154,6 +154,11 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, err
 	}
+	gate, err := acquireWorktreeUse(pc, *target)
+	if err != nil {
+		return agentResult{}, err
+	}
+	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 	if err := checkRoleCompatible(target.Path, opts, created); err != nil {
 		return agentResult{}, err
 	}

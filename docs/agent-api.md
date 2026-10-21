@@ -213,6 +213,14 @@ refuse an active lease with `lease_held` unless `--ignore-lease`; a stale lease
 only warns.
 `prune --ignore-lease` and `unlink --clean --ignore-lease` apply the same explicit
 override to every selected worktree. `--force` alone does not bypass leases.
+Lease mutations and `ensure` hold the shared per-worktree lifecycle gate before
+reading or writing claims. Cleanup holds the exclusive gate through Git removal
+and resource release. A mutation during cleanup fails with `cleanup_blocked`
+and leaves state unchanged. After taking the gate, mutating commands revalidate
+the target's Git directory, registration, and HEAD before any claim writes.
+The lock order is lifecycle, preparation, repository database lifecycle, check
+active, sorted resources, run, then local state. Gate files remain in the common
+Git directory after removal so concurrent callers use the same lock.
 
 ## `anvil status --json`
 

@@ -62,6 +62,12 @@ func removeTestBinaryDir(dir string) {
 // tests (no sh fixtures, no /tmp assumptions). Every branch exits.
 func helperMain() {
 	switch mode := os.Getenv("ANVIL_HELPER_MODE"); mode {
+	case "cleanup-barrier":
+		if err := cleanupBarrierHelper(); err != nil {
+			fmt.Fprintln(os.Stderr, "cleanup barrier:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	case "env":
 		for _, key := range []string{"DB_DATABASE", "ANVIL_DB_DATABASE", "ANVIL_TEST_DB_DATABASE"} {
 			fmt.Printf("%s=%s\n", key, os.Getenv(key))
