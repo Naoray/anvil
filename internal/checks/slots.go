@@ -128,6 +128,9 @@ func (a *admission) release() error {
 // changed while it waited.
 func admit(ctx context.Context, req RunRequest, store Store, gate, active *lockfile.Lock, runID string) (*admission, error) {
 	a := &admission{}
+	// A queued reuse miss assesses the identity twice; report each nonfatal
+	// identity warning (for example an unwritable resource cache) once.
+	req.Warn = warnOnce(req.Warn)
 	slotReq := slotRequest(req, runID)
 	if req.slotGated() && req.Reuse {
 		locks, err := takeResourceLocks(ctx, req, runID)
@@ -183,24 +186,28 @@ func takeResourceLocks(ctx context.Context, req RunRequest, runID string) (heldL
 // slotRequest describes the run to the slot queue. Warnings repeated by the
 // non-blocking attempt and the queued one are reported once.
 func slotRequest(req RunRequest, runID string) slots.Request {
-	warn := req.Slot.Warn
-	if warn != nil {
-		var mu sync.Mutex
-		seen := map[string]bool{}
-		next := warn
-		warn = func(message string) {
-			mu.Lock()
-			repeated := seen[message]
-			seen[message] = true
-			mu.Unlock()
-			if !repeated {
-				next(message)
-			}
-		}
-	}
+	warn := warnOnce(req.Slot.Warn)
 	return slots.Request{
 		Weight: SlotWeight(req.Check), Priority: req.Slot.Priority, Check: req.Check.Name,
 		Worktree: req.Worktree.Path, WorktreeID: req.Worktree.ID, RunID: runID,
 		Wait: req.Slot.Wait, Progress: req.Slot.Progress, Warn: warn,
+	}
+}
+
+// warnOnce forwards each distinct message to warn once (nil stays nil).
+func warnOnce(warn func(string)) func(string) {
+	if warn == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	return func(message string) {
+		mu.Lock()
+		repeated := seen[message]
+		seen[message] = true
+		mu.Unlock()
+		if !repeated {
+			warn(message)
+		}
 	}
 }

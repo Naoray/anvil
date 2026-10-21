@@ -481,7 +481,10 @@ func canonicalOrClean(path string) string {
 // worktree: this worktree's own identity, the producer's outcome and
 // artifacts, no commands, and provenance naming the producing run. It makes
 // `check --list` and `status` report the check as current here.
-func recordReuse(req RunRequest, store Store, identity Identity, produced *Result, from *ReusedFrom, runID string, started time.Time) (*Result, error) {
+//
+// Like an executed run, started_at excludes a slot queue wait (a hit found
+// only after queueing), which is reported as queued_ms.
+func recordReuse(req RunRequest, store Store, identity Identity, produced *Result, from *ReusedFrom, runID string, started time.Time, queued time.Duration) (*Result, error) {
 	runDir := store.runDir(req.Check.Name, runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, err
@@ -489,7 +492,7 @@ func recordReuse(req RunRequest, store Store, identity Identity, produced *Resul
 	finished := req.now().UTC()
 	record := &Result{
 		Schema: ResultSchema, RunID: runID, Check: req.Check.Name, Status: StatusPassed,
-		StartedAt: started, FinishedAt: &finished, Worktree: req.Worktree, Identity: identity,
+		StartedAt: started.Add(queued), QueuedMS: queued.Milliseconds(), FinishedAt: &finished, Worktree: req.Worktree, Identity: identity,
 		Commands: []CommandResult{}, Artifacts: append([]Artifact{}, produced.Artifacts...), Locks: append([]string{}, req.Check.Locks...),
 		AnvilVersion: req.AnvilVersion, RunDir: runDir, Producer: req.producer(), ReusedFrom: from,
 	}

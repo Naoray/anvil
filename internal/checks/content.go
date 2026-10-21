@@ -2,6 +2,7 @@ package checks
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -170,6 +171,15 @@ var toolchainEnv = []string{
 	"RUSTFLAGS", "CARGO_BUILD_TARGET", "PHP_INI_SCAN_DIR", "CI",
 }
 
+// envKey matches variable names the way the platform does: Windows names
+// are case-insensitive (PATH is usually spelled Path there).
+func envKey(name string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(name)
+	}
+	return name
+}
+
 // contentEnvironmentDigest hashes one command's directory and declared
 // environment for the content identity. Inherited variables count only when
 // listed in toolchainEnv or the check's identity_env; their values are
@@ -178,13 +188,13 @@ var toolchainEnv = []string{
 func contentEnvironmentDigest(req IdentityRequest, target CommandTarget) string {
 	include := map[string]bool{}
 	for _, name := range append(append([]string{}, toolchainEnv...), req.Check.IdentityEnv...) {
-		include[name] = true
+		include[envKey(name)] = true
 	}
 	vars := target.Env.Variables()
 	normalizer := newContentNormalizer(req.WorktreePath, req.RuntimeDir, vars)
 	fields := []string{"dir=" + normalizer.value("", target.Dir)}
 	for _, variable := range vars {
-		if variable.Source == workenv.SourceInherited && !include[variable.Name] {
+		if variable.Source == workenv.SourceInherited && !include[envKey(variable.Name)] {
 			continue
 		}
 		value := normalizer.value(variable.Name, variable.Value)

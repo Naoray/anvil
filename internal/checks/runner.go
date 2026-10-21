@@ -115,13 +115,14 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, adm.release()) }()
-	// Reuse hits (this worktree's or another's) execute nothing and hold no slot.
+	// Reuse hits (this worktree's or another's) execute nothing; a hit found
+	// after queueing releases its slot immediately (on return).
 	if reused := adm.assessment.Reused; reused != nil {
 		if reused.Worktree.ID == req.Worktree.ID {
 			reused.Reused, reused.ReusedFrom = true, adm.assessment.ReusedFrom
 			return reused, nil
 		}
-		return recordReuse(req, store, adm.assessment.Identity, reused, adm.assessment.ReusedFrom, runID, started)
+		return recordReuse(req, store, adm.assessment.Identity, reused, adm.assessment.ReusedFrom, runID, started, adm.queued)
 	}
 	if req.Reuse && req.ReuseMiss != nil {
 		req.ReuseMiss(adm.assessment.Reason)

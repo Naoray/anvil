@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/slots"
 	"github.com/naoray/anvil/internal/workenv"
 	"github.com/naoray/anvil/internal/wtstate"
 )
@@ -46,9 +47,6 @@ type crossWorktree struct {
 
 func newCrossFixture(t *testing.T) *crossFixture {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("check commands use sh")
-	}
 	repo := canonicalTemp(t)
 	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.email", "t@e.st"}, {"config", "user.name", "T"}} {
 		crossGit(t, repo, args...)
@@ -158,6 +156,16 @@ func (f *crossFixture) request(w *crossWorktree, check config.CheckConfig, misse
 	}
 }
 
+// skipWithoutCheckExecution skips scenarios that run checks: commands use
+// sh, and Windows check execution is refused until job-object supervision
+// exists. Identity-only tests run everywhere.
+func skipWithoutCheckExecution(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("check execution is refused on Windows; scenarios use sh")
+	}
+}
+
 func (f *crossFixture) run(w *crossWorktree, check config.CheckConfig) (*Result, []string) {
 	f.t.Helper()
 	var misses []string
@@ -185,6 +193,7 @@ func reusableCheck() config.CheckConfig {
 }
 
 func TestCrossWorktreeReuseIdentifiesProducer(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	f := newCrossFixture(t)
 	author := f.add("author", wtstate.RoleImplementation, 41001)
 	review := f.add("review", wtstate.RoleReview, 41002)
@@ -232,6 +241,7 @@ func TestCrossWorktreeReuseIdentifiesProducer(t *testing.T) {
 }
 
 func TestCrossWorktreeReuseIdentityChanges(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	cases := []struct {
 		name string
 		// change prepares the consumer (and may change the check it runs).
@@ -306,6 +316,7 @@ func TestCrossWorktreeReuseIdentityChanges(t *testing.T) {
 }
 
 func TestCrossWorktreeReuseTrustPolicies(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	cases := []struct {
 		name     string
 		role     string
@@ -354,6 +365,7 @@ func TestCrossWorktreeReuseTrustPolicies(t *testing.T) {
 }
 
 func TestCrossWorktreeReuseRefusesUnsafeProducers(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	cases := []struct {
 		name     string
 		before   func(t *testing.T, f *crossFixture, producer *crossWorktree)
@@ -452,6 +464,7 @@ func TestContentEnvironmentNormalization(t *testing.T) {
 }
 
 func TestCrossWorktreeReuseNormalizesToolchainPaths(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	f := newCrossFixture(t)
 	author := f.add("author", wtstate.RoleImplementation, 41001)
 	review := f.add("review", wtstate.RoleReview, 41002)
@@ -465,6 +478,7 @@ func TestCrossWorktreeReuseNormalizesToolchainPaths(t *testing.T) {
 }
 
 func TestReuseIndexForgetsVanishedResults(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	entries := func(f *crossFixture, id string) []string {
 		t.Helper()
 		found, err := filepath.Glob(filepath.Join(f.root, "reuse", "*", "fast", "*", id+".json"))
@@ -498,4 +512,53 @@ func TestReuseIndexForgetsVanishedResults(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, dirs, 1, "empty content directories are removed")
 	})
+}
+
+// A cross-worktree hit found only after queueing (the first assessment
+// missed) records its queue wait like an executed run: started_at is
+// admission and queued_ms the wait.
+func TestCrossWorktreeHitAfterQueueingRecordsQueueTime(t *testing.T) {
+	skipWithoutCheckExecution(t)
+	f := newCrossFixture(t)
+	author := f.add("author", wtstate.RoleImplementation, 41001)
+	review := f.add("review", wtstate.RoleReview, 41002)
+	check := reusableCheck()
+	check.Expensive = true
+	f.run(author, check)
+	artifact := filepath.Join(author.runtime, "artifacts", "report.txt")
+	original, err := os.ReadFile(artifact)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(artifact, []byte("being rewritten"), 0o644))
+
+	manager := slots.New(slots.Dir(f.root), slots.Settings{Capacity: 1})
+	manager.Poll = 5 * time.Millisecond
+	holder, err := manager.Acquire(context.Background(), slots.Request{Weight: 1, Check: "other"})
+	require.NoError(t, err)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		if err := os.WriteFile(artifact, original, 0o644); err != nil {
+			t.Errorf("restore artifact: %v", err)
+		}
+		if err := holder.Release(); err != nil {
+			t.Errorf("release: %v", err)
+		}
+	}()
+	var misses []string
+	request := f.request(review, check, &misses)
+	request.Slot = SlotOptions{Manager: manager}
+	called := time.Now().UTC()
+	result, err := Run(context.Background(), request)
+	require.NoError(t, err)
+	require.True(t, result.Reused, "misses: %v", misses)
+	require.Empty(t, misses, "the final assessment hit")
+	require.Equal(t, author.id, result.ReusedFrom.WorktreeID)
+	require.Equal(t, 1, f.runs())
+	// The first assessment (identity, git and index reads) precedes queueing,
+	// so the wait is somewhat shorter than the 300ms the slot was held.
+	require.GreaterOrEqual(t, result.QueuedMS, int64(100))
+	require.False(t, result.StartedAt.Before(called.Add(time.Duration(result.QueuedMS)*time.Millisecond)), "started_at excludes the queue wait")
+	stored, err := Store{RuntimeDir: review.runtime}.Latest("fast")
+	require.NoError(t, err)
+	require.Equal(t, result.QueuedMS, stored.QueuedMS)
+	require.Equal(t, result.StartedAt, stored.StartedAt)
 }

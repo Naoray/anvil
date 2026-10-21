@@ -1,18 +1,13 @@
-// Cross-worktree reuse scenarios use sh.
-
-//go:build !windows
-
 package cli
 
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/naoray/anvil/internal/lockfile"
 )
 
 const crossReuseFixtureYAML = `env:
@@ -31,6 +26,7 @@ checks:
 `
 
 func TestCheckReuseAcrossWorktreesAtTheSameContent(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	runLog := filepath.Join(t.TempDir(), "runs.log")
 	f := newAgentFixture(t, crossReuseFixtureYAML, nil)
 	f = withEnv(f, "RUN_LOG="+runLog, "CHECK_MODE=fast", "CLAUDE_SESSION_ID=author-session")
@@ -138,6 +134,7 @@ func TestCheckReuseTrustFlagValidation(t *testing.T) {
 }
 
 func TestCheckReuseRolePolicyFromConfig(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	runLog := filepath.Join(t.TempDir(), "runs.log")
 	yaml := crossReuseFixtureYAML + `roles:
   review:
@@ -169,6 +166,7 @@ func TestCheckReuseRolePolicyFromConfig(t *testing.T) {
 // anvil.yaml is ignored by Git here and written into each worktree, so the
 // check definition changes while the committed tree stays identical.
 func TestCheckReuseInvalidatedByDefinitionOnlyChange(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	runLog := filepath.Join(t.TempDir(), "runs.log")
 	f := newAgentFixture(t, "", map[string]string{".gitignore": ".anvil.local\nanvil.yaml\n"})
 	f = withEnv(f, "RUN_LOG="+runLog, "CHECK_MODE=fast")
@@ -206,6 +204,7 @@ func TestCheckReuseInvalidatedByDefinitionOnlyChange(t *testing.T) {
 }
 
 func TestRemoveForgetsReuseIndexEntries(t *testing.T) {
+	skipWithoutCheckExecution(t)
 	f := withEnv(newAgentFixture(t, crossReuseFixtureYAML, nil), "RUN_LOG="+filepath.Join(t.TempDir(), "runs.log"), "CHECK_MODE=fast")
 	envelope, stderr, code := f.runJSON(f.repo, "ensure", "author", "--role", "implementation")
 	require.Equal(t, 0, code, stderr)
@@ -225,36 +224,12 @@ func TestRemoveForgetsReuseIndexEntries(t *testing.T) {
 	require.Empty(t, found)
 }
 
-// A cross-worktree reuse hit on a slot-gated check executes nothing and
-// takes no machine-wide slot, even when every slot is held.
-func TestCheckReuseAcrossWorktreesTakesNoSlot(t *testing.T) {
-	f, trace, wts := slotFixture(t, 1, `checks:
-  bench:
-    expensive: true
-    reusable: true
-    commands: ['echo run >> "TRACE/runs.log"']
-`, "author", "reviewer")
-	runs := func() int {
-		content, err := os.ReadFile(filepath.Join(trace, "runs.log"))
-		require.NoError(t, err)
-		return strings.Count(string(content), "run\n")
+// skipWithoutCheckExecution skips scenarios that execute check commands:
+// they use sh, and Windows check execution is refused until job-object
+// supervision exists (see docs/agent-api.md).
+func skipWithoutCheckExecution(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("check execution is refused on Windows; scenarios use sh")
 	}
-	envelope, stderr, code := f.runJSON(wts["author"], "check", "bench", "--allow-expensive")
-	require.Equal(t, 0, code, stderr)
-	authorID := field(t, envelope, "data", "results", 0, "worktree", "id").(string)
-	require.Equal(t, 1, runs())
-
-	slot, err := lockfile.Acquire(filepath.Join(f.runtimeRoot(), "slots", "slot-0.lock"))
-	require.NoError(t, err)
-	defer func() { require.NoError(t, slot.Release()) }()
-
-	envelope, stderr, code = f.runJSON(wts["reviewer"], "check", "bench", "--allow-expensive", "--reuse", "--slot-wait", "300ms")
-	require.Equal(t, 0, code, stderr)
-	result := field(t, envelope, "data", "results", 0).(map[string]any)
-	require.Equal(t, true, result["reused"], "warnings: %v", envelope["warnings"])
-	require.Equal(t, authorID, field(t, result, "assessment", "reused_from", "worktree_id"))
-	require.Equal(t, float64(0), result["queued_ms"])
-	require.NotContains(t, stderr, "waiting for slot")
-	require.Empty(t, f.queued(), "the hit never queued")
-	require.Equal(t, 1, runs(), "nothing ran in the reviewer worktree")
 }
