@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/workenv"
 )
 
@@ -117,14 +118,22 @@ func DescribeDirectories(root, worktreeID string, cfg *config.Config) (Directori
 
 // ProvisionDirectories creates the managed directories and records the owner.
 // It is idempotent and refuses a directory owned by another worktree.
-func ProvisionDirectories(root, worktreeID, worktreePath string, cfg *config.Config) (Directories, []workenv.Variable, error) {
-	dirs, vars, err := DescribeDirectories(root, worktreeID, cfg)
+func ProvisionDirectories(root, worktreeID, worktreePath string, cfg *config.Config) (dirs Directories, vars []workenv.Variable, err error) {
+	dirs, vars, err = DescribeDirectories(root, worktreeID, cfg)
 	if err != nil {
 		return dirs, nil, err
 	}
 	if err := os.MkdirAll(dirs.Root, 0o700); err != nil {
 		return dirs, nil, fmt.Errorf("creating runtime directory: %w", err)
 	}
+	// Concurrent preparations (for example parallel `anvil ensure`) must not
+	// read and replace the owner record at the same time: Windows refuses to
+	// rename over a file another process has open.
+	lock, err := lockfile.Acquire(filepath.Join(root, "locks", "runtime-"+worktreeID+".lock"))
+	if err != nil {
+		return dirs, nil, fmt.Errorf("locking runtime directory: %w", err)
+	}
+	defer func() { err = errors.Join(err, lock.Release()) }()
 	owner, err := ReadOwner(dirs.Root)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
