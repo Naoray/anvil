@@ -211,9 +211,17 @@ func ResolvePaths(worktreePath, runtimeDir string, patterns []string, env map[st
 		if !within(worktreePath, expanded) && (runtimeDir == "" || !within(runtimeDir, expanded)) {
 			return nil, fmt.Errorf("path %q must stay inside the worktree or its runtime directory", pattern)
 		}
+		if err := validateCheckPath(worktreePath, runtimeDir, expanded); err != nil {
+			return nil, err
+		}
 		matches, err := filepath.Glob(expanded)
 		if err != nil {
 			return nil, fmt.Errorf("pattern %q: %w", pattern, err)
+		}
+		for _, match := range matches {
+			if err := validateCheckPath(worktreePath, runtimeDir, match); err != nil {
+				return nil, err
+			}
 		}
 		sort.Strings(matches)
 		out[pattern] = matches
@@ -257,6 +265,12 @@ func pathsDigest(worktreePath, runtimeDir string, resolved map[string][]string) 
 			err := filepath.WalkDir(match, func(path string, entry fs.DirEntry, err error) error {
 				if err != nil {
 					return err
+				}
+				if err := validateCheckPath(worktreePath, runtimeDir, path); err != nil {
+					return err
+				}
+				if !entry.Type().IsRegular() && !entry.IsDir() {
+					return fmt.Errorf("unsupported input type: %s", path)
 				}
 				writeField(h, displayPath(worktreePath, runtimeDir, path))
 				if entry.Type().IsRegular() {
@@ -322,4 +336,30 @@ func resolveTargets(req IdentityRequest) ([]CommandTarget, error) {
 		targets = append(targets, target)
 	}
 	return targets, nil
+}
+
+// Reject links anywhere below an allowed root, including ancestors of glob
+// matches and links discovered while walking a directory. The roots themselves
+// may use the platform's canonical aliases (for example /var on macOS).
+func validateCheckPath(worktreePath, runtimeDir, path string) error {
+	root := worktreePath
+	if !within(root, path) {
+		if runtimeDir == "" || !within(runtimeDir, path) {
+			return fmt.Errorf("path %q must stay inside the worktree or its runtime directory", path)
+		}
+		root = runtimeDir
+	}
+	for current := filepath.Clean(path); current != filepath.Clean(root); current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink inputs and artifacts are unsupported: %s", current)
+		}
+	}
+	return nil
 }

@@ -147,3 +147,7 @@ non-secret environment, including component values, expanded command overrides
 and inherited process variables. Execution receives the same snapshot. Values
 are never stored. Names marked by `secret_env` or Anvil's secret-name heuristic
 contribute a placeholder, so changing only a secret does not invalidate reuse.
+
+Declared inputs and artifacts must remain inside the worktree or runtime
+root. Symlinks below those roots (including ancestor directories and links
+inside input directories) are rejected with a diagnostic; they cannot be reused.

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -35,6 +37,37 @@ func TestCheckReuseFingerprintsEffectiveEnvironment(t *testing.T) {
 				}
 				require.Equal(t, i == 1, field(t, envelope, "data", "results", 0, "reused"))
 			}
+		})
+	}
+}
+
+func TestCheckRejectsSymlinkInputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix symlinks")
+	}
+	for _, kind := range []string{"leaf", "ancestor", "nested", "inside"} {
+		t.Run(kind, func(t *testing.T) {
+			pattern := "fixture/input"
+			if kind == "nested" {
+				pattern = "fixture"
+			}
+			f := newAgentFixture(t, fmt.Sprintf("checks:\n  links:\n    reusable: true\n    inputs: [%q]\n    commands: ['true']\n", pattern), map[string]string{".gitignore": ".anvil.local\nfixture/\n", "inside.txt": "inside"})
+			outside := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(outside, "input"), []byte("good"), 0o600))
+			fixture := filepath.Join(f.repo, "fixture")
+			if kind == "ancestor" {
+				require.NoError(t, os.Symlink(outside, fixture))
+			} else {
+				require.NoError(t, os.MkdirAll(fixture, 0o700))
+				target := filepath.Join(outside, "input")
+				if kind == "inside" {
+					target = filepath.Join(f.repo, "inside.txt")
+				}
+				require.NoError(t, os.Symlink(target, filepath.Join(fixture, "input")))
+			}
+			envelope, stderr, code := f.runJSON(f.repo, "check", "links", "--reuse")
+			require.NotZero(t, code, stderr)
+			require.Contains(t, field(t, envelope, "error", "message"), "symlink")
 		})
 	}
 }
