@@ -56,6 +56,7 @@ type WorktreeRef struct {
 
 // Result is the persisted provenance of one check run.
 type Result struct {
+	Reused           bool            `json:"-"`
 	Schema           string          `json:"schema"`
 	RunID            string          `json:"run_id"`
 	Check            string          `json:"check"`

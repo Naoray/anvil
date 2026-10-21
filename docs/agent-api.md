@@ -158,3 +158,7 @@ or reusing checks; two unidentifiable dirty states never share a passing result.
 
 Artifact patterns must match regular files. Directory artifacts fail the run
 with a diagnostic and disable reuse; use a file glob such as `bundle/*` instead.
+
+Execution identity and reuse assessment are computed only after all declared
+resource locks are held. Inputs produced by a preceding lock holder are included
+in that identity, which commands receive as `ANVIL_CHECK_IDENTITY`.

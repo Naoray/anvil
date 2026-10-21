@@ -36,6 +36,8 @@ type RunRequest struct {
 	Unset        []string
 	SecretEnv    []string
 	Now          func() time.Time
+	Reuse        bool
+	ReuseMiss    func(string)
 }
 
 // ErrAlreadyRunning reports a concurrent run of the same check in the same worktree.
@@ -66,17 +68,6 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	defer func() { err = errors.Join(err, active.Release()) }()
 
-	identityReq := IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
-	targets, err := resolveTargets(identityReq)
-	if err != nil {
-		return nil, err
-	}
-	identityReq.Targets = targets
-	identity, err := ComputeIdentity(ctx, identityReq)
-	if err != nil {
-		return nil, fmt.Errorf("computing check identity: %w", err)
-	}
-
 	started := req.now().UTC()
 	runID, err := newRunID(started)
 	if err != nil {
@@ -89,6 +80,31 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, locks.release()) }()
+
+	identityReq := IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
+	targets, err := resolveTargets(identityReq)
+	if err != nil {
+		return nil, err
+	}
+	identityReq.Targets = targets
+	identity, err := ComputeIdentity(ctx, identityReq)
+	if err != nil {
+		return nil, fmt.Errorf("computing check identity: %w", err)
+	}
+
+	if req.Reuse {
+		reused, reason, err := store.reusable(req.Check, identity)
+		if err != nil {
+			return nil, err
+		}
+		if reused != nil {
+			reused.Reused = true
+			return reused, nil
+		}
+		if req.ReuseMiss != nil {
+			req.ReuseMiss(reason)
+		}
+	}
 
 	runDir := store.runDir(req.Check.Name, runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {

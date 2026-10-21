@@ -253,20 +253,11 @@ func checkFailure(result *checks.Result) error {
 }
 
 func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
-	store := checks.Store{RuntimeDir: wenv.Directories.Root}
 	warning := ""
-	if mustGetBool(cmd, "reuse") {
-		reused, reason, err := reusableResult(ctx, wenv, store, check)
-		if err != nil {
-			return checkRunEntry{}, "", agentapi.Wrap(agentapi.CodeInternal, err)
-		}
-		if reused != nil {
-			return checkRunEntry{Result: reused, Reused: true}, "", nil
-		}
-		warning = fmt.Sprintf("check %s not reused: %s", check.Name, reason)
-	}
 	result, err := checks.Run(ctx, checks.RunRequest{
 		Check:       check,
+		Reuse:       mustGetBool(cmd, "reuse"),
+		ReuseMiss:   func(reason string) { warning = fmt.Sprintf("check %s not reused: %s", check.Name, reason) },
 		Worktree:    checks.WorktreeRef{ID: wenv.Identity.ID, Path: wenv.Worktree.Path, Branch: wenv.Worktree.Branch},
 		RuntimeDir:  wenv.Directories.Root,
 		RuntimeRoot: wenv.RuntimeRoot,
@@ -294,35 +285,7 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 	case err != nil:
 		warning = fmt.Sprintf("check %s: %v", check.Name, err)
 	}
-	return checkRunEntry{Result: result}, warning, nil
-}
-
-// reusableResult returns the latest result only when the check is declared
-// reusable, it passed, its full identity is unchanged and every recorded
-// artifact is intact.
-func reusableResult(ctx context.Context, wenv *worktreeEnv, store checks.Store, check config.CheckConfig) (*checks.Result, string, error) {
-	if !check.Reusable {
-		return nil, "the check is not declared reusable", nil
-	}
-	latest, err := store.Latest(check.Name)
-	if err != nil || latest == nil {
-		return nil, "no earlier result", err
-	}
-	if latest.Status != checks.StatusPassed {
-		return nil, "the latest result is " + latest.Status, nil
-	}
-	identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check))
-	if err != nil {
-		return nil, "", err
-	}
-	assessment := checks.Assess(latest, identity)
-	if !assessment.Current {
-		return nil, fmt.Sprintf("the latest result is stale (%v)", assessment.Reasons), nil
-	}
-	if intact, reason := checks.ArtifactsIntact(latest); !intact {
-		return nil, reason, nil
-	}
-	return latest, "", nil
+	return checkRunEntry{Result: result, Reused: result.Reused}, warning, nil
 }
 
 func resolveCheckCommand(wenv *worktreeEnv, command config.CheckCommand) (checks.CommandTarget, error) {

@@ -1,7 +1,10 @@
 package checks
 
 import (
+	"fmt"
 	"os"
+
+	"github.com/naoray/anvil/internal/config"
 )
 
 // Assessment says whether a stored result still describes the checkout.
@@ -58,4 +61,26 @@ func ArtifactsIntact(result *Result) (bool, string) {
 		}
 	}
 	return true, ""
+}
+
+// reusable is called only while the active and declared resource locks are held.
+func (s Store) reusable(check config.CheckConfig, identity Identity) (*Result, string, error) {
+	if !check.Reusable {
+		return nil, "the check is not declared reusable", nil
+	}
+	latest, err := s.Latest(check.Name)
+	if err != nil || latest == nil {
+		return nil, "no earlier result", err
+	}
+	if latest.Status != StatusPassed {
+		return nil, "the latest result is " + latest.Status, nil
+	}
+	assessment := Assess(latest, identity)
+	if !assessment.Current {
+		return nil, fmt.Sprintf("the latest result is stale (%v)", assessment.Reasons), nil
+	}
+	if intact, reason := ArtifactsIntact(latest); !intact {
+		return nil, reason, nil
+	}
+	return latest, "", nil
 }

@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/naoray/anvil/internal/lockfile"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -125,4 +129,43 @@ func TestCheckRejectsDirectoryArtifacts(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(bundles[0], "added"), []byte("extra"), 0o600))
 		}
 	}
+}
+
+func TestCheckIdentityCapturedAfterAllResourceLocks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix checks")
+	}
+	f := newAgentFixture(t, `checks:
+  wait:
+    locks: [a, z]
+    inputs: [input.count]
+    commands: ['cat input.count > "$ANVIL_ARTIFACTS_DIR/consumed"']
+`, map[string]string{"input.count": "A"})
+	gate, err := lockfile.Acquire(filepath.Join(f.runtimeRoot(), "locks", "z.lock"))
+	require.NoError(t, err)
+	defer gate.Release()
+	running := exec.Command(f.bin, "check", "wait", "--lock-wait", "30s", "--json")
+	running.Dir, running.Env = f.repo, f.env
+	var output bytes.Buffer
+	running.Stdout, running.Stderr = &output, &output
+	require.NoError(t, running.Start())
+	t.Cleanup(func() {
+		if running.ProcessState == nil {
+			require.NoError(t, running.Process.Kill())
+			require.Error(t, running.Wait())
+		}
+	})
+	require.Eventually(t, func() bool {
+		held, err := lockfile.IsHeld(filepath.Join(f.runtimeRoot(), "locks", "a.lock"))
+		return err == nil && held
+	}, 10*time.Second, 10*time.Millisecond)
+	require.NoError(t, os.WriteFile(filepath.Join(f.repo, "input.count"), []byte("B"), 0o600))
+	require.NoError(t, gate.Release())
+	require.NoError(t, running.Wait(), output.String())
+	envelope, stderr, code := f.runJSON(f.repo, "check", "--list")
+	require.Zero(t, code, stderr)
+	require.Equal(t, true, field(t, checkEntry(t, envelope, "wait"), "assessment", "passing_and_current"), output.String())
+	require.NoError(t, os.WriteFile(filepath.Join(f.repo, "input.count"), []byte("A"), 0o600))
+	envelope, _, _ = f.runJSON(f.repo, "check", "--list")
+	require.Equal(t, false, field(t, checkEntry(t, envelope, "wait"), "assessment", "passing_and_current"))
 }
