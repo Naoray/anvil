@@ -79,3 +79,16 @@ func TestExecCommand_ExistingDirectory126(t *testing.T) {
 	assert.Contains(t, stderr.String(), target)
 	assert.NotContains(t, stderr.String(), "command not found")
 }
+
+func TestRunWindowsLookupUsesChildPathAndPathExt(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "tools"), 0o755))
+	target := filepath.Join(root, "tools", "tool.custom")
+	require.NoError(t, os.WriteFile(target, []byte("test"), 0o644))
+	path, err := lookPathIn("tool", root, []string{"Path=tools", "PathExt=.CUSTOM"})
+	require.NoError(t, err)
+	require.Equal(t, target, path)
+	path, err = lookPathIn("tools/tool", root, []string{"PATHEXT=.CUSTOM"})
+	require.NoError(t, err)
+	require.Equal(t, target, path)
+}

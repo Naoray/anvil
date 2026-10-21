@@ -7,12 +7,12 @@ package capabilities
 import (
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Contribution is what one capability adds to a component.
 type Contribution struct {
+	// Err reports invalid capability configuration.
+	Err      error
 	Requires []string
 	Prepare  []Command
 	// Env values may reference ${ANVIL_COMPONENT_DIR}.
@@ -63,28 +63,30 @@ func Contribute(name, dir, goos string) Contribution {
 
 func node(dir string) Contribution {
 	c := Contribution{PathPrepend: []string{filepath.Join("node_modules", ".bin")}}
-	install := func(manager, run string, inputs, outputs []string) {
+	install := func(manager, run, lockfile string) {
 		c.Requires = append(c.Requires, manager)
 		c.Prepare = append(c.Prepare, Command{
 			Run:     run,
-			Inputs:  append([]string{"package.json"}, inputs...),
-			Outputs: outputs,
+			Inputs:  []string{"package.json", lockfile},
+			Outputs: []string{"node_modules"},
 		})
 	}
-	nodeModules := []string{"node_modules"}
 	switch {
 	case exists(dir, "pnpm-lock.yaml"):
-		install("pnpm", "pnpm install --frozen-lockfile", []string{"pnpm-lock.yaml"}, nodeModules)
+		install("pnpm", "pnpm install --frozen-lockfile", "pnpm-lock.yaml")
 	case exists(dir, "bun.lock"):
-		install("bun", "bun install --frozen-lockfile", []string{"bun.lock"}, nodeModules)
+		install("bun", "bun install --frozen-lockfile", "bun.lock")
 	case exists(dir, "bun.lockb"):
-		install("bun", "bun install --frozen-lockfile", []string{"bun.lockb"}, nodeModules)
+		install("bun", "bun install --frozen-lockfile", "bun.lockb")
 	case exists(dir, "yarn.lock") && exists(dir, ".yarnrc.yml"):
-		install("yarn", "yarn install --immutable", []string{"yarn.lock", ".yarnrc.yml"}, yarnBerryOutputs(dir))
+		install("yarn", "yarn install --immutable", "yarn.lock")
+		c.Prepare[0].Inputs = append(c.Prepare[0].Inputs, ".yarnrc.yml", ".yarnrc")
+		c.Prepare[0].Outputs, c.Err = yarnOutputs(dir)
 	case exists(dir, "yarn.lock"):
-		install("yarn", "yarn install --frozen-lockfile", []string{"yarn.lock"}, nodeModules)
+		install("yarn", "yarn install --frozen-lockfile", "yarn.lock")
+		c.Prepare[0].Inputs = append(c.Prepare[0].Inputs, ".yarnrc.yml", ".yarnrc")
 	case exists(dir, "package-lock.json"):
-		install("npm", "npm ci", []string{"package-lock.json"}, nodeModules)
+		install("npm", "npm ci", "package-lock.json")
 	case exists(dir, "package.json"):
 		// No lockfile: installs are not reproducible, so only record the manifest.
 		c.Requires = append(c.Requires, "npm")
@@ -94,26 +96,6 @@ func node(dir string) Contribution {
 		c.Requires = append([]string{"node"}, c.Requires...)
 	}
 	return c
-}
-
-// yarnBerryOutputs follows .yarnrc.yml's nodeLinker: Plug'n'Play (the
-// default) writes .pnp.cjs instead of node_modules. An unreadable file keeps
-// the default; yarn itself reports the configuration error.
-func yarnBerryOutputs(dir string) []string {
-	var settings struct {
-		NodeLinker string `yaml:"nodeLinker"`
-	}
-	if content, err := os.ReadFile(filepath.Join(dir, ".yarnrc.yml")); err == nil {
-		if err := yaml.Unmarshal(content, &settings); err != nil {
-			settings.NodeLinker = ""
-		}
-	}
-	switch settings.NodeLinker {
-	case "node-modules", "pnpm":
-		return []string{"node_modules"}
-	default:
-		return []string{".pnp.cjs"}
-	}
 }
 
 func rust(dir, sub string) Contribution {
@@ -133,10 +115,9 @@ func rust(dir, sub string) Contribution {
 }
 
 func python(dir, goos string) Contribution {
-	// Native Windows virtualenvs keep executables in Scripts.
-	bin, interpreter := filepath.Join(".venv", "bin"), ".venv/bin/python"
+	bin := filepath.Join(".venv", "bin")
 	if goos == "windows" {
-		bin, interpreter = filepath.Join(".venv", "Scripts"), ".venv/Scripts/python.exe"
+		bin = filepath.Join(".venv", "Scripts")
 	}
 	venv := Contribution{
 		Env:         map[string]string{"VIRTUAL_ENV": filepath.Join("${ANVIL_COMPONENT_DIR}", ".venv")},
@@ -151,9 +132,15 @@ func python(dir, goos string) Contribution {
 		venv.Env["POETRY_VIRTUALENVS_IN_PROJECT"] = "true"
 		venv.Prepare = []Command{{Run: "poetry install --no-interaction", Inputs: []string{"pyproject.toml", "poetry.lock"}, Outputs: []string{".venv"}}}
 	case exists(dir, "requirements.txt"):
-		venv.Requires = []string{"python3"}
+		pythonCommand := "python3"
+		interpreter := filepath.Join(bin, "python")
+		if goos == "windows" {
+			pythonCommand = "python"
+			interpreter += ".exe"
+		}
+		venv.Requires = []string{pythonCommand}
 		venv.Prepare = []Command{{
-			Run:     "python3 -m venv .venv && " + shellQuote(interpreter) + " -m pip install --disable-pip-version-check -r requirements.txt",
+			Run:     pythonCommand + " -m venv .venv && " + shellQuote(filepath.ToSlash(interpreter)) + " -m pip install --disable-pip-version-check -r requirements.txt",
 			Inputs:  []string{"requirements.txt"},
 			Outputs: []string{".venv"},
 		}}

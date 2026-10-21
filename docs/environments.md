@@ -66,26 +66,26 @@ capability only contributes its requirements.
 
 | Capability | Detects | Default command | Inputs → outputs | Environment |
 |------------|---------|-----------------|------------------|-------------|
-| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile (+ `.yarnrc.yml`) → `node_modules`, or `.pnp.cjs` for Yarn Plug'n'Play (Berry's default `nodeLinker`) | `node_modules/.bin` on PATH |
+| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile + Yarn config → `node_modules` (Yarn PnP: `.pnp.cjs`) | `node_modules/.bin` on PATH |
 | `rust` | `Cargo.toml` (+`Cargo.lock`) | `cargo fetch [--locked]` | `Cargo.toml`, `Cargo.lock`, `rust-toolchain(.toml)` | — |
-| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` (`.venv\Scripts` on Windows) on PATH |
+| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` (`.venv/Scripts` on Windows) on PATH |
 | `go` | `go.mod` | `go mod download` | `go.mod`, `go.sum` | — |
 | `php` | `composer.lock` | `composer install --no-interaction` | `composer.json`, `composer.lock` → `vendor` | `vendor/bin` on PATH |
 | `tauri` | `src-tauri/Cargo.toml` | `cargo fetch` in `src-tauri` | Cargo inputs under `src-tauri` | — |
 | `swift` | `Package.swift` | `swift package resolve` | `Package.swift`, `Package.resolved` | defaults to `platforms: [darwin]` |
 
-Anvil does not build projects by default (no `cargo build`, `tauri build`,
-`swift build`); declare such commands in `prepare` when you want them. Toolchain
-versions are not part of a step's identity — use `anvil ensure --refresh` after
-upgrading a toolchain. The declared environment is: changing a project `env`
-value, or a component or command `env` value after expansion, reruns the steps
-that receive it. Only a digest is recorded, never the values; `PATH` is left
-out so shell differences do not invalidate preparation.
+Yarn Berry reads `nodeLinker` from the component's `.yarnrc.yml` (or
+`YARN_NODE_LINKER`). PnP records `.pnp.cjs` plus explicitly enabled loader/data
+files; the `node-modules` and `pnpm` linkers record `node_modules`. Both
+`.yarnrc.yml` and legacy `.yarnrc` participate in the install input digest.
 
-Component and prepare-command `env` values may reference `${ANVIL_COMPONENT}`
-and `${ANVIL_COMPONENT_DIR}`. Conditions (`when`, `platforms`) of every
-component are validated before any effect, including components skipped on
-this machine.
+Anvil does not build projects by default (no `cargo build`, `tauri build`,
+`swift build`); declare such commands in `prepare` when you want them.
+
+The exported preparation environment is hashed into step identities; changing
+project env values invalidates completion records without storing their raw
+values in local state. Toolchain versions are not part of a step's identity —
+use `anvil ensure --refresh` after upgrading a toolchain.
 
 The Laravel/PHP presets are unchanged and keep running through `scaffold`
 steps; components may be combined with a preset in one repository.
@@ -111,17 +111,12 @@ anvil run feature-x --require-ready -- make lint
 ```
 
 `--` is required. The child replaces Anvil (exit status passes through; 127 =
-not found, 126 = not executable). COMMAND is looked up on the exported `PATH`
-(and `PATHEXT` on Windows), so component-local tools such as
-`node_modules/.bin` or `.venv/bin` win over global ones; a relative path is
-resolved against the child's directory.
-
-`--require-ready` refuses (`not_prepared`, exit 6) unless worktree preparation
-is complete; with `--component` the component's requirements must also be met
-and each of its applicable steps must have a current completion record (an
-opt-in component needs `anvil ensure --component NAME` first). Without
-`--require-ready` these are warnings on stderr. `run` is read-only and works whether or not a
+not found, 126 = not executable). `run` is read-only and works whether or not a
 testing database exists. `anvil exec` keeps its database-specific semantics.
+With `--component --require-ready`, the selected component must have satisfied
+requirements and matching preparation records for its current applicable steps,
+including their declared inputs and outputs. Prepare opt-in components explicitly
+with `anvil ensure --component NAME` before requiring them to be ready.
 
 ## Runtime resources
 
@@ -183,13 +178,16 @@ processes:
 
 `anvil start [WORKTREE] [--process NAME]` runs each process detached through
 `sh -c` in its own session/process group, with the worktree environment and
-output appended to `$ANVIL_LOG_DIR/<name>.log`. The PID is recorded in
+output appended to `$ANVIL_LOG_DIR/<name>.log`. The group leader is a small
+Anvil supervisor that stays alive until every process in the group has
+exited, so a command that backgrounds its work and returns (`server &`) is
+still `already_running` on the next start. The leader PID is recorded in
 `.anvil.local` together with the kernel start time (Linux `/proc/<pid>/stat`
 start ticks + boot ID; macOS `kern.proc.pid` start time). `anvil stop` signals
-the group only when the PID still has that start identity, or when the leader
-exited but its own process group survives (a PID is never recycled while it is
-a live process group ID). A recycled PID is reported as
-`not_signaled_pid_reused` and never signaled; nothing is ever killed because it
+the group only while the leader PID still has that start identity. A recycled
+PID is reported as `not_signaled_pid_reused`, and a surviving group whose
+leader is gone as `not_signaled_unverifiable` (its ID may now belong to an
+unrelated session); neither is ever signaled; nothing is ever killed because it
 listens on a recorded port. Managed processes are unsupported on Windows and
 other platforms without a verifiable identity (`unsupported_platform`).
 
@@ -321,7 +319,9 @@ runtime directory; they are referenced by path, never embedded in JSON.
    stop, ports to release and the runtime directory to delete),
 2. stop verified owned processes first (failure keeps the worktree),
 3. after the worktree is removed, release its ports and delete its runtime
-   directory only when `owner.json` names exactly this worktree ID and path.
+   directory only when `owner.json` names this worktree's verified ID and is
+   unchanged since step 1 (a worktree moved with `git worktree move` keeps its
+   ID, so its old path in `owner.json` still matches).
 
 Shared resources, files outside the runtime directory and other worktrees'
 resources are never touched. A worktree whose `.anvil.local` was copied from

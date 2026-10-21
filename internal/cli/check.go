@@ -393,7 +393,7 @@ func completeCheckNames(cmd *cobra.Command, _ []string, _ string) ([]string, cob
 }
 
 func init() {
-	addJSONFlag(checkCmd)
+	addJSONFlag(checkCmd, agentCommand{Name: "check", Mutating: true, Human: printCheckHuman})
 	checkCmd.Flags().Bool("list", false, "List checks with their latest result and whether it is current (read-only)")
 	checkCmd.Flags().String("worktree", "", "Worktree to check (exact name, branch, path or ID; default: current)")
 	checkCmd.Flags().Bool("allow-expensive", false, "Allow running checks marked expensive")

@@ -6,6 +6,10 @@ package procs
 
 import "errors"
 
+// SuperviseArg is the hidden first argument that makes the anvil binary act
+// as the leader of a managed process group.
+const SuperviseArg = "__anvil-supervise"
+
 var (
 	// ErrNoProcess reports that no live process has the PID.
 	ErrNoProcess = errors.New("process does not exist")

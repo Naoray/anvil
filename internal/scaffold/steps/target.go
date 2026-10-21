@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
-	"github.com/naoray/anvil/internal/utils"
 )
 
 // execTarget is the optional working directory and environment of a command
@@ -24,18 +26,19 @@ func newExecTarget(cfg config.StepConfig) execTarget {
 
 // resolve returns the absolute working directory and the extra environment.
 // Extra values are Anvil's worktree environment (ctx.Env) plus the step's own
-// values, which may reference ${VAR} from the worktree or inherited
-// environment (not other step values).
+// values, which may reference ${VAR} from either the worktree or inherited
+// environment.
 func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]string, error) {
 	dir := ctx.WorktreePath
 	if t.dir != "" {
 		if err := config.ValidateRelativePath(t.dir); err != nil {
 			return "", nil, err
 		}
-		dir = filepath.Join(ctx.WorktreePath, t.dir)
-		if err := config.CheckResolvedContained(ctx.WorktreePath, dir, t.dir); err != nil {
+		resolved, err := config.ResolveContainedPath(ctx.WorktreePath, filepath.Join(ctx.WorktreePath, t.dir))
+		if err != nil {
 			return "", nil, err
 		}
+		dir = resolved
 		info, err := os.Stat(dir)
 		if err != nil {
 			return "", nil, fmt.Errorf("step directory %s: %w", t.dir, err)
@@ -44,37 +47,69 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 			return "", nil, fmt.Errorf("step directory %s is not a directory", t.dir)
 		}
 	}
-	if len(ctx.Env) == 0 && len(t.env) == 0 {
-		return dir, nil, nil
-	}
-	return dir, ResolveEnv(ctx.Env, t.env), nil
+	return dir, CommandEnvironment(ctx.Env, t.env), nil
 }
 
-// componentVariables are seeded into the expansion base first so component
-// values can reference their own component's identity.
-var componentVariables = []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"}
+// CommandEnvironment expands step values against an immutable snapshot of
+// inherited/worktree values plus the component identity. It is shared by
+// execution and preparation cache identities.
+func CommandEnvironment(worktreeEnv, stepEnv map[string]string) map[string]string {
+	return commandEnvironment(worktreeEnv, stepEnv, runtime.GOOS == "windows")
+}
 
-// ResolveEnv returns the extra environment a step receives: the worktree
-// environment plus the step's own values. Step values expand against the
-// worktree environment, the step's component identity and the inherited
-// environment only — never against each other — so results do not depend
-// on map iteration order.
-func ResolveEnv(base, stepEnv map[string]string) map[string]string {
-	expansion := make(map[string]string, len(base)+len(componentVariables))
-	for key, value := range base {
-		expansion[key] = value
+func commandEnvironment(worktreeEnv, stepEnv map[string]string, caseInsensitive bool) map[string]string {
+	if len(worktreeEnv) == 0 && len(stepEnv) == 0 {
+		return nil
 	}
-	for _, key := range componentVariables {
-		if value, ok := stepEnv[key]; ok {
-			expansion[key] = value
+	normalize := func(name string) string {
+		if caseInsensitive {
+			return strings.ToUpper(name)
+		}
+		return name
+	}
+	base := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			base[normalize(key)] = value
 		}
 	}
-	env := make(map[string]string, len(base)+len(stepEnv))
-	for key, value := range base {
+	env := make(map[string]string, len(worktreeEnv)+len(stepEnv))
+	spellings := make(map[string]string)
+	set := func(key, value string) {
+		name := normalize(key)
+		if previous, ok := spellings[name]; ok && previous != key {
+			delete(env, previous)
+		}
+		spellings[name] = key
 		env[key] = value
 	}
-	for key, value := range stepEnv {
-		env[key] = utils.ExpandEnv(value, expansion)
+	for _, key := range environmentNames(worktreeEnv) {
+		value := worktreeEnv[key]
+		base[normalize(key)] = value
+		set(key, value)
+	}
+	for _, key := range []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"} {
+		if value, ok := stepEnv[key]; ok {
+			base[normalize(key)] = value
+		}
+	}
+	for _, key := range environmentNames(stepEnv) {
+		value := stepEnv[key]
+		if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
+			set(key, value)
+		} else {
+			set(key, os.Expand(value, func(name string) string { return base[normalize(name)] }))
+		}
 	}
 	return env
+}
+
+func environmentNames(values map[string]string) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

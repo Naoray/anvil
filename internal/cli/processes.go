@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,11 @@ type processesData struct {
 	Processes []processStatus `json:"processes"`
 }
 
+var (
+	startAgentCommand = agentCommand{Name: "start", Mutating: true, Human: printProcessesHuman}
+	stopAgentCommand  = agentCommand{Name: "stop", Mutating: true, DryRun: true, Human: printProcessesHuman}
+)
+
 var startCmd = &cobra.Command{
 	Use:   "start [WORKTREE]",
 	Short: "Start a worktree's managed development processes",
@@ -42,16 +48,18 @@ var startCmd = &cobra.Command{
 
 Each process runs detached through 'sh -c' in its own process group with the
 worktree environment (directories, ports, project and component env), stdin
-from /dev/null and output appended to $ANVIL_LOG_DIR/<name>.log. Anvil records
-the PID together with the kernel start time so a recycled PID is never
-mistaken for it. Already running processes are left alone. Directories and
+from /dev/null and output appended to $ANVIL_LOG_DIR/<name>.log. The group is
+led by a small Anvil supervisor that lives until every process in the group
+has exited, so commands that background their work stay tracked. Anvil
+records the leader PID together with its kernel start time so a recycled PID
+is never mistaken for it. Already running processes are left alone. Directories and
 ports are provisioned first, like 'anvil ensure'.
 
 Supported on macOS and Linux. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "start", Mutating: true, Human: printProcessesHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, startAgentCommand, func() (agentResult, error) {
 			return runStart(cmd, args)
 		})
 	},
@@ -63,14 +71,14 @@ var stopCmd = &cobra.Command{
 	Long: `Stop processes Anvil started for this worktree.
 
 A process group is signaled (SIGTERM, then SIGKILL after the stop timeout)
-only when its recorded PID still has the recorded start identity, or when the
-leader exited but its own process group survives. A PID that now belongs to
-another process is never signaled. Processes are never stopped because of a
+only while its recorded leader PID still has the recorded start identity. A
+PID that now belongs to another process, or a surviving group whose leader is
+gone, is never signaled. Processes are never stopped because of a
 port they listen on. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "stop", Mutating: true, DryRun: true, Human: printProcessesHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, stopAgentCommand, func() (agentResult, error) {
 			return runStop(cmd, args)
 		})
 	},
@@ -121,7 +129,20 @@ func runStart(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err := provisionResources(wenv); err != nil {
 		return agentResult{}, err
 	}
+	lock, err := wtstate.AcquireRunLock(wt.Path)
+	if err != nil {
+		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	result, err := startLocked(pc, wt, wenv, selected)
+	if releaseErr := lock.Release(); releaseErr != nil && err == nil {
+		return result, agentapi.Wrap(agentapi.CodeInternal, releaseErr)
+	}
+	return result, err
+}
 
+// startLocked launches the selected processes that are not already running.
+// The caller holds the worktree run lock.
+func startLocked(pc *ProjectContext, wt *git.Worktree, wenv *worktreeEnv, selected []config.ProcessConfig) (agentResult, error) {
 	records, err := wtstate.ReadProcesses(wt.Path)
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
@@ -166,7 +187,7 @@ func startProcess(pc *ProjectContext, wt git.Worktree, process config.ProcessCon
 	for key, value := range process.Env {
 		extra[key] = utils.ExpandEnv(value, base)
 	}
-	environ := wenv.Env.Environ(os.Environ(), nil, false)
+	environ := wenv.Env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
 	for key, value := range extra {
 		environ = append(environ, key+"="+value)
 	}
@@ -189,12 +210,19 @@ func startProcess(pc *ProjectContext, wt git.Worktree, process config.ProcessCon
 
 // stopRecordedProcesses stops verified processes for a worktree, removing
 // their records. It returns per-process outcomes.
-func stopRecordedProcesses(worktreePath, worktreeID string, cfg *config.Config, names map[string]bool, dryRun bool) ([]processStatus, error) {
+func stopRecordedProcesses(worktreePath, worktreeID string, cfg *config.Config, names map[string]bool, dryRun bool) (statuses []processStatus, err error) {
+	if !dryRun {
+		lock, lockErr := wtstate.AcquireRunLock(worktreePath)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		defer func() { err = errors.Join(err, lock.Release()) }()
+	}
 	records, err := wtstate.ReadProcesses(worktreePath)
 	if err != nil {
 		return nil, err
 	}
-	statuses := []processStatus{}
+	statuses = []processStatus{}
 	for _, record := range records {
 		if names != nil && !names[record.Name] {
 			continue
@@ -283,8 +311,8 @@ func printProcessesHuman(result agentResult) error {
 }
 
 func init() {
-	for _, command := range []*cobra.Command{startCmd, stopCmd} {
-		addJSONFlag(command)
+	for command, spec := range map[*cobra.Command]agentCommand{startCmd: startAgentCommand, stopCmd: stopAgentCommand} {
+		addJSONFlag(command, spec)
 		command.Flags().StringArray("process", nil, "Limit to this declared process (repeatable)")
 		rootCmd.AddCommand(command)
 	}

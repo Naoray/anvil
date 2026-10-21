@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -153,78 +152,4 @@ var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // IsValidEnvName reports whether name is a portable environment variable name.
 func IsValidEnvName(name string) bool {
 	return envNamePattern.MatchString(name)
-}
-
-// CheckContained verifies that a worktree-relative path (or glob) cannot
-// leave the worktree through symlinks. The deepest existing ancestor of the
-// path's literal prefix is resolved and must stay inside the canonical
-// worktree. Paths that do not exist yet are checked again when used.
-func CheckContained(worktreePath, rel string) error {
-	if err := ValidateRelativePath(rel); err != nil {
-		return err
-	}
-	root, err := filepath.EvalSymlinks(worktreePath)
-	if err != nil {
-		return fmt.Errorf("resolving worktree: %w", err)
-	}
-	literal := rel
-	if i := strings.IndexAny(rel, "*?["); i >= 0 {
-		literal = filepath.Dir(rel[:i] + "x")
-	}
-	candidate := filepath.Join(worktreePath, literal)
-	for {
-		if _, err := os.Lstat(candidate); err == nil {
-			break
-		}
-		parent := filepath.Dir(candidate)
-		if parent == candidate {
-			return nil
-		}
-		candidate = parent
-	}
-	resolved, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
-		return fmt.Errorf("resolving %s: %w", rel, err)
-	}
-	return checkWithin(root, resolved, rel)
-}
-
-// CheckResolvedContained verifies an existing absolute path resolves inside
-// the worktree (used for glob matches at the moment they are read).
-func CheckResolvedContained(worktreePath, path, label string) error {
-	root, err := filepath.EvalSymlinks(worktreePath)
-	if err != nil {
-		return fmt.Errorf("resolving worktree: %w", err)
-	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return fmt.Errorf("resolving %s: %w", label, err)
-	}
-	return checkWithin(root, resolved, label)
-}
-
-func checkWithin(root, resolved, label string) error {
-	relative, err := filepath.Rel(root, resolved)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return fmt.Errorf("path %q resolves outside the worktree (%s)", label, resolved)
-	}
-	return nil
-}
-
-// CheckStepContainment rejects step directories and declared files that
-// escape the worktree through existing symlinks.
-func CheckStepContainment(worktreePath string, cfg StepConfig) error {
-	paths := append(append([]string(nil), cfg.Inputs...), cfg.Outputs...)
-	for i := range paths {
-		paths[i] = filepath.Join(cfg.Dir, paths[i])
-	}
-	if cfg.Dir != "" {
-		paths = append([]string{cfg.Dir}, paths...)
-	}
-	for _, path := range paths {
-		if err := CheckContained(worktreePath, path); err != nil {
-			return fmt.Errorf("%s: %w", cfg.Name, err)
-		}
-	}
-	return nil
 }

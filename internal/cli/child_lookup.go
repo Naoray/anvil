@@ -13,9 +13,15 @@ import (
 // lookPathIn resolves command like exec.LookPath, but against the PATH (and
 // PATHEXT on Windows) the child will receive and the directory it will run
 // in, so component-local tools such as node_modules/.bin win over global
-// ones. Relative PATH entries are ignored, matching exec.LookPath's refusal
-// to run programs found through the current directory.
+// ones. Relative PATH entries resolve against the child's directory.
 func lookPathIn(command, dir string, env []string) (string, error) {
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	}
 	if strings.ContainsAny(command, `/\`) || filepath.IsAbs(command) {
 		candidate := command
 		if !filepath.IsAbs(candidate) {
@@ -25,8 +31,8 @@ func lookPathIn(command, dir string, env []string) (string, error) {
 	}
 	var blocked error
 	for _, entry := range filepath.SplitList(environValue(env, "PATH")) {
-		if entry == "" || !filepath.IsAbs(entry) {
-			continue
+		if !filepath.IsAbs(entry) {
+			entry = filepath.Join(dir, entry)
 		}
 		path, err := findExecutable(filepath.Join(entry, command), env)
 		if err == nil {
@@ -55,7 +61,7 @@ func findExecutable(candidate string, env []string) (string, error) {
 			return "", err
 		}
 		if info.IsDir() {
-			continue
+			return "", &fs.PathError{Op: "exec", Path: path, Err: fs.ErrPermission}
 		}
 		if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			return "", &fs.PathError{Op: "exec", Path: path, Err: fs.ErrPermission}
