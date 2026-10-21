@@ -5,6 +5,7 @@
 package lockfile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -65,19 +66,37 @@ func tryAcquire(path string, shared bool) (*Lock, error) {
 // AcquireTimeout retries TryAcquire until timeout elapses. A zero timeout
 // tries exactly once; a negative timeout blocks like Acquire.
 func AcquireTimeout(path string, timeout time.Duration) (*Lock, error) {
-	if timeout < 0 {
-		return Acquire(path)
-	}
+	return AcquireContext(context.Background(), path, timeout)
+}
+
+// AcquireContext retries without hiding cancellation. Negative timeouts wait
+// indefinitely, zero tries once; cancellation never starts a later acquisition.
+func AcquireContext(ctx context.Context, path string, timeout time.Duration) (*Lock, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		lock, err := TryAcquire(path)
-		if err == nil || !errors.Is(err, ErrLocked) {
-			return lock, err
-		}
-		if !time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		time.Sleep(pollInterval)
+		lock, err := TryAcquire(path)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.Join(err, lock.Release())
+			}
+			return lock, nil
+		}
+		if !errors.Is(err, ErrLocked) {
+			return nil, err
+		}
+		if timeout >= 0 && !time.Now().Before(deadline) {
+			return nil, err
+		}
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

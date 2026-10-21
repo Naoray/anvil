@@ -241,3 +241,38 @@ func TestCleanupRefusesPrepareLock(t *testing.T) {
 	require.Contains(t, stderr, "preparation")
 	require.DirExists(t, wt)
 }
+
+func TestCheckCancellationWhileWaitingForResourceLocks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix signals")
+	}
+	f := newAgentFixture(t, "checks:\n  wait:\n    locks: [a, z]\n    commands: ['touch ran.count']\n", nil)
+	gate, err := lockfile.Acquire(filepath.Join(f.runtimeRoot(), "locks", "z.lock"))
+	require.NoError(t, err)
+	defer gate.Release()
+	running := exec.Command(f.bin, "check", "wait", "--lock-wait=-1s", "--json")
+	running.Dir, running.Env = f.repo, f.env
+	var output bytes.Buffer
+	running.Stdout, running.Stderr = &output, &output
+	require.NoError(t, running.Start())
+	require.Eventually(t, func() bool {
+		held, err := lockfile.IsHeld(filepath.Join(f.runtimeRoot(), "locks", "a.lock"))
+		return err == nil && held
+	}, 10*time.Second, 10*time.Millisecond)
+	require.NoError(t, running.Process.Signal(os.Interrupt))
+	done := make(chan error, 1)
+	go func() { done <- running.Wait() }()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(2 * time.Second):
+		require.NoError(t, gate.Release())
+		<-done
+		t.Fatal("SIGINT did not interrupt resource-lock contention")
+	}
+	require.Equal(t, 130, running.ProcessState.ExitCode(), output.String())
+	require.NoFileExists(t, filepath.Join(f.repo, "ran.count"))
+	earlier, err := lockfile.TryAcquire(filepath.Join(f.runtimeRoot(), "locks", "a.lock"))
+	require.NoError(t, err, "cancellation releases already acquired locks")
+	require.NoError(t, earlier.Release())
+}

@@ -79,7 +79,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	locks, err := acquireResourceLocks(req.RuntimeRoot, req.Check.Locks, req.LockWait, LockHolder{
+	locks, err := acquireResourceLocks(ctx, req.RuntimeRoot, req.Check.Locks, req.LockWait, LockHolder{
 		PID: os.Getpid(), WorktreeID: req.Worktree.ID, Worktree: req.Worktree.Path, Check: req.Check.Name, RunID: runID, Since: started,
 	})
 	if err != nil {

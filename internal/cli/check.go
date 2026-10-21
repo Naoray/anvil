@@ -285,6 +285,8 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 	})
 	var busy *checks.BusyError
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return checkRunEntry{}, warning, &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: 130, Message: "check interrupted before execution", Cause: err}
 	case errors.As(err, &busy):
 		details := map[string]any{"lock": busy.Lock}
 		if busy.Holder != nil {
