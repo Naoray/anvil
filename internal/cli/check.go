@@ -17,6 +17,7 @@ import (
 	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/ui"
 	"github.com/naoray/anvil/internal/utils"
 	"github.com/naoray/anvil/internal/wtstate"
@@ -82,10 +83,13 @@ type checkRunData struct {
 }
 
 // checkContext loads the worktree, its identity and runtime directory.
-func checkContext(cmd *cobra.Command, mutate bool) (*worktreeEnv, error) {
+// Mutating callers also receive the worktree's check gate, held shared
+// before any write and until they finish, so removal cannot start cleanup
+// while a check is starting or running.
+func checkContext(cmd *cobra.Command, mutate bool) (wenv *worktreeEnv, gate *lockfile.Lock, err error) {
 	pc, err := openAgentProject()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var query []string
 	if wt := mustGetString(cmd, "worktree"); wt != "" {
@@ -93,30 +97,63 @@ func checkContext(cmd *cobra.Command, mutate bool) (*worktreeEnv, error) {
 	}
 	wt, err := selectAgentWorktree(pc, query)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if mutate {
-		if _, _, err := wtstate.EnsureIdentity(wt.Path); err != nil {
-			return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+	if !mutate {
+		wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{})
+		return wenv, nil, err
+	}
+	if gate, err = acquireCheckGate(wt.Path); err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, gate.Release())
+			gate = nil
 		}
+	}()
+	if _, _, err := wtstate.EnsureIdentity(wt.Path); err != nil {
+		return nil, nil, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	wenv, err := loadWorktreeEnv(pc, *wt, worktreeEnvOptions{})
+	if wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{}); err != nil {
+		return nil, nil, err
+	}
+	if err := provisionResources(wenv); err != nil {
+		return nil, nil, err
+	}
+	if wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{}); err != nil {
+		return nil, nil, err
+	}
+	return wenv, gate, nil
+}
+
+// acquireCheckGate takes the worktree's check gate shared without waiting.
+// Removal holds it exclusively from its safety check until the worktree is
+// gone, so a held gate means the worktree is being removed.
+func acquireCheckGate(path string) (*lockfile.Lock, error) {
+	gatePath := checks.GatePath(path)
+	gate, err := lockfile.TryAcquireShared(gatePath)
+	if errors.Is(err, lockfile.ErrLocked) {
+		return nil, agentapi.Errorf(agentapi.CodeResourceBusy, "worktree %s is being removed; checks cannot start", path)
+	}
 	if err != nil {
-		return nil, err
+		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	if mutate {
-		if err := provisionResources(wenv); err != nil {
-			return nil, err
-		}
-		if wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{}); err != nil {
-			return nil, err
-		}
+	// Removal may have finished just before: the worktree (and with it the
+	// gate's location) must still exist under the lock.
+	if _, statErr := os.Stat(path); statErr != nil || checks.GatePath(path) != gatePath {
+		return nil, errors.Join(agentapi.Errorf(agentapi.CodeWorktreeNotFound, "worktree %s no longer exists", path), gate.Release())
 	}
-	return wenv, nil
+	return gate, nil
 }
 
 func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.IdentityRequest {
-	request := checks.IdentityRequest{WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env, Unset: wenv.Unset}
+	request := checks.IdentityRequest{
+		WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env, SecretEnv: wenv.PC.Config.SecretEnv, Unset: wenv.Unset,
+		Resolve: func(command config.CheckCommand) (checks.CommandTarget, error) {
+			return resolveCheckCommand(wenv, command)
+		},
+	}
 	if wenv.Directories != nil {
 		request.RuntimeDir = wenv.Directories.Root
 	}
@@ -124,10 +161,13 @@ func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.Id
 }
 
 func runCheckList(cmd *cobra.Command, args []string) (agentResult, error) {
-	wenv, err := checkContext(cmd, false)
+	wenv, _, err := checkContext(cmd, false)
 	if err != nil {
 		return agentResult{}, err
 	}
+	// Interruption ends toolchain probes instead of orphaning them.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	summary, warnings := summarizeWorktree(wenv.Worktree)
 	data := checkListData{Worktree: summary, Checks: []checkSummary{}}
 	selected, err := selectChecks(wenv.PC.Config, args, true)
@@ -148,7 +188,7 @@ func runCheckList(cmd *cobra.Command, args []string) (agentResult, error) {
 		}
 		if entry.Latest == nil {
 			entry.Assessment = checks.Assess(nil, checks.Identity{})
-		} else if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check)); err != nil {
+		} else if identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check)); err != nil {
 			warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
 			entry.Assessment = checks.Assessment{Reasons: []string{"identity unavailable: " + err.Error()}}
 		} else {
@@ -192,11 +232,16 @@ func selectChecks(cfg *config.Config, names []string, includeExpensive bool) ([]
 	return out, nil
 }
 
-func runChecks(cmd *cobra.Command, args []string) (agentResult, error) {
-	wenv, err := checkContext(cmd, true)
+func runChecks(cmd *cobra.Command, args []string) (result agentResult, err error) {
+	wenv, gate, err := checkContext(cmd, true)
 	if err != nil {
 		return agentResult{}, err
 	}
+	defer func() {
+		if releaseErr := gate.Release(); releaseErr != nil && err == nil {
+			err = agentapi.Wrap(agentapi.CodeInternal, releaseErr)
+		}
+	}()
 	selected, err := selectChecks(wenv.PC.Config, args, false)
 	if err != nil {
 		return agentResult{}, err
@@ -222,7 +267,7 @@ func runChecks(cmd *cobra.Command, args []string) (agentResult, error) {
 	data := checkRunData{Worktree: summary, Results: []checkRunEntry{}}
 	var failure error
 	for _, check := range selected {
-		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, lockWait)
+		entry, warning, err := runOneCheck(ctx, cmd, wenv, gate, check, lockWait)
 		if warning != "" {
 			warnings = append(warnings, warning)
 		}
@@ -249,7 +294,7 @@ func checkFailure(result *checks.Result) error {
 		Details: map[string]any{"check": result.Check, "status": result.Status, "run_id": result.RunID}}
 }
 
-func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
+func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, gate *lockfile.Lock, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
 	store := checks.Store{RuntimeDir: wenv.Directories.Root}
 	warning := ""
 	if mustGetBool(cmd, "reuse") {
@@ -275,6 +320,8 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		LockWait:     lockWait,
 		AnvilVersion: Version,
 		Unset:        wenv.Unset,
+		SecretEnv:    wenv.PC.Config.SecretEnv,
+		Gate:         gate,
 	})
 	var busy *checks.BusyError
 	switch {
@@ -284,6 +331,10 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 			details["holder"] = busy.Holder
 		}
 		return checkRunEntry{}, warning, (&agentapi.Error{Code: agentapi.CodeResourceBusy, Message: busy.Error(), Cause: err}).WithDetails(details)
+	case errors.Is(err, checks.ErrInterrupted):
+		return checkRunEntry{}, warning, &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: 130,
+			Message: fmt.Sprintf("check %s interrupted before any command started", check.Name),
+			Details: map[string]any{"check": check.Name, "status": checks.StatusInterrupted}, Cause: err}
 	case errors.Is(err, checks.ErrAlreadyRunning):
 		return checkRunEntry{}, warning, agentapi.Errorf(agentapi.CodeResourceBusy, "check %s: %v", check.Name, err)
 	case err != nil && result == nil:

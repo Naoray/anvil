@@ -11,10 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/naoray/anvil/internal/agentapi"
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
 	anvilerrors "github.com/naoray/anvil/internal/errors"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/presets"
 	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/ui"
@@ -142,6 +144,18 @@ func runRemoveLifecycle(
 	for _, message := range cleanupMessages {
 		deps.printInfoMessage(message)
 	}
+
+	// The exclusive check gate is held from this safety check until the
+	// worktree is gone: running checks (and commands they left behind) hold
+	// it shared, and no check can start meanwhile.
+	gate, err := lockfile.TryAcquire(checks.GatePath(worktree.Path))
+	if errors.Is(err, lockfile.ErrLocked) {
+		return agentapi.Errorf(agentapi.CodeCleanupBlocked, "refusing to remove %s: checks are running in this worktree; wait for them or stop them first", worktree.Path)
+	}
+	if err != nil {
+		return fmt.Errorf("locking checks for removal: %w", err)
+	}
+	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 
 	runtimePlan, err := planRuntimeCleanup(worktree.Path)
 	if err != nil {

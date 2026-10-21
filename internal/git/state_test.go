@@ -74,3 +74,40 @@ func TestWorkingStateDistinguishesDirtyFromHead(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, deleted.Dirty)
 }
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir, "-c", "protocol.file.allow=always", "-c", "user.email=t@e.st", "-c", "user.name=T"}, args...)...).CombinedOutput()
+	require.NoError(t, err, string(out))
+}
+
+func TestWorkingStateDistinguishesDirtySubmoduleContents(t *testing.T) {
+	sub := stateRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "src"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "src", "lib.txt"), []byte("v1"), 0o644))
+	gitIn(t, sub, "add", ".")
+	gitIn(t, sub, "commit", "-m", "lib")
+
+	parent := stateRepo(t)
+	gitIn(t, parent, "submodule", "add", sub, "sub")
+	gitIn(t, parent, "commit", "-m", "add sub")
+	clean, err := ReadWorkingState(parent)
+	require.NoError(t, err)
+	require.False(t, clean.Dirty)
+
+	lib := filepath.Join(parent, "sub", "src", "lib.txt")
+	require.NoError(t, os.WriteFile(lib, []byte("dirty A"), 0o644))
+	a, err := ReadWorkingState(parent)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(lib, []byte("dirty B"), 0o644))
+	b, err := ReadWorkingState(parent)
+	require.NoError(t, err)
+	require.True(t, a.Dirty)
+	require.NotEqual(t, a.Digest, b.Digest, "different dirty submodule contents never share a digest")
+
+	// A new commit inside the submodule changes the parent state too.
+	gitIn(t, filepath.Join(parent, "sub"), "commit", "-am", "move")
+	moved, err := ReadWorkingState(parent)
+	require.NoError(t, err)
+	require.NotEqual(t, b.Digest, moved.Digest)
+}

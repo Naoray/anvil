@@ -1,6 +1,7 @@
 package lockfile
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -75,4 +76,38 @@ func TestLockReleasedWhenHolderDies(t *testing.T) {
 	lock, err := AcquireTimeout(path, 5*time.Second)
 	require.NoError(t, err)
 	require.NoError(t, lock.Release())
+}
+
+func TestSharedLocksCoexistAndExcludeExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gate.lock")
+	first, err := TryAcquireShared(path)
+	require.NoError(t, err)
+	second, err := TryAcquireShared(path)
+	require.NoError(t, err, "shared holders coexist")
+	_, err = TryAcquire(path)
+	require.ErrorIs(t, err, ErrLocked, "exclusive waits for shared holders")
+	require.NoError(t, first.Release())
+	require.NoError(t, second.Release())
+	exclusive, err := TryAcquire(path)
+	require.NoError(t, err)
+	_, err = TryAcquireShared(path)
+	require.ErrorIs(t, err, ErrLocked, "shared waits for an exclusive holder")
+	require.NoError(t, exclusive.Release())
+}
+
+func TestAcquireContextHonorsCancellation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.lock")
+	holder, err := TryAcquire(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, holder.Release()) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = AcquireContext(ctx, path, -1)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), 2*time.Second, "an unbounded wait still ends on cancellation")
+
+	_, err = AcquireContext(context.Background(), path, 100*time.Millisecond)
+	require.ErrorIs(t, err, ErrLocked)
 }

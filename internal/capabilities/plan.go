@@ -89,10 +89,7 @@ func planComponent(worktreePath string, component config.Component, selected boo
 		plan.Path = "."
 	}
 
-	contributions := make([]Contribution, 0, len(component.Uses))
-	for _, capability := range component.Uses {
-		contributions = append(contributions, Contribute(capability, absDir, opts.GOOS))
-	}
+	contributions := contributionsFor(component, absDir, opts.GOOS)
 	if len(plan.Platforms) == 0 {
 		for _, contribution := range contributions {
 			plan.Platforms = append(plan.Platforms, contribution.Platforms...)
@@ -141,6 +138,38 @@ func planComponent(worktreePath string, component config.Component, selected boo
 	}
 	plan.Steps = steps
 	return plan, nil
+}
+
+func contributionsFor(component config.Component, absDir, goos string) []Contribution {
+	contributions := make([]Contribution, 0, len(component.Uses))
+	for _, capability := range component.Uses {
+		contributions = append(contributions, Contribute(capability, absDir, goos))
+	}
+	return contributions
+}
+
+// ValidationSteps compiles the preparation steps of every declared
+// component, applicable on this machine or not, so callers can validate all
+// conditions before any effect. A component condition without prepare
+// commands is represented by a no-op step carrying it.
+func ValidationSteps(worktreePath string, cfg *config.Config, goos string) ([]config.StepConfig, error) {
+	var steps []config.StepConfig
+	var problems []error
+	for _, component := range cfg.Components {
+		dir := component.ComponentDir()
+		absDir := filepath.Join(worktreePath, dir)
+		contributions := contributionsFor(component, absDir, goos)
+		compiled, err := compileSteps(component, contributions, dir, componentEnv(component, contributions, absDir, goos))
+		if err != nil {
+			problems = append(problems, fmt.Errorf("component %q: %w", component.Name, err))
+			continue
+		}
+		if len(compiled) == 0 && len(component.When) > 0 {
+			compiled = []config.StepConfig{{Name: config.StepCommandRun, Command: "true", ConditionHolder: config.ConditionHolder{Condition: component.When}}}
+		}
+		steps = append(steps, compiled...)
+	}
+	return steps, errors.Join(problems...)
 }
 
 func skipped(plan ComponentPlan, reason string) ComponentPlan {
