@@ -195,7 +195,15 @@ func Build(opts Options) *Environment {
 		setExpanded(env, opts.Config.Env, SourceProject, declared)
 	}
 	if opts.Component != nil {
-		setExpanded(env, opts.Component.Env, SourceComponent, declared)
+		values := make(map[string]string, len(opts.Component.Env))
+		for key, value := range opts.Component.Env {
+			if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
+				env.Set(Variable{Name: key, Value: value, Source: SourceAnvil})
+			} else {
+				values[key] = value
+			}
+		}
+		setExpanded(env, values, SourceComponent, declared)
 	}
 	return env
 }

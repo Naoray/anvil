@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
-	"github.com/naoray/anvil/internal/utils"
 )
 
 // execTarget is the optional working directory and environment of a command
@@ -41,17 +41,39 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 			return "", nil, fmt.Errorf("step directory %s is not a directory", t.dir)
 		}
 	}
-	if len(ctx.Env) == 0 && len(t.env) == 0 {
-		return dir, nil, nil
+	return dir, CommandEnvironment(ctx.Env, t.env), nil
+}
+
+// CommandEnvironment expands step values against an immutable snapshot of
+// inherited/worktree values plus the component identity. It is shared by
+// execution and preparation cache identities.
+func CommandEnvironment(worktreeEnv, stepEnv map[string]string) map[string]string {
+	if len(worktreeEnv) == 0 && len(stepEnv) == 0 {
+		return nil
 	}
-	env := make(map[string]string, len(ctx.Env)+len(t.env))
-	for key, value := range ctx.Env {
+	base := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			base[key] = value
+		}
+	}
+	env := make(map[string]string, len(worktreeEnv)+len(stepEnv))
+	for key, value := range worktreeEnv {
+		base[key] = value
 		env[key] = value
 	}
-	// Step values expand against the worktree environment only, never
-	// against each other, so the result is independent of map order.
-	for key, value := range t.env {
-		env[key] = utils.ExpandEnv(value, ctx.Env)
+	for _, key := range []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"} {
+		if value, ok := stepEnv[key]; ok {
+			base[key] = value
+		}
 	}
-	return dir, env, nil
+	for key, value := range stepEnv {
+		if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
+			env[key] = value
+		} else {
+			env[key] = os.Expand(value, func(name string) string { return base[name] })
+		}
+	}
+	return env
 }
