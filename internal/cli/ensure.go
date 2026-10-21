@@ -338,6 +338,19 @@ func checkRoleCompatible(path string, opts ensureOptions, created bool) error {
 	if opts.ReviewCommit != "" && metadata.Role == "" && !created {
 		return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; create a new detached review instead", path)
 	}
+	if metadata.Role == wtstate.RoleReview {
+		detached, err := git.IsDetachedHEAD(path)
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeGitFailed, err)
+		}
+		head, err := git.HeadCommit(path)
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeGitFailed, err)
+		}
+		if !detached || metadata.PinnedCommit == "" || head != metadata.PinnedCommit {
+			return agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s must remain detached at its pinned commit %s (actual HEAD %s); reviewer changes were preserved", path, metadata.PinnedCommit, head)
+		}
+	}
 	return nil
 }
 

@@ -181,6 +181,10 @@ require `--full-prepare` or `roles.review.scaffold`.
 An existing worktree without role metadata cannot become a review, even when
 its HEAD matches the requested commit. This includes the main checkout and
 legacy branch worktrees. `--review` creates a separate detached worktree.
+Every review re-ensure checks that the checkout remains detached at its recorded
+pin, including calls without `--review` and calls with `--skip-prepare`.
+A moved or branch-attached HEAD returns `invalid_arguments` before state or
+preparation changes. Anvil preserves reviewer edits and never resets the checkout.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases
