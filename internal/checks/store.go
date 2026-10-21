@@ -174,20 +174,72 @@ func (s Store) prune(check string) error {
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(runs))
+	latest, err := s.Latest(check)
+	if err != nil {
+		return err
+	}
+	protected := ""
+	if latest != nil {
+		protected = latest.RunID
+	}
+	type savedRun struct {
+		name    string
+		started time.Time
+	}
+	var ordered []savedRun
 	for _, run := range runs {
-		if run.IsDir() {
-			names = append(names, run.Name())
+		if !run.IsDir() {
+			continue
 		}
+		info, err := run.Info()
+		if err != nil {
+			return err
+		}
+		started := info.ModTime()
+		data, err := os.ReadFile(filepath.Join(s.runDir(check, run.Name()), "result.json"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil {
+			var result Result
+			if err := json.Unmarshal(data, &result); err != nil {
+				return fmt.Errorf("reading retention chronology for %s: %w", run.Name(), err)
+			}
+			if !result.StartedAt.IsZero() {
+				started = result.StartedAt
+			}
+		}
+		ordered = append(ordered, savedRun{name: run.Name(), started: started})
 	}
-	sort.Strings(names)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].started.Equal(ordered[j].started) {
+			return ordered[i].name < ordered[j].name
+		}
+		return ordered[i].started.Before(ordered[j].started)
+	})
+	remaining := len(ordered)
 	var problems []error
-	for len(names) > retainedRuns {
-		if err := os.RemoveAll(s.runDir(check, names[0])); err != nil {
-			problems = append(problems, err)
+	for _, run := range ordered {
+		if remaining <= retainedRuns {
+			break
 		}
-		names = names[1:]
+		if run.name == protected {
+			continue
+		}
+		held, err := lockfile.IsHeld(runLockPath(s.runDir(check, run.name)))
+		if err != nil {
+			return errors.Join(append(problems, err)...)
+		}
+		if held {
+			continue
+		}
+		if err := os.RemoveAll(s.runDir(check, run.name)); err != nil {
+			problems = append(problems, err)
+		} else {
+			remaining--
+		}
 	}
+
 	return errors.Join(problems...)
 }
 
