@@ -45,11 +45,13 @@ func TestEnsureInvalidatesDeclaredPreparationEnvironment(t *testing.T) {
 }
 
 func TestEnsureInvalidatesInheritedComponentEnvironment(t *testing.T) {
-	for _, placement := range []string{
-		"    env:\n      MODE: \"${ANVIL_EXTERNAL_MODE}\"\n    prepare:\n      - run: printf '%s' \"$MODE\" > mode.txt\n",
-		"    prepare:\n      - run: printf '%s' \"$MODE\" > mode.txt\n        env:\n          MODE: \"${ANVIL_EXTERNAL_MODE}\"\n",
+	for name, placement := range map[string]string{
+		"component env": "    env:\n      MODE: \"${ANVIL_EXTERNAL_MODE}\"\n    prepare:\n      - run: printf '%s' \"$MODE\" > mode.txt\n",
+		"command env":   "    prepare:\n      - run: printf '%s' \"$MODE\" > mode.txt\n        env:\n          MODE: \"${ANVIL_EXTERNAL_MODE}\"\n",
 	} {
-		t.Run(placement, func(t *testing.T) {
+		// Subtest names become temp directory names; keep them free of
+		// ${...}, which project path lookup would expand.
+		t.Run(name, func(t *testing.T) {
 			f := newAgentFixture(t, "components:\n  - name: tool\n    path: tool\n"+placement, map[string]string{"tool/README.md": "tool"})
 			fakeToolchain(t, f)
 			f.env = subprocessEnvFrom(append(f.env, "ANVIL_EXTERNAL_MODE=one"))
