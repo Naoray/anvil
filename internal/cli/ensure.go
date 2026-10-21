@@ -157,6 +157,14 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err := checkRoleCompatible(target.Path, opts); err != nil {
 		return agentResult{}, err
 	}
+	metadata, err := wtstate.ReadMetadata(target.Path)
+	if err != nil {
+		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	effectiveRole := opts.Role
+	if effectiveRole == "" {
+		effectiveRole = metadata.Role
+	}
 
 	data := ensureData{Components: []capabilities.ComponentPlan{}, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	var warnings []string
@@ -186,8 +194,8 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, err
 	}
-	reviewMinimal := opts.Role == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
-	components := reviewComponents(wenv, opts.Role)
+	reviewMinimal := effectiveRole == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
+	components := reviewComponents(wenv, effectiveRole)
 	data.Components = wenv.Components
 	if failure := environmentPreconditions(wenv); failure != nil {
 		summary, summaryWarnings := summarizeWorktree(*target)

@@ -175,6 +175,9 @@ anvil ensure feature/x --lease-owner codex --lease-ttl 2h --session-id S [--take
 
 `data.metadata`: `{role, pinned_commit, task: {id, url, pr}, created_at}`.
 Recorded roles and pins are never changed implicitly (`invalid_arguments`).
+Re-ensuring a review by name, path, ID or from its directory preserves its
+minimal preparation policy without repeating `--review`. Scaffold steps still
+require `--full-prepare` or `roles.review.scaffold`.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases
