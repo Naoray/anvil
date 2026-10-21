@@ -162,3 +162,15 @@ with a diagnostic and disable reuse; use a file glob such as `bundle/*` instead.
 Execution identity and reuse assessment are computed only after all declared
 resource locks are held. Inputs produced by a preceding lock holder are included
 in that identity, which commands receive as `ANVIL_CHECK_IDENTITY`.
+
+Checks (including reuse), ensure and scaffold hold a shared worktree lifecycle
+gate from startup through completion. Remove, prune and unlink cleanup take the
+exclusive gate before any safety inspection and retain it through deletion and
+runtime release. A conflict fails closed (`cleanup_blocked`, exit 7). Cleanup
+also retains the preparation lock and refuses an existing preparation holder.
+Gate files live in the common Git directory and are never deleted.
+
+Lock order is lifecycle gate → preparation lock → repository database lock →
+check active lock → resource locks sorted by name → run lock → `.anvil.local`
+state lock. Never upgrade a shared gate; acquire multiple worktree gates in
+canonical path order. Lease mutations must use the same shared gate.

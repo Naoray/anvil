@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/naoray/anvil/internal/lockfile"
+	"github.com/naoray/anvil/internal/wtstate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,4 +169,75 @@ func TestCheckIdentityCapturedAfterAllResourceLocks(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(f.repo, "input.count"), []byte("A"), 0o600))
 	envelope, _, _ = f.runJSON(f.repo, "check", "--list")
 	require.Equal(t, false, field(t, checkEntry(t, envelope, "wait"), "assessment", "passing_and_current"))
+}
+
+func TestCleanupExcludesCheckStartup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO synchronization")
+	}
+	for _, operation := range []string{"remove", "prune", "unlink"} {
+		t.Run(operation, func(t *testing.T) {
+			barrier := filepath.Join(t.TempDir(), "release")
+			ready := barrier + ".ready"
+			require.NoError(t, exec.Command("mkfifo", barrier).Run())
+			yaml := fmt.Sprintf("cleanup:\n  steps:\n    - name: command.run\n      condition:\n        command: %q\nchecks:\n  start:\n    commands: ['touch check.count']\n", "touch '"+ready+"'; read answer < '"+barrier+"'")
+			f := newAgentFixture(t, yaml, nil)
+			if operation == "prune" {
+				remote := filepath.Join(t.TempDir(), "origin.git")
+				gitRun(t, f.repo, "init", "--bare", remote)
+				gitRun(t, f.repo, "remote", "add", "origin", remote)
+				gitRun(t, f.repo, "push", "origin", "main")
+			}
+
+			_, stderr, code := f.runJSON(f.repo, "ensure", "feature/gate")
+			require.Zero(t, code, stderr)
+			wt := f.worktreePath("feature-gate")
+			args := []string{"remove", "feature-gate", "--force"}
+			if operation == "prune" {
+				args = []string{"prune", "--force"}
+			}
+			if operation == "unlink" {
+				args = []string{"unlink", "demo", "--clean", "--force"}
+			}
+			cleanup := exec.Command(f.bin, args...)
+			cleanup.Dir, cleanup.Env = f.repo, f.env
+			var output bytes.Buffer
+			cleanup.Stdout, cleanup.Stderr = &output, &output
+			require.NoError(t, cleanup.Start())
+			t.Cleanup(func() {
+				if cleanup.ProcessState == nil {
+					require.NoError(t, cleanup.Process.Kill())
+					require.Error(t, cleanup.Wait())
+				}
+			})
+			require.Eventually(t, func() bool { _, err := os.Stat(ready); return err == nil }, 15*time.Second, 10*time.Millisecond)
+			envelope, stderr, code := f.runJSON(wt, "check", "start")
+			// Unblock before assertions so a failing regression never leaks cleanup.
+			release, err := os.OpenFile(barrier, os.O_WRONLY, 0o600)
+			require.NoError(t, err)
+			_, err = release.WriteString("continue\n")
+			require.NoError(t, err)
+			require.NoError(t, release.Close())
+			require.NoError(t, cleanup.Wait(), output.String())
+			require.Equal(t, 7, code, stderr)
+			require.Equal(t, "cleanup_blocked", field(t, envelope, "error", "code"))
+		})
+	}
+}
+
+func TestCleanupRefusesPrepareLock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix fixture")
+	}
+	f := newAgentFixture(t, "", nil)
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/preparing")
+	require.Zero(t, code, stderr)
+	wt := f.worktreePath("feature-preparing")
+	lock, err := wtstate.AcquirePrepareLock(wt)
+	require.NoError(t, err)
+	defer lock.Release()
+	stdout, stderr, code := f.run(f.repo, "remove", "feature-preparing", "--force")
+	require.Equal(t, 7, code, stdout+stderr)
+	require.Contains(t, stderr, "preparation")
+	require.DirExists(t, wt)
 }

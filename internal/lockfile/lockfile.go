@@ -34,7 +34,7 @@ func Acquire(path string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file, true); err != nil {
+	if err := lockFile(file, true, false); err != nil {
 		return nil, errors.Join(fmt.Errorf("locking %s: %w", path, err), file.Close())
 	}
 	return &Lock{file: file, path: path}, nil
@@ -42,12 +42,17 @@ func Acquire(path string) (*Lock, error) {
 
 // TryAcquire attempts the lock once. It returns ErrLocked when another holder
 // owns it.
-func TryAcquire(path string) (*Lock, error) {
+func TryAcquire(path string) (*Lock, error) { return tryAcquire(path, false) }
+
+// TryAcquireShared allows concurrent readers and excludes an exclusive owner.
+func TryAcquireShared(path string) (*Lock, error) { return tryAcquire(path, true) }
+
+func tryAcquire(path string, shared bool) (*Lock, error) {
 	file, err := open(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(file, false); err != nil {
+	if err := lockFile(file, false, shared); err != nil {
 		closeErr := file.Close()
 		if isContended(err) {
 			return nil, errors.Join(ErrLocked, closeErr)

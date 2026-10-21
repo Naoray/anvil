@@ -12,6 +12,7 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
+	"github.com/naoray/anvil/internal/lifecycle"
 	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/scaffold/words"
@@ -250,6 +251,12 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 			stepConfigs = append(stepConfigs, policyConfig)
 		}
 	}
+
+	gate, err := lifecycle.AcquireShared(worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("locking preparation lifecycle: %w", err)
+	}
+	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 
 	// Run pre-flight checks with spinner
 	if !request.Quiet {

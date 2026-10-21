@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lifecycle"
 	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/workenv"
 )
@@ -54,6 +55,11 @@ func (r RunRequest) now() time.Time {
 // outcome that reached execution; errors before execution (busy locks,
 // unreadable state) return a nil result.
 func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
+	gate, err := lifecycle.AcquireShared(req.Worktree.Path)
+	if err != nil {
+		return nil, fmt.Errorf("locking check lifecycle: %w", err)
+	}
+	defer func() { err = errors.Join(err, gate.Release()) }()
 	timeout, err := config.ParseOptionalDuration(req.Check.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("check timeout: %w", err)

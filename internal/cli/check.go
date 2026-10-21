@@ -17,6 +17,7 @@ import (
 	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/ui"
 	"github.com/naoray/anvil/internal/utils"
 	"github.com/naoray/anvil/internal/wtstate"
@@ -82,10 +83,10 @@ type checkRunData struct {
 }
 
 // checkContext loads the worktree, its identity and runtime directory.
-func checkContext(cmd *cobra.Command, mutate bool) (*worktreeEnv, error) {
+func checkContext(cmd *cobra.Command, mutate bool) (wenv *worktreeEnv, held *lockfile.Lock, err error) {
 	pc, err := openAgentProject()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var query []string
 	if wt := mustGetString(cmd, "worktree"); wt != "" {
@@ -93,26 +94,36 @@ func checkContext(cmd *cobra.Command, mutate bool) (*worktreeEnv, error) {
 	}
 	wt, err := selectAgentWorktree(pc, query)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	gate, err := acquireWorktreeUse(pc, *wt)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, gate.Release())
+		}
+	}()
+
 	if mutate {
 		if _, _, err := wtstate.EnsureIdentity(wt.Path); err != nil {
-			return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+			return nil, nil, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
 	}
-	wenv, err := loadWorktreeEnv(pc, *wt, worktreeEnvOptions{})
+	wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if mutate {
 		if err := provisionResources(wenv); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if wenv, err = loadWorktreeEnv(pc, *wt, worktreeEnvOptions{}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return wenv, nil
+	return wenv, gate, nil
 }
 
 func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.IdentityRequest {
@@ -126,11 +137,12 @@ func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.Id
 	return request
 }
 
-func runCheckList(cmd *cobra.Command, args []string) (agentResult, error) {
-	wenv, err := checkContext(cmd, false)
+func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
+	wenv, gate, err := checkContext(cmd, false)
 	if err != nil {
 		return agentResult{}, err
 	}
+	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 	summary, warnings := summarizeWorktree(wenv.Worktree)
 	data := checkListData{Worktree: summary, Checks: []checkSummary{}}
 	selected, err := selectChecks(wenv.PC.Config, args, true)
@@ -195,11 +207,12 @@ func selectChecks(cfg *config.Config, names []string, includeExpensive bool) ([]
 	return out, nil
 }
 
-func runChecks(cmd *cobra.Command, args []string) (agentResult, error) {
-	wenv, err := checkContext(cmd, true)
+func runChecks(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
+	wenv, gate, err := checkContext(cmd, true)
 	if err != nil {
 		return agentResult{}, err
 	}
+	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
 	selected, err := selectChecks(wenv.PC.Config, args, false)
 	if err != nil {
 		return agentResult{}, err
