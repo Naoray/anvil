@@ -576,10 +576,14 @@ func treeDigest(root string, opts digestOptions) (string, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("dependency root must be a directory")
 	}
+	given := root
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}
+	// Tools may record the worktree under the given or the resolved path.
+	needles := sourceNeedles(sourcePaths(filepath.Dir(given), filepath.Dir(root)), runtime.GOOS)
+	fold := foldsCase(runtime.GOOS)
 	h := sha256.New()
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -632,7 +636,7 @@ func treeDigest(root string, opts digestOptions) (string, error) {
 			if opts.workspacePaths {
 				_, readErr = io.Copy(h, f)
 			} else {
-				_, readErr = hashPortableFile(h, f, filepath.Dir(root))
+				_, readErr = hashPortableFile(h, f, needles, fold)
 			}
 			return errors.Join(readErr, f.Close())
 		default:
@@ -645,14 +649,12 @@ func treeDigest(root string, opts digestOptions) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func hashPortableFile(h io.Writer, f *os.File, root string) (int64, error) {
-	needles := [][]byte{[]byte(root)}
-	if resolved, e := filepath.EvalSymlinks(root); e == nil {
-		needles = append(needles, []byte(resolved))
-	}
-	// Include common aliases, e.g. macOS /var and /private/var.
-	if strings.HasPrefix(root, "/private/") {
-		needles = append(needles, []byte(strings.TrimPrefix(root, "/private")))
+// hashPortableFile hashes f and fails when it contains any needle (see
+// sourceNeedles); fold matches ASCII case-insensitively.
+func hashPortableFile(h io.Writer, f io.Reader, needles []string, fold bool) (int64, error) {
+	keep := 0
+	for _, needle := range needles {
+		keep = max(keep, len(needle))
 	}
 	tail := []byte{}
 	buf := make([]byte, 64*1024)
@@ -661,8 +663,11 @@ func hashPortableFile(h io.Writer, f *os.File, root string) (int64, error) {
 		n, err := f.Read(buf)
 		if n > 0 {
 			current := append(tail, buf[:n]...)
+			if fold {
+				foldASCII(current[len(tail):])
+			}
 			for _, needle := range needles {
-				if bytes.Contains(current, needle) {
+				if bytes.Contains(current, []byte(needle)) {
 					return total, fmt.Errorf("dependency contains workspace-specific path")
 				}
 			}
@@ -670,11 +675,7 @@ func hashPortableFile(h io.Writer, f *os.File, root string) (int64, error) {
 				return total, e
 			}
 			total += int64(n)
-			keep := len(root) + 32
-			if keep > len(current) {
-				keep = len(current)
-			}
-			tail = append([]byte(nil), current[len(current)-keep:]...)
+			tail = append([]byte(nil), current[len(current)-min(keep, len(current)):]...)
 		}
 		if err == io.EOF {
 			return total, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -302,7 +303,7 @@ func TestCheckDetachedIgnoresSiblingPathsWithSharedPrefix(t *testing.T) {
 		strings.Repeat("a ", 32767) + "a/wt/feature-2": false,
 		strings.Repeat("b", 65535) + " /wt/feature":    true,
 	} {
-		found, err := referencesPath(strings.NewReader(text), "/wt/feature")
+		found, err := referencesPath(strings.NewReader(text), "/wt/feature", false)
 		require.NoError(t, err)
 		require.Equal(t, references, found, text[max(0, len(text)-40):])
 	}
@@ -419,20 +420,109 @@ func TestCheckDetachedRejectsSymlinksLeavingDestination(t *testing.T) {
 	})
 }
 
-func TestCheckDetachedSourceAliases(t *testing.T) {
-	for _, tc := range []struct{ source, text string }{
-		{"/private/var/wt/feature", "/var/wt/feature/build"},
-		{"/var/wt/feature", "/private/var/wt/feature/build"},
-		{"/wt/my feature", `/wt/my\ feature/build`},
-	} {
-		found := false
-		for _, needle := range detachNeedles(tc.source) {
-			hit, err := referencesPath(strings.NewReader(tc.text), needle)
-			require.NoError(t, err)
-			found = found || hit
+// mentions reports whether text references any needle the way CheckDetached
+// matches them.
+func mentions(t *testing.T, text string, needles []string, fold bool) bool {
+	t.Helper()
+	for _, needle := range needles {
+		hit, err := referencesPath(strings.NewReader(text), needle, fold)
+		require.NoError(t, err)
+		if hit {
+			return true
 		}
-		require.True(t, found, "%s should reference %s", tc.text, tc.source)
 	}
+	return false
+}
+
+// TestSourceNeedlesSpellings pins each platform's path semantics with
+// explicit inputs, so darwin, linux and Windows rules run on every OS.
+func TestSourceNeedlesSpellings(t *testing.T) {
+	const (
+		short = `C:\Users\RUNNER~1\AppData\Local\Temp\wt\feature`
+		long  = `C:\Users\runneradmin\AppData\Local\Temp\wt\feature`
+	)
+	for _, tc := range []struct {
+		goos       string
+		paths      []string
+		text       string
+		references bool
+	}{
+		// macOS exposes /var, /tmp and /etc below /private too.
+		{"darwin", []string{"/private/var/wt/feature"}, "/var/wt/feature/build", true},
+		{"darwin", []string{"/var/wt/feature"}, "/private/var/wt/feature/build", true},
+		{"darwin", []string{"/tmp/wt/feature"}, "/private/tmp/wt/feature", true},
+		{"darwin", []string{"/wt/my feature"}, `/wt/my\ feature/build`, true},
+		{"darwin", []string{"/var/wt/feature"}, "/var/wt/feature-2/build", false},
+		{"linux", []string{"/home/u/wt/feature", "/srv/wt/feature"}, `"/srv/wt/feature/node_modules"`, true},
+		{"linux", []string{"/home/u/wt/feature"}, "/HOME/U/WT/FEATURE", false},
+		{"linux", []string{"/wt/my feature"}, `/wt/my\ feature/build`, true},
+		// Windows tools write native, forward-slash, JSON-escaped and MSYS
+		// spellings, in any case, of either the 8.3 or the long name.
+		{"windows", []string{short, long}, short + `\build\config.gypi`, true},
+		{"windows", []string{short, long}, `C:/Users/RUNNER~1/AppData/Local/Temp/wt/feature/node_modules`, true},
+		{"windows", []string{short, long}, `{"nodedir":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\wt\\feature\\x"}`, true},
+		{"windows", []string{short, long}, `c:\users\RUNNERADMIN\appdata\local\temp\WT\Feature`, true},
+		{"windows", []string{short, long}, `/c/Users/runneradmin/AppData/Local/Temp/wt/feature/build`, true},
+		{"windows", []string{short, long}, `"C:\Users\runneradmin\AppData\Local\Temp\wt\feature"`, true},
+		{"windows", []string{`C:\wt\my feature`}, `C:/wt/my\ feature/build`, true},
+		{"windows", []string{short, long}, long + `-2\build`, false},
+		{"windows", []string{short, long}, `C:/Users/runneradmin/AppData/Local/Temp/wt/featureX`, false},
+		{"windows", []string{short, long}, `D:\Users\runneradmin\AppData\Local\Temp\wt\feature`, false},
+	} {
+		needles := sourceNeedles(tc.paths, tc.goos)
+		require.Equal(t, tc.references, mentions(t, tc.text, needles, foldsCase(tc.goos)),
+			"%s: %s should reference %v: %v (needles %q)", tc.goos, tc.text, tc.paths, tc.references, needles)
+	}
+	require.Equal(t, sourceNeedles([]string{"/var/wt/feature"}, "linux"), sourceNeedles([]string{"/var/wt/feature", "/var/wt/feature"}, "linux"), "needles are deduplicated")
+}
+
+// osSpellings are the ways installers on this OS may record dir.
+func osSpellings(t *testing.T, dir string) []string {
+	t.Helper()
+	spellings := []string{dir}
+	if runtime.GOOS != "windows" {
+		return spellings
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	spellings = append(spellings, resolved, filepath.ToSlash(dir), filepath.ToSlash(resolved),
+		strings.ReplaceAll(dir, `\`, `\\`), strings.ReplaceAll(resolved, `\`, `\\`),
+		strings.ToUpper(dir), strings.ToLower(resolved))
+	return append(spellings, platformPathForms(dir)...)
+}
+
+// Every spelling of the source worktree keeps the default policy cold and
+// fails CheckDetached, including on Windows (8.3 and long names, forward
+// slashes, JSON escapes, any case).
+func TestWorkspacePathSpellingsAreDetected(t *testing.T) {
+	src := t.TempDir()
+	for _, spelling := range osSpellings(t, src) {
+		writeTrustedInputs(t, src, `{"name":"fixture"}`, `{"lockfileVersion":3,"packages":{"":{"name":"fixture"}}}`)
+		dep := filepath.Join(src, "node_modules", "dep")
+		require.NoError(t, os.MkdirAll(dep, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(dep, "config.json"), []byte(`{"dir":"`+spelling+`"}`), 0644))
+		_, err := treeDigest(filepath.Join(src, "node_modules"), digestOptions{})
+		require.Error(t, err, "default digest must reject %s", spelling)
+
+		detached := &Install{root: t.TempDir(), tree: "node_modules", warmedFrom: src}
+		require.NoError(t, os.MkdirAll(filepath.Join(detached.root, "node_modules"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(detached.root, "node_modules", "config.json"), []byte(spelling+`/build`), 0644))
+		require.Error(t, detached.CheckDetached(), "CheckDetached must reject %s", spelling)
+	}
+}
+
+// A worktree reached through a symlink can be recorded under either path.
+func TestWorkspacePathThroughSymlinkIsDetected(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	dep := filepath.Join(real, "node_modules", "dep")
+	require.NoError(t, os.MkdirAll(dep, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "config.json"), []byte(`{"dir":"`+link+`/node_modules"}`), 0644))
+	_, err := treeDigest(filepath.Join(link, "node_modules"), digestOptions{})
+	require.Error(t, err)
 }
 
 func TestRecordWarmFailsWhenTreeNoLongerCertifiable(t *testing.T) {

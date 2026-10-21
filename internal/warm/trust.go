@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -180,6 +181,7 @@ func (i *Install) CheckDetached() error {
 		return nil
 	}
 	needles := detachNeedles(i.warmedFrom)
+	fold := foldsCase(runtime.GOOS)
 	dest := filepath.Join(i.root, i.tree)
 	return filepath.WalkDir(dest, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -215,7 +217,7 @@ func (i *Install) CheckDetached() error {
 			if err != nil {
 				return err
 			}
-			found, readErr := referencesPath(f, needle)
+			found, readErr := referencesPath(f, needle, fold)
 			if err := errors.Join(readErr, f.Close()); err != nil {
 				return err
 			}
@@ -227,28 +229,78 @@ func (i *Install) CheckDetached() error {
 	})
 }
 
-// detachNeedles lists spellings of the source worktree path: as given,
-// symlink-resolved, with or without macOS's /private prefix, and with
-// Makefile-style escaped spaces.
+// detachNeedles lists the spellings of the source worktree path (see
+// sourceNeedles) on this OS.
 func detachNeedles(source string) []string {
-	paths := []string{source}
-	if resolved, err := filepath.EvalSymlinks(source); err == nil {
-		paths = append(paths, resolved)
-	}
+	return sourceNeedles(sourcePaths(source), runtime.GOOS)
+}
+
+// sourcePaths lists the names the OS reports for the worktree paths: as
+// given, symlink-resolved and, on Windows, the long and 8.3 short names.
+func sourcePaths(paths ...string) []string {
+	var out []string
 	for _, path := range paths {
-		if trimmed, ok := strings.CutPrefix(path, "/private/"); ok {
-			paths = append(paths, "/"+trimmed)
-		} else if filepath.IsAbs(path) && runtimeHasPrivateAlias(path) {
-			paths = append(paths, "/private"+path)
+		out = append(out, path)
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			out = append(out, resolved)
 		}
 	}
-	for _, path := range paths {
+	for _, path := range slices.Clone(out) {
+		out = append(out, platformPathForms(path)...)
+	}
+	return out
+}
+
+// sourceNeedles lists the spellings under which tools may record the
+// worktree paths, using goos's path semantics: POSIX paths with or without
+// macOS's /private prefix; Windows paths with native, forward-slash,
+// JSON-escaped and MSYS (/c/...) separators, case-folded (see foldsCase).
+// Both add Makefile-style escaped spaces.
+func sourceNeedles(paths []string, goos string) []string {
+	var out []string
+	if goos == "windows" {
+		for _, path := range paths {
+			slash := strings.ReplaceAll(path, `\`, "/")
+			out = append(out, path, slash, strings.ReplaceAll(path, `\`, `\\`))
+			if len(slash) >= 3 && slash[1] == ':' && slash[2] == '/' {
+				out = append(out, "/"+slash[:1]+slash[2:])
+			}
+		}
+		for n := range out {
+			out[n] = string(foldASCII([]byte(out[n])))
+		}
+	} else {
+		out = append(out, paths...)
+		for _, path := range paths {
+			if trimmed, ok := strings.CutPrefix(path, "/private/"); ok {
+				out = append(out, "/"+trimmed)
+			} else if strings.HasPrefix(path, "/") && runtimeHasPrivateAlias(path) {
+				out = append(out, "/private"+path)
+			}
+		}
+	}
+	for _, path := range slices.Clone(out) {
 		if strings.Contains(path, " ") {
-			paths = append(paths, strings.ReplaceAll(path, " ", `\ `))
+			out = append(out, strings.ReplaceAll(path, " ", `\ `))
 		}
 	}
-	sort.Strings(paths)
-	return slices.Compact(paths)
+	out = slices.DeleteFunc(out, func(path string) bool { return path == "" })
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
+// foldsCase reports whether goos compares paths case-insensitively for
+// needle matching. Only Windows does; other platforms keep exact matches.
+func foldsCase(goos string) bool { return goos == "windows" }
+
+// foldASCII lowercases ASCII letters in place, keeping byte offsets.
+func foldASCII(b []byte) []byte {
+	for n, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[n] = c + 'a' - 'A'
+		}
+	}
+	return b
 }
 
 // runtimeHasPrivateAlias reports paths that macOS also exposes below /private.
@@ -287,8 +339,9 @@ func pathByte(b byte) bool {
 }
 
 // referencesPath reports whether r mentions the absolute path as a whole
-// path (not as a prefix of a sibling or suffix of a longer path).
-func referencesPath(r io.Reader, path string) (bool, error) {
+// path (not as a prefix of a sibling or suffix of a longer path). With fold,
+// r is ASCII case-folded and path must already be (see sourceNeedles).
+func referencesPath(r io.Reader, path string, fold bool) (bool, error) {
 	needle := []byte(path)
 	if len(needle) == 0 {
 		return false, nil
@@ -300,6 +353,9 @@ func referencesPath(r io.Reader, path string) (bool, error) {
 	start := true
 	for {
 		n, err := r.Read(buf)
+		if fold {
+			foldASCII(buf[:n])
+		}
 		window = append(window, buf[:n]...)
 		eof := errors.Is(err, io.EOF)
 		if err != nil && !eof {
