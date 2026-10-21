@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Laravel scaffolding now leaves the worktree's own testing database schema-ready: `db.migrate` runs a non-destructive `artisan migrate` (no seed) on the owned, isolated `role: testing` database on every scaffold/ensure, through a per-command database environment without editing `.env`. Unrecorded, auxiliary, borrowed, shared, legacy and mismatched databases are never targeted. Testing databases are no longer existence-only by default; `database_actions: {testing: skip}` restores that.
+- `--db-action testing=fresh` / `database_actions: {testing: fresh}` opts into rebuilding that testing database with `migrate:fresh` (no seed); it is refused for any other target or when another registered worktree records or borrows the name, and runs under the repository database lock.
+- Failed migrations name the database, role, action and the corrective command (`anvil scaffold`, or `testing: skip` to opt out).
+
 ### Fixed
 
 - `db.create` fails closed: a configured MySQL/MariaDB/PostgreSQL engine whose connection or ping fails now fails the step (naming the engine, role and corrective action) instead of reporting the worktree ready without its database. Explicit `type:` accepts the same aliases as `DB_CONNECTION` case-insensitively; an unsupported `type` is rejected before any scaffold step runs.

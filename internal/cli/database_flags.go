@@ -12,7 +12,7 @@ import (
 )
 
 func addDatabaseFlags(cmd *cobra.Command) {
-	cmd.Flags().StringArray("db-action", nil, "Database action: application|testing|EXACT_NAME=skip|migrate (repeatable)")
+	cmd.Flags().StringArray("db-action", nil, "Database action: application|testing|EXACT_NAME=skip|migrate|fresh (repeatable; fresh only for the owned testing database)")
 	cmd.Flags().StringArray("reset-database", nil, "Reset and seed an existing exact owned database name (repeatable)")
 	cmd.Flags().String("borrow-app-db", "", "Borrow the application database of a registered worktree; testing stays isolated")
 }
@@ -28,8 +28,8 @@ func applyDatabaseFlags(cmd *cobra.Command, pc *ProjectContext) error {
 	seen := map[string]bool{}
 	for _, value := range actions {
 		selector, action, ok := strings.Cut(value, "=")
-		if !ok || selector == "" || (action != "skip" && action != "migrate") {
-			return fmt.Errorf("invalid --db-action %q; use SELECTOR=skip|migrate", value)
+		if !ok || selector == "" || (action != "skip" && action != "migrate" && action != "fresh") {
+			return fmt.Errorf("invalid --db-action %q; use SELECTOR=skip|migrate|fresh", value)
 		}
 		if seen[selector] {
 			return fmt.Errorf("duplicate --db-action selector %q", selector)
