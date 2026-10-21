@@ -62,6 +62,9 @@ type ensureData struct {
 }
 
 func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
+	if mustGetBool(cmd, "dry-run") {
+		return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "ensure does not support --dry-run")
+	}
 	jsonMode := mustGetBool(cmd, "json")
 	verbose := mustGetBool(cmd, "verbose")
 	quiet := mustGetBool(cmd, "quiet") || jsonMode

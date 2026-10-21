@@ -78,6 +78,8 @@ records on the next `ensure`, and is never treated as their owner).
 
 ## `anvil ensure [WORKTREE] --json` (mutating)
 
+`--dry-run` returns `invalid_arguments` (exit 2) before any changes.
+
 ```json
 "data": {
   "worktree": { "...": "see above" },

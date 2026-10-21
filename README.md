@@ -400,6 +400,7 @@ anvil ensure feature/auth --skip-prepare
 ID (`wt_…`); partial matches are never used. When nothing matches, it is treated
 as a branch name and created exactly as `anvil work` would (`--base`, `--no-track`
 apply). Concurrent `ensure` calls for the same branch converge on one worktree.
+`--dry-run` is rejected before any worktree, identity or preparation changes.
 
 Preparation runs the same steps as `anvil scaffold` (preset defaults plus
 `scaffold.steps`) under a per-worktree lock and records each completed step in
