@@ -195,31 +195,33 @@ type prepareRecorder struct {
 
 func (r *prepareRecorder) BeforeStep(index int, _ types.ScaffoldStep) (bool, string, error) {
 	entry := r.plan[index]
-	if !r.skipCompleted || !entry.cacheable {
-		return false, "", nil
-	}
 	record, ok := r.records[entry.key]
-	if !ok || record.Definition != entry.definition {
-		return false, "", nil
+	if r.skipCompleted && entry.cacheable && ok && record.Definition == entry.definition {
+		root := stepRoot(r.worktreePath, entry.cfg)
+		inputs, err := InputsDigest(root, entry.cfg.Inputs)
+		if err != nil {
+			return false, "", err
+		}
+		if inputs != record.Inputs {
+			r.reasons[index] = "inputs changed"
+		} else {
+			present, missing, err := OutputsPresent(root, entry.cfg.Outputs)
+			if err != nil {
+				return false, "", err
+			}
+			if present {
+				return true, SkipUpToDate, nil
+			}
+			r.reasons[index] = fmt.Sprintf("output %s missing", missing)
+		}
 	}
-	root := stepRoot(r.worktreePath, entry.cfg)
-	inputs, err := InputsDigest(root, entry.cfg.Inputs)
-	if err != nil {
-		return false, "", err
+	if ok {
+		if err := wtstate.ForgetStep(r.worktreePath, entry.key); err != nil {
+			return false, "", fmt.Errorf("invalidating step completion: %w", err)
+		}
+		delete(r.records, entry.key)
 	}
-	if inputs != record.Inputs {
-		r.reasons[index] = "inputs changed"
-		return false, "", nil
-	}
-	present, missing, err := OutputsPresent(root, entry.cfg.Outputs)
-	if err != nil {
-		return false, "", err
-	}
-	if !present {
-		r.reasons[index] = fmt.Sprintf("output %s missing", missing)
-		return false, "", nil
-	}
-	return true, SkipUpToDate, nil
+	return false, "", nil
 }
 
 func (r *prepareRecorder) AfterStep(index int, _ types.ScaffoldStep, stepErr error) error {
