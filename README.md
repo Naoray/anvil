@@ -1204,7 +1204,9 @@ Steps execute in the order they appear in the configuration file.
 Step directories, declared inputs/outputs and file conditions must remain inside
 the canonical worktree root, including through symlinks. Existing escaping links
 are rejected before preparation changes state or runs any step. Internal links
-are allowed.
+are allowed. Step environment values all expand against the same worktree and
+inherited environment snapshot; another override in the same step does not
+change that snapshot.
 
 ### Conditions
 

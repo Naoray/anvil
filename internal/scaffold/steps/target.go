@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/types"
@@ -47,12 +48,20 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 	if len(ctx.Env) == 0 && len(t.env) == 0 {
 		return dir, nil, nil
 	}
+	baseEnv := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			baseEnv[key] = value
+		}
+	}
 	env := make(map[string]string, len(ctx.Env)+len(t.env))
 	for key, value := range ctx.Env {
 		env[key] = value
+		baseEnv[key] = value
 	}
 	for key, value := range t.env {
-		env[key] = ExpandEnv(value, env)
+		env[key] = ExpandEnv(value, baseEnv)
 	}
 	return dir, env, nil
 }
