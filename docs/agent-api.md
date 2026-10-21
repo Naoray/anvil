@@ -211,6 +211,8 @@ no lease) carry the conflicting lease in `error.details.lease`. A task ID never
 authorizes renew/release. `anvil remove` (and `prune`/`unlink --clean`)
 refuse an active lease with `lease_held` unless `--ignore-lease`; a stale lease
 only warns.
+`prune --ignore-lease` and `unlink --clean --ignore-lease` apply the same explicit
+override to every selected worktree. `--force` alone does not bypass leases.
 
 ## `anvil status --json`
 

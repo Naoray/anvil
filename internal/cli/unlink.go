@@ -122,7 +122,7 @@ Examples:
 							if err != nil {
 								return err
 							}
-							if err := runRemoveLifecycle(pc, wt, removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet}, cleanupOpts, messages, deps); err != nil {
+							if err := runRemoveLifecycle(pc, wt, removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet, IgnoreLease: mustGetBool(cmd, "ignore-lease")}, cleanupOpts, messages, deps); err != nil {
 								return err
 							}
 						}
@@ -165,4 +165,5 @@ func init() {
 
 	unlinkCmd.Flags().Bool("clean", false, "Remove all worktrees for this project")
 	unlinkCmd.Flags().Bool("force", false, "Skip confirmation when using --clean")
+	unlinkCmd.Flags().Bool("ignore-lease", false, "Remove even if another agent holds an active lease (explicit authorization)")
 }
