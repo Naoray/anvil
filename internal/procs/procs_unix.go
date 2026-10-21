@@ -30,9 +30,12 @@ type Started struct {
 	Identity string
 }
 
-// Start launches `sh -c Command` detached in its own session (so its PID is
-// also its process group ID), with stdin from /dev/null and output appended
-// to LogPath. The process keeps running after Anvil exits.
+// Start launches Command detached in its own session (so its PID is also its
+// process group ID), with stdin from /dev/null and output appended to
+// LogPath. The leader is this binary acting as supervisor: it runs
+// `sh -c Command` and lives until the whole group has exited, so a command
+// that backgrounds its work and returns still has a verifiable leader. The
+// process keeps running after Anvil exits.
 func Start(spec Spec) (Started, error) {
 	logFile, err := os.OpenFile(spec.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -42,7 +45,11 @@ func Start(spec Spec) (Started, error) {
 	if err != nil {
 		return Started{}, errors.Join(err, logFile.Close())
 	}
-	cmd := exec.Command("sh", "-c", spec.Command)
+	self, err := os.Executable()
+	if err != nil {
+		return Started{}, errors.Join(fmt.Errorf("locating supervisor: %w", err), logFile.Close(), devNull.Close())
+	}
+	cmd := exec.Command(self, SuperviseArg, spec.Command)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
 	cmd.Stdin = devNull
@@ -57,12 +64,9 @@ func Start(spec Spec) (Started, error) {
 	pid := cmd.Process.Pid
 	identity, err := StartIdentity(pid)
 	if errors.Is(err, ErrNoProcess) {
-		// The leader already exited (for example a command that backgrounds
-		// work and returns). Its process group may still hold our
-		// descendants: record it without an identity. Stop may then signal
-		// only a surviving group of the dead leader; once the PID is reused
-		// by anyone, the empty identity reads as unknown and is never
-		// signaled.
+		// The supervisor already exited, so the command finished and left
+		// no process in its group. The empty identity never verifies, so
+		// nothing is ever signaled for this record.
 		reap(cmd)
 		return Started{PID: pid}, closeErr
 	}
@@ -89,8 +93,6 @@ func reap(cmd *exec.Cmd) {
 }
 
 // groupExists reports whether any process still has pgid as process group.
-// A PID is never recycled while it is in use as a process group ID, so a
-// surviving group of a dead leader still contains only its descendants.
 func groupExists(pgid int) bool {
 	err := unix.Kill(-pgid, 0)
 	return err == nil || errors.Is(err, unix.EPERM)
@@ -108,8 +110,10 @@ const (
 )
 
 // Stop terminates a recorded process group: SIGTERM, then SIGKILL after
-// timeout. It only signals when the leader still has its recorded identity,
-// or when the leader is gone but its own process group survives.
+// timeout. It signals only while the leader verifiably has its recorded
+// identity. The supervisor leads every group Anvil starts until the group is
+// empty, so a surviving group whose leader is gone cannot be proven ours: its
+// ID may have been reused by an unrelated session, and it is never signaled.
 func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	switch Check(pid, identity) {
 	case StateReused:
@@ -117,9 +121,10 @@ func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	case StateUnknown:
 		return StopUnverifiable, nil
 	case StateExited:
-		if !groupExists(pid) {
-			return StopAlreadyExited, nil
+		if groupExists(pid) {
+			return StopUnverifiable, nil
 		}
+		return StopAlreadyExited, nil
 	case StateRunning:
 	}
 	if err := unix.Kill(-pid, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
@@ -128,10 +133,10 @@ func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	if waitGone(pid, identity, timeout) {
 		return StopTerminated, nil
 	}
-	switch Check(pid, identity) {
-	case StateReused, StateUnknown:
+	if Check(pid, identity) != StateRunning {
+		// The leader exited after SIGTERM; without it the group is no
+		// longer provably ours, so it is not escalated.
 		return StopTerminated, nil
-	case StateRunning, StateExited:
 	}
 	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
 		return "", fmt.Errorf("killing process group %d: %w", pid, err)

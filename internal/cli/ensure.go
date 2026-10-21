@@ -30,6 +30,8 @@ const worktreeCreateLockFile = "anvil-worktree-create.lock"
 // arguments.
 const LeaseTokenEnv = "ANVIL_LEASE_TOKEN"
 
+var ensureAgentCommand = agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}
+
 var ensureCmd = &cobra.Command{
 	Use:   "ensure [WORKTREE]",
 	Short: "Create a worktree if needed and prepare it idempotently",
@@ -63,7 +65,7 @@ Mutating. Use --json for one versioned JSON document on stdout.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, ensureAgentCommand, func() (agentResult, error) {
 			return runEnsure(cmd, args)
 		})
 	},
@@ -155,24 +157,24 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{}, err
 	}
+
 	gate, err := acquireWorktreeUse(pc, *target)
 	if err != nil {
 		return agentResult{}, err
 	}
 	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
+	summary, warnings := summarizeWorktree(*target)
+	data := ensureData{Components: []capabilities.ComponentPlan{}, Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	if opts, err = effectiveRole(target, opts, created); err != nil {
-		return agentResult{}, err
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
-
-	data := ensureData{Components: []capabilities.ComponentPlan{}, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
-	var warnings []string
 	if mustGetBool(cmd, "skip-prepare") {
 		if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
 			return agentResult{Data: data, Warnings: warnings}, err
 		}
 		summary, summaryWarnings := summarizeWorktree(*target)
-		data.Worktree = summary
 		warnings = append(warnings, summaryWarnings...)
+		data.Worktree = summary
 		state, err := wtstate.ReadPrepare(target.Path)
 		if err == nil {
 			data.Prepare.Status, err = wtstate.EffectivePrepareStatus(target.Path, state)
@@ -186,15 +188,14 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 
 	selected, err := cmd.Flags().GetStringArray("component")
 	if err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
 	envOptions := worktreeEnvOptions{Selected: selected, Role: opts.Role}
 	wenv, err := loadWorktreeEnv(pc, *target, envOptions)
 	if err != nil {
-		return agentResult{}, err
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	reviewMinimal := opts.Role == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
-	components := wenv.Components
 	data.Components = wenv.Components
 	// Every component's conditions are validated, including components
 	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
@@ -204,18 +205,31 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
 	}
 	if err != nil {
-		return agentResult{Data: data}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
-	if failure := environmentPreconditions(wenv); failure != nil {
-		summary, summaryWarnings := summarizeWorktree(*target)
+	if wenv.ComponentErr != nil {
+		summary, warnings := summarizeWorktree(*target)
 		data.Worktree = summary
-		return agentResult{Data: data, Warnings: summaryWarnings}, failure
+		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
+			Code:    agentapi.CodePrepareFailed,
+			Message: fmt.Sprintf("component requirements not met (nothing was changed): %v", wenv.ComponentErr),
+			Cause:   wenv.ComponentErr,
+		}
+	}
+	if wenv.SharedErr != nil {
+		summary, warnings := summarizeWorktree(*target)
+		data.Worktree = summary
+		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
+			Code:    agentapi.CodePrepareFailed,
+			Message: fmt.Sprintf("%v (nothing was changed)", wenv.SharedErr),
+			Cause:   wenv.SharedErr,
+		}
 	}
 	targetPC := wenv.PC
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	extraSteps := capabilities.Steps(components)
+	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
 	prepareConfig, defaultSteps := targetPC.Config, resolvedPreset.DefaultSteps()
 	presetName := resolvedPreset.Name()
@@ -227,20 +241,19 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		prepareConfig, defaultSteps, presetName = &minimal, nil, ""
 	}
 	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: prepareConfig, DefaultSteps: defaultSteps, ExtraSteps: extraSteps}
-	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
-	}
 
-	// First writes: identity, then role/task metadata and the lease, so an
-	// agent's claim exists before preparation starts.
+	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
+	// Record identity, role/task metadata and the lease before preparation.
 	if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
-		return agentResult{}, err
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	if err := provisionResources(wenv); err != nil {
-		return agentResult{Data: data, Warnings: warnings}, err
+		return agentResult{Data: data}, err
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
 		return agentResult{}, err
@@ -267,8 +280,8 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	})
 
 	summary, summaryWarnings := summarizeWorktree(*target)
-	data.Worktree = summary
 	warnings = append(warnings, summaryWarnings...)
+	data.Worktree = summary
 	if report != nil {
 		data.Prepare.PlanDigest = report.PlanDigest
 		data.Prepare.Steps = report.Steps
@@ -278,7 +291,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	}
 	if runErr != nil {
 		if report == nil {
-			// Validation or pre-flight failed before any step ran.
+			// Validation or pre-flight failed before any effect.
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
@@ -286,26 +299,6 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
-}
-
-// environmentPreconditions refuses preparation before any effect when
-// components or required shared resources are unavailable.
-func environmentPreconditions(wenv *worktreeEnv) error {
-	if wenv.ComponentErr != nil {
-		return &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("component requirements not met (nothing was changed): %v", wenv.ComponentErr),
-			Cause:   wenv.ComponentErr,
-		}
-	}
-	if wenv.SharedErr != nil {
-		return &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("%v (nothing was changed)", wenv.SharedErr),
-			Cause:   wenv.SharedErr,
-		}
-	}
-	return nil
 }
 
 // effectiveRole applies the recorded role and verifies review worktrees
@@ -393,32 +386,22 @@ func recordEnsureClaims(target *git.Worktree, opts ensureOptions, data *ensureDa
 	return nil
 }
 
-// prepareFailure returns a JSON-safe error. Step errors embed the command's
-// combined output, which may contain secrets, so only the failing step is
-// named; the full diagnostics go to stderr.
+// prepareFailure names the failed step without copying child output into JSON.
 func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
-	fmt.Fprintf(os.Stderr, "preparation failed:\n%v\n", runErr)
-	step := "a step"
+	fmt.Fprintf(os.Stderr, "preparation failed: %v\n", runErr)
+	step, key := "a step", ""
 	for _, outcome := range report.Steps {
 		if outcome.Result == scaffold.OutcomeFailed {
 			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+			key = outcome.Key
 		}
 	}
 	return &agentapi.Error{
 		Code:    agentapi.CodePrepareFailed,
 		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
-		Details: map[string]any{"failed_step": failedKey(report)},
+		Details: map[string]any{"failed_step": key},
 		Cause:   runErr,
 	}
-}
-
-func failedKey(report *scaffold.PrepareReport) string {
-	for _, outcome := range report.Steps {
-		if outcome.Result == scaffold.OutcomeFailed {
-			return outcome.Key
-		}
-	}
-	return ""
 }
 
 // ensureWorktreeExists resolves the target, creating it under the
@@ -429,49 +412,69 @@ func ensureWorktreeExists(cmd *cobra.Command, pc *ProjectContext, args []string)
 		return wt, false, err
 	}
 	query := args[0]
-	if wt, err := lookupWorktree(pc, query); err != nil || wt != nil {
+	worktrees, err := git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	if wt, err := resolveExactWorktree(worktrees, query); err != nil || wt != nil {
 		return wt, false, err
 	}
-	err = withCreateLock(pc, func() error {
-		// Another process may have created it while this one waited.
-		if target, err = lookupWorktree(pc, query); err != nil || target != nil {
-			return err
+
+	commonDir, err := dblifecycle.CommonDir(pc.ProjectPath)
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	lock, err := lockfile.Acquire(filepath.Join(commonDir, worktreeCreateLockFile))
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	defer func() { err = errors.Join(err, lock.Release()) }()
+
+	// Another process may have created it while this one waited.
+	worktrees, err = git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	if wt, err := resolveExactWorktree(worktrees, query); err != nil || wt != nil {
+		return wt, false, err
+	}
+
+	selection, err := git.ResolveWorkBranch(pc.GitDir, query)
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	for _, wt := range worktrees {
+		if wt.Branch == selection.Branch {
+			copied := wt
+			return &copied, false, nil
 		}
-		selection, err := git.ResolveWorkBranch(pc.GitDir, query)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeGitFailed, err)
-		}
-		worktrees, err := git.ListWorktrees(pc.GitDir)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeGitFailed, err)
-		}
-		for _, wt := range worktrees {
-			if wt.Branch == selection.Branch {
-				copied := wt
-				target = &copied
-				return nil
-			}
-		}
-		baseBranch := mustGetString(cmd, "base")
+	}
+	baseBranch := mustGetString(cmd, "base")
+	if baseBranch == "" {
+		baseBranch = selection.Base
 		if baseBranch == "" {
-			baseBranch = selection.Base
-			if baseBranch == "" {
-				baseBranch = pc.DefaultBranch
-			}
+			baseBranch = pc.DefaultBranch
 		}
-		absPath, err := filepath.Abs(pc.GetWorktreePath(selection.Branch))
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	absPath, err := filepath.Abs(pc.GetWorktreePath(selection.Branch))
+	if err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	ui.PrintStep(fmt.Sprintf("Creating worktree for branch '%s' from '%s'", selection.Branch, baseBranch))
+	if err := createBranchWorktree(pc, selection, absPath, baseBranch, mustGetBool(cmd, "no-track"), mustGetBool(cmd, "verbose")); err != nil {
+		return nil, false, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	worktrees, err = git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, true, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	for _, wt := range worktrees {
+		if git.PathsEqual(wt.Path, absPath) {
+			copied := wt
+			return &copied, true, nil
 		}
-		ui.PrintStep(fmt.Sprintf("Creating worktree for branch '%s' from '%s'", selection.Branch, baseBranch))
-		if err := createBranchWorktree(pc, selection, absPath, baseBranch, mustGetBool(cmd, "no-track"), mustGetBool(cmd, "verbose")); err != nil {
-			return agentapi.Wrap(agentapi.CodeGitFailed, err)
-		}
-		created = true
-		target, err = registeredAt(pc, absPath)
-		return err
-	})
-	return target, created, err
+	}
+	return nil, true, agentapi.Errorf(agentapi.CodeGitFailed, "created worktree %s is not registered", absPath)
 }
 
 // ensureReviewWorktree creates or reuses a detached worktree at commit.
@@ -566,14 +569,11 @@ func printEnsureHuman(result agentResult) error {
 		}
 	}
 	ui.PrintDone(fmt.Sprintf("Worktree ready at %s (%d steps ran, %d up to date)", data.Worktree.Path, ran, upToDate))
-	if data.Lease != nil && data.Lease.Token != "" {
-		fmt.Printf("Lease token (shown once; export %s to renew/release): %s\n", LeaseTokenEnv, data.Lease.Token)
-	}
 	return nil
 }
 
 func init() {
-	addJSONFlag(ensureCmd)
+	addJSONFlag(ensureCmd, ensureAgentCommand)
 	addDatabaseFlags(ensureCmd)
 	ensureCmd.Flags().StringP("base", "b", "", "Base branch for a newly created worktree")
 	ensureCmd.Flags().Bool("no-track", false, "Skip remote tracking for a newly created branch")

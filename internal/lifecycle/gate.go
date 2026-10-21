@@ -6,9 +6,8 @@ import (
 	"github.com/naoray/anvil/internal/lockfile"
 )
 
-// Path is stable across worktree and private Git-directory deletion. It lives
-// outside both directories so Windows can remove them while the gate is held.
-// Gate files must never be removed: waiters must keep using the same inode.
+// Path stays outside the worktree and its Git directory, including during
+// deletion. Gate files are retained so waiters always contend on one inode.
 func Path(worktreePath string) (string, error) {
 	return config.WorktreeExternalLockPath(worktreePath, "anvil-lifecycle.lock"), nil
 }

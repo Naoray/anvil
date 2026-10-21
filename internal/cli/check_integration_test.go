@@ -58,6 +58,21 @@ func checkEntry(t *testing.T, envelope map[string]any, name string) map[string]a
 	return nil
 }
 
+func TestCheckArgumentErrorsHaveJSONEnvelope(t *testing.T) {
+	f := newAgentFixture(t, checksFixtureYAML, nil)
+	for _, args := range [][]string{
+		{"check", "--unknown-flag"},
+		{"check", "--lock-wait=invalid"},
+		{"check", "--verbose", "--quiet"},
+	} {
+		envelope, stderr, code := f.runJSON(f.repo, args...)
+		require.Equal(t, 2, code, stderr)
+		require.Equal(t, false, envelope["ok"])
+		require.Equal(t, "check", envelope["command"])
+		require.Equal(t, "invalid_arguments", field(t, envelope, "error", "code"))
+	}
+}
+
 func TestCheckProvenanceStalenessFailuresAndLocks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("check commands use sh")

@@ -66,26 +66,26 @@ capability only contributes its requirements.
 
 | Capability | Detects | Default command | Inputs → outputs | Environment |
 |------------|---------|-----------------|------------------|-------------|
-| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile (+ `.yarnrc.yml`) → `node_modules`, or `.pnp.cjs` for Yarn Plug'n'Play (Berry's default `nodeLinker`) | `node_modules/.bin` on PATH |
+| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile + Yarn config → `node_modules` (Yarn PnP: `.pnp.cjs`) | `node_modules/.bin` on PATH |
 | `rust` | `Cargo.toml` (+`Cargo.lock`) | `cargo fetch [--locked]` | `Cargo.toml`, `Cargo.lock`, `rust-toolchain(.toml)` | — |
-| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` (`.venv\Scripts` on Windows) on PATH |
+| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` (`.venv/Scripts` on Windows) on PATH |
 | `go` | `go.mod` | `go mod download` | `go.mod`, `go.sum` | — |
 | `php` | `composer.lock` | `composer install --no-interaction` | `composer.json`, `composer.lock` → `vendor` | `vendor/bin` on PATH |
 | `tauri` | `src-tauri/Cargo.toml` | `cargo fetch` in `src-tauri` | Cargo inputs under `src-tauri` | — |
 | `swift` | `Package.swift` | `swift package resolve` | `Package.swift`, `Package.resolved` | defaults to `platforms: [darwin]` |
 
-Anvil does not build projects by default (no `cargo build`, `tauri build`,
-`swift build`); declare such commands in `prepare` when you want them. Toolchain
-versions are not part of a step's identity — use `anvil ensure --refresh` after
-upgrading a toolchain. The declared environment is: changing a project `env`
-value, or a component or command `env` value after expansion, reruns the steps
-that receive it. Only a digest is recorded, never the values; `PATH` is left
-out so shell differences do not invalidate preparation.
+Yarn Berry reads `nodeLinker` from the component's `.yarnrc.yml` (or
+`YARN_NODE_LINKER`). PnP records `.pnp.cjs` plus explicitly enabled loader/data
+files; the `node-modules` and `pnpm` linkers record `node_modules`. Both
+`.yarnrc.yml` and legacy `.yarnrc` participate in the install input digest.
 
-Component and prepare-command `env` values may reference `${ANVIL_COMPONENT}`
-and `${ANVIL_COMPONENT_DIR}`. Conditions (`when`, `platforms`) of every
-component are validated before any effect, including components skipped on
-this machine.
+Anvil does not build projects by default (no `cargo build`, `tauri build`,
+`swift build`); declare such commands in `prepare` when you want them.
+
+The exported preparation environment is hashed into step identities; changing
+project env values invalidates completion records without storing their raw
+values in local state. Toolchain versions are not part of a step's identity —
+use `anvil ensure --refresh` after upgrading a toolchain.
 
 The Laravel/PHP presets are unchanged and keep running through `scaffold`
 steps; components may be combined with a preset in one repository.
@@ -111,17 +111,12 @@ anvil run feature-x --require-ready -- make lint
 ```
 
 `--` is required. The child replaces Anvil (exit status passes through; 127 =
-not found, 126 = not executable). COMMAND is looked up on the exported `PATH`
-(and `PATHEXT` on Windows), so component-local tools such as
-`node_modules/.bin` or `.venv/bin` win over global ones; a relative path is
-resolved against the child's directory.
-
-`--require-ready` refuses (`not_prepared`, exit 6) unless worktree preparation
-is complete; with `--component` the component's requirements must also be met
-and each of its applicable steps must have a current completion record (an
-opt-in component needs `anvil ensure --component NAME` first). Without
-`--require-ready` these are warnings on stderr. `run` is read-only and works whether or not a
+not found, 126 = not executable). `run` is read-only and works whether or not a
 testing database exists. `anvil exec` keeps its database-specific semantics.
+With `--component --require-ready`, the selected component must have satisfied
+requirements and matching preparation records for its current applicable steps,
+including their declared inputs and outputs. Prepare opt-in components explicitly
+with `anvil ensure --component NAME` before requiring them to be ready.
 
 ## Runtime resources
 
@@ -183,13 +178,16 @@ processes:
 
 `anvil start [WORKTREE] [--process NAME]` runs each process detached through
 `sh -c` in its own session/process group, with the worktree environment and
-output appended to `$ANVIL_LOG_DIR/<name>.log`. The PID is recorded in
+output appended to `$ANVIL_LOG_DIR/<name>.log`. The group leader is a small
+Anvil supervisor that stays alive until every process in the group has
+exited, so a command that backgrounds its work and returns (`server &`) is
+still `already_running` on the next start. The leader PID is recorded in
 `.anvil.local` together with the kernel start time (Linux `/proc/<pid>/stat`
 start ticks + boot ID; macOS `kern.proc.pid` start time). `anvil stop` signals
-the group only when the PID still has that start identity, or when the leader
-exited but its own process group survives (a PID is never recycled while it is
-a live process group ID). A recycled PID is reported as
-`not_signaled_pid_reused` and never signaled; nothing is ever killed because it
+the group only while the leader PID still has that start identity. A recycled
+PID is reported as `not_signaled_pid_reused`, and a surviving group whose
+leader is gone as `not_signaled_unverifiable` (its ID may now belong to an
+unrelated session); neither is ever signaled; nothing is ever killed because it
 listens on a recorded port. Managed processes are unsupported on Windows and
 other platforms without a verifiable identity (`unsupported_platform`).
 
@@ -238,23 +236,21 @@ nanosecond timestamp). A result records:
 - the commit (`identity.git.head`), whether the tree was dirty, how many paths
   differed and `state_digest` — a digest of HEAD plus the exact content of every
   modified, deleted and untracked non-ignored path (`.anvil.local` excluded). A
-  dirty tree never shares a digest with its HEAD. Submodules and nested
-  repositories contribute their own checked-out commit and dirty contents;
-  one that cannot be identified fails the check rather than being ignored;
+  dirty tree never shares a digest with its HEAD. Dirty submodules and nested
+  repositories fail identification rather than sharing an incomplete digest;
 - the check definition digest, toolchain probe output, an environment digest
   and platform. The environment digest covers what each command actually
   receives: Anvil's variables, component and command `env` after expansion and
-  the inherited environment, except volatile session variables (`PWD`,
-  `SHLVL`, `SSH_AUTH_SOCK`, terminal and multiplexer IDs, …). Names are
-  listed and values hashed; secret values are excluded (only their presence
+  the inherited environment. Execution receives the same resolved snapshot.
+  Names are listed and values hashed; secret values are excluded (only their presence
   counts), so changing a secret does not make a result stale;
-- declared input digests. Symlinks inside inputs are followed, must resolve
-  inside the worktree or runtime directory, and contribute their target's
-  content;
+- declared input digests. Inputs must remain inside the worktree or runtime
+  directory. Symlinks below either root, including ancestor directories, fail
+  identification;
 - status (`passed`, `failed`, `timed_out`, `interrupted`, `error`), exit code,
-  timings, the commands with their logs, and artifacts with SHA-256 and size. A
-  directory artifact (`kind: directory`) is digested as a whole tree, so
-  changed, deleted and added files all invalidate it.
+  timings, the commands with their logs, and file artifacts with SHA-256 and size.
+  Directory artifacts fail the run and cannot be reused. File patterns such as
+  `bundle/*` record the files instead.
 
 **Validity.** `anvil check --list` recomputes the identity and reports
 `assessment.current`, `assessment.passing_and_current` and `stale_reasons`
@@ -272,10 +268,11 @@ process group (exit 124). SIGINT/SIGTERM terminate the group and record
 `interrupted` (exit 130); an interruption while waiting for a lock returns
 exit 130 without starting a command. Toolchain probes run supervised the same
 way (own process group, 15-second deadline, bounded output). On macOS and
-Linux every command inherits the run's lock files, so if Anvil itself is
-killed the locks, the `running` status and cleanup protection last until the
-surviving command group exits; then the record is reported as `interrupted`.
-Windows cannot pass the locks to commands, so there they end with Anvil.
+Linux a separate supervisor inherits the run's locks. Anvil death closes its
+heartbeat and terminates the command group. The supervisor retains resource
+exclusion, `running` status and cleanup protection until the group is gone.
+Commands must keep descendants in that group. Windows checks and toolchain
+probes fail closed until job-object supervision can provide this guarantee.
 Nothing that did not finish successfully is ever recorded as passing.
 
 **Locks.** `locks` are exclusive across all Anvil processes on the machine
@@ -284,8 +281,8 @@ A held lock fails fast with `resource_busy` (exit 7) and the holder's check,
 worktree and PID, unless `--lock-wait` is given (negative waits indefinitely;
 SIGINT/SIGTERM still end the wait). Locks are taken before the identity is
 computed, so the recorded identity is the state the commands ran against.
-Locks are released by their holder or by the operating system when the holder
-(and every command that inherited them) exits — never because time passed. The same check cannot run twice concurrently in one worktree; different
+Locks remain held through supervisor cleanup and are never stolen because
+time passed. The same check cannot run twice concurrently in one worktree; different
 checks without shared locks run concurrently.
 
 **Reuse and benchmark caching.** `--reuse` returns the latest result instead of
@@ -302,8 +299,9 @@ compatibility beyond these explicit identities (see `examples/gaze-like`).
 Reuse is per worktree.
 
 Check `inputs` and `artifacts` must resolve inside the worktree or its runtime
-directory, including through symlinks. An escaping input fails the check
-before any command runs; an escaping artifact is refused rather than hashed.
+directory. Symlinks are rejected, including links to other files inside those
+roots. An unsupported input fails before commands run. An unsupported artifact
+fails the run and disables reuse.
 
 Logs contain whatever commands print and are stored with mode 0600 in the
 runtime directory; they are referenced by path, never embedded in JSON.
@@ -312,15 +310,18 @@ runtime directory; they are referenced by path, never embedded in JSON.
 
 `anvil remove`, `prune` and `unlink --clean` additionally:
 
-0. refuse (`cleanup_blocked`, exit 7) while a check is running in the worktree.
-   Running checks hold the worktree's check gate shared; removal takes it
-   exclusively before this test and keeps it until the worktree is gone, so a
-   check started meanwhile fails with `resource_busy` instead of running,
+0. refuse (`cleanup_blocked`, exit 7) while checks, ensure or scaffold use the
+   worktree. These operations hold one shared lifecycle gate. Cleanup takes it
+   exclusively before inspection and retains it through deletion and runtime
+   release. New users fail with `cleanup_blocked`. Cleanup also refuses a held
+   preparation lock and retains that lock during deletion,
 1. inspect owned resources before any effect (`--dry-run` lists processes to
    stop, ports to release and the runtime directory to delete),
 2. stop verified owned processes first (failure keeps the worktree),
 3. after the worktree is removed, release its ports and delete its runtime
-   directory only when `owner.json` names exactly this worktree ID and path.
+   directory only when `owner.json` names this worktree's verified ID and is
+   unchanged since step 1 (a worktree moved with `git worktree move` keeps its
+   ID, so its old path in `owner.json` still matches).
 
 Shared resources, files outside the runtime directory and other worktrees'
 resources are never touched. A worktree whose `.anvil.local` was copied from

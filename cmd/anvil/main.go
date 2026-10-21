@@ -7,6 +7,7 @@ import (
 
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/cli"
+	"github.com/naoray/anvil/internal/procs"
 )
 
 // These variables are set at build time via -ldflags
@@ -17,6 +18,9 @@ var (
 )
 
 func main() {
+	if code, ok := procs.Supervise(os.Args); ok {
+		os.Exit(code)
+	}
 	cli.Version = Version
 	cli.Commit = Commit
 	cli.BuildDate = BuildDate

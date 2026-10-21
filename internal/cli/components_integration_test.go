@@ -218,3 +218,59 @@ func TestEnsureRustPythonExample(t *testing.T) {
 	venv := filepath.Join(wt, "eval", ".venv")
 	require.Equal(t, venv+"|"+filepath.Join(venv, "bin"), stdout)
 }
+
+func TestRunResolvesComponentExecutableOnExportedPath(t *testing.T) {
+	f := newAgentFixture(t, "components:\n  - name: tool\n    path: tool\n    uses: [node]\n", map[string]string{"tool/package.json": "{}"})
+	fakeToolchain(t, f, "node", "npm")
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/path")
+	require.Equal(t, 0, code, stderr)
+	wt := f.worktreePath("feature-path")
+	stdout, stderr, code := f.run(f.repo, "run", "feature-path", "--component", "tool", "--", "local-tool")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "local-tool\n", stdout)
+
+	global := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(global, "local-tool"), []byte("#!/bin/sh\necho global\n"), 0o755))
+	f.env = subprocessEnvFrom(append(f.env, "PATH="+global+string(os.PathListSeparator)+"/usr/bin:/bin"))
+	stdout, stderr, code = f.run(f.repo, "run", "feature-path", "--component", "tool", "--", "local-tool")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "local-tool\n", stdout)
+
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "anvil.yaml"), []byte("components:\n  - name: tool\n    path: tool\n    env:\n      PATH: node_modules/.bin\n"), 0o644))
+	stdout, stderr, code = f.run(f.repo, "run", "feature-path", "--component", "tool", "--", "local-tool")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "local-tool\n", stdout)
+}
+func TestRunRequireReadyChecksSelectedComponent(t *testing.T) {
+	f := newAgentFixture(t, "components:\n  - name: extras\n    path: extras\n    opt_in: true\n    requires: [optional-tool]\n    prepare:\n      - run: echo run >> ready.count\n        inputs: [deps.lock]\n        outputs: [ready.count]\n", map[string]string{"extras/deps.lock": "v1"})
+	fakeToolchain(t, f, "optional-tool")
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/ready")
+	require.Equal(t, 0, code, stderr)
+	wt := f.worktreePath("feature-ready")
+	run := func(want int) {
+		t.Helper()
+		_, stderr, code := f.run(f.repo, "run", "feature-ready", "--component", "extras", "--require-ready", "--", "sh", "-c", "touch child-ran")
+		require.Equal(t, want, code, stderr)
+		if want != 0 {
+			require.Contains(t, stderr, "preparation")
+			require.NoFileExists(t, filepath.Join(wt, "extras", "child-ran"))
+		} else {
+			require.NoError(t, os.Remove(filepath.Join(wt, "extras", "child-ran")))
+		}
+	}
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	run(0)
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "extras", "deps.lock"), []byte("v2"), 0o644))
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	run(0)
+	require.NoError(t, os.Remove(filepath.Join(wt, "extras", "ready.count")))
+	run(6)
+	_, stderr, code = f.runJSON(f.repo, "ensure", "feature-ready", "--component", "extras")
+	require.Equal(t, 0, code, stderr)
+	f.env = subprocessEnvFrom(append(f.env, "PATH=/usr/bin:/bin"))
+	run(6)
+}

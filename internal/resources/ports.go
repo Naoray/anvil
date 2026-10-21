@@ -32,11 +32,14 @@ const (
 
 // Reservation records one port owned by one worktree identity.
 type Reservation struct {
-	Port         int       `json:"port"`
-	Name         string    `json:"name"`
-	WorktreeID   string    `json:"worktree_id"`
-	WorktreePath string    `json:"worktree_path"`
-	ReservedAt   time.Time `json:"reserved_at"`
+	Port         int    `json:"port"`
+	Name         string `json:"name"`
+	WorktreeID   string `json:"worktree_id"`
+	WorktreePath string `json:"worktree_path"`
+	// GitDir is the worktree's private Git directory. `git worktree move`
+	// keeps it and rewrites its gitdir file, so it locates a moved owner.
+	GitDir     string    `json:"git_dir,omitempty"`
+	ReservedAt time.Time `json:"reserved_at"`
 }
 
 type registry struct {
@@ -57,14 +60,30 @@ type PortState struct {
 // OwnerCheck reports whether a reservation's owner is still a live worktree.
 type OwnerCheck func(Reservation) bool
 
-// LiveOwner treats a reservation as active while the owner path holds the
-// same Anvil identity. Removed or re-identified worktrees are stale.
+// LiveOwner treats a reservation as active while its owner worktree holds the
+// same Anvil identity, at the recorded path or where `git worktree move` put
+// it. Removed or re-identified worktrees are stale.
 func LiveOwner(r Reservation) bool {
-	identity, status, err := wtstate.ReadIdentity(r.WorktreePath)
+	if ownedBy(r.WorktreePath, r.WorktreeID) {
+		return true
+	}
+	if r.GitDir == "" {
+		return false
+	}
+	content, err := os.ReadFile(filepath.Join(r.GitDir, "gitdir"))
+	if err != nil {
+		return false
+	}
+	moved := filepath.Dir(strings.TrimSpace(string(content)))
+	return moved != r.WorktreePath && ownedBy(moved, r.WorktreeID)
+}
+
+func ownedBy(worktreePath, worktreeID string) bool {
+	identity, status, err := wtstate.ReadIdentity(worktreePath)
 	if err != nil || identity == nil {
 		return false
 	}
-	return identity.ID == r.WorktreeID && (status == wtstate.IdentityOK || status == wtstate.IdentityMoved)
+	return identity.ID == worktreeID && (status == wtstate.IdentityOK || status == wtstate.IdentityMoved)
 }
 
 // Ports manages the machine-wide port registry under root.
@@ -176,6 +195,10 @@ func (p *Ports) preferred(worktreeID, name string) int {
 func (p *Ports) Allocate(worktreeID, worktreePath string, names []string) ([]Reservation, error) {
 	var result []Reservation
 	err := p.withLock(func(reg *registry) error {
+		gitDir, err := config.WorktreeGitDir(worktreePath)
+		if err != nil {
+			gitDir = "" // not a linked worktree: nothing to follow after a move
+		}
 		wanted := map[string]bool{}
 		for _, name := range names {
 			wanted[name] = true
@@ -189,7 +212,7 @@ func (p *Ports) Allocate(worktreeID, worktreePath string, names []string) ([]Res
 				if !wanted[r.Name] {
 					continue
 				}
-				r.WorktreePath = worktreePath
+				r.WorktreePath, r.GitDir = worktreePath, gitDir
 				mine[r.Name] = r
 			case !p.Owner(r):
 				continue // stale: owner removed or re-identified
@@ -207,7 +230,7 @@ func (p *Ports) Allocate(worktreeID, worktreePath string, names []string) ([]Res
 			if err != nil {
 				return err
 			}
-			r := Reservation{Port: port, Name: name, WorktreeID: worktreeID, WorktreePath: worktreePath, ReservedAt: time.Now().UTC().Truncate(time.Second)}
+			r := Reservation{Port: port, Name: name, WorktreeID: worktreeID, WorktreePath: worktreePath, GitDir: gitDir, ReservedAt: time.Now().UTC().Truncate(time.Second)}
 			reg.Reservations = append(reg.Reservations, r)
 			taken[port] = true
 			result = append(result, r)

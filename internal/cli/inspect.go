@@ -424,8 +424,8 @@ func printStatusHuman(result agentResult) error {
 }
 
 func init() {
-	addJSONFlag(contextCmd)
-	addJSONFlag(statusCmd)
+	addJSONFlag(contextCmd, agentCommand{Name: "context", Human: printContextHuman})
+	addJSONFlag(statusCmd, agentCommand{Name: "status", Human: printStatusHuman})
 	statusCmd.Flags().Bool("all", false, "Summarize every worktree of the project")
 	rootCmd.AddCommand(contextCmd, statusCmd)
 }

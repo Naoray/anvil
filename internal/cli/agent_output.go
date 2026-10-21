@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -22,8 +23,7 @@ type agentResult struct {
 type agentCommand struct {
 	Name     string
 	Mutating bool
-	// DryRun marks mutating commands that implement --dry-run; every other
-	// mutating command refuses it before any effect.
+	// DryRun marks commands that implement a side-effect-free preview.
 	DryRun bool
 	// Human renders a successful result for terminals; nil prints nothing.
 	Human func(result agentResult) error
@@ -36,10 +36,8 @@ type agentCommand struct {
 func runAgentCommand(cmd *cobra.Command, spec agentCommand, fn func() (agentResult, error)) error {
 	jsonMode := mustGetBool(cmd, "json")
 	if spec.Mutating && !spec.DryRun && mustGetBool(cmd, "dry-run") {
-		// The command has no side-effect-free mode: refuse before fn runs.
 		fn = func() (agentResult, error) {
-			return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments,
-				"%s does not support --dry-run (it would have effects); use read-only commands to inspect first", spec.Name)
+			return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "%s does not support --dry-run", spec.Name)
 		}
 	}
 	if !jsonMode {
@@ -75,12 +73,66 @@ func runAgentCommand(cmd *cobra.Command, spec agentCommand, fn func() (agentResu
 }
 
 // addJSONFlag registers --json; JSON mode never prompts.
-func addJSONFlag(cmd *cobra.Command) {
+func addJSONFlag(cmd *cobra.Command, spec agentCommand) {
 	cmd.Flags().Bool("json", false, "Write one versioned JSON document to stdout (diagnostics go to stderr)")
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[agentMutatingAnnotation] = strconv.FormatBool(spec.Mutating)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	})
+}
+
+const agentMutatingAnnotation = "anvil.agent.mutating"
+
+// jsonRequested also sees flags after a parse error, without consuming child
+// arguments after -- or a value belonging to another known flag.
+func jsonRequested(cmd *cobra.Command, args []string) bool {
+	requested := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		if strings.HasPrefix(arg, "--") {
+			if name == "json" {
+				requested = true
+				if hasValue {
+					parsed, err := strconv.ParseBool(value)
+					requested = err == nil && parsed
+				}
+			}
+			if flag := cmd.Flags().Lookup(name); flag != nil && flag.NoOptDefVal == "" && !hasValue {
+				i++
+			}
+		} else if len(arg) == 2 && strings.HasPrefix(arg, "-") {
+			if flag := cmd.Flags().ShorthandLookup(arg[1:]); flag != nil && flag.NoOptDefVal == "" {
+				i++
+			}
+		}
+	}
+	return requested
+}
+
+// agentValidationError is the boundary for Cobra failures before RunE.
+func agentValidationError(cmd *cobra.Command, err error) error {
+	if cmd == nil {
+		return err
+	}
+	mutating, agentEnabled := cmd.Annotations[agentMutatingAnnotation]
+	var childErr *ChildExitError
+	if !agentEnabled || errors.As(err, &childErr) || !jsonRequested(cmd, os.Args[1:]) {
+		return err
+	}
+	if setErr := cmd.Flags().Set("json", "true"); setErr != nil {
+		return setErr
+	}
+	return runAgentCommand(cmd, agentCommand{Name: cmd.Name(), Mutating: mutating == "true"}, func() (agentResult, error) {
+		return agentResult{}, invalidArgs(err)
 	})
 }
 
@@ -94,40 +146,4 @@ func invalidArgs(err error) error {
 		return err
 	}
 	return agentapi.Wrap(agentapi.CodeInvalidArguments, err)
-}
-
-// jsonRequested reports whether --json was given, even when flag parsing
-// failed before cobra recorded it.
-func jsonRequested(cmd *cobra.Command) bool {
-	if cmd == nil || cmd.Flags().Lookup("json") == nil {
-		return false
-	}
-	if flag := cmd.Flags().Lookup("json"); flag.Changed {
-		return flag.Value.String() == "true"
-	}
-	for _, arg := range os.Args[1:] {
-		if arg == "--" {
-			break
-		}
-		if arg == "--json" || arg == "--json=true" || arg == "--json=1" {
-			return true
-		}
-	}
-	return false
-}
-
-// finishCommandError turns failures that happen before RunE (argument and
-// flag validation) into the same single JSON envelope agent commands write.
-func finishCommandError(cmd *cobra.Command, err error) error {
-	var childErr *ChildExitError
-	if errors.As(err, &childErr) || !jsonRequested(cmd) {
-		return err
-	}
-	classified := agentapi.Wrap(agentapi.CodeInvalidArguments, err)
-	name := strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
-	envelope := agentapi.NewEnvelope(name, false, nil, nil, classified)
-	if writeErr := envelope.Write(os.Stdout); writeErr != nil {
-		return &ChildExitError{Code: agentapi.ExitGeneral, Message: fmt.Sprintf("writing JSON response: %v", writeErr)}
-	}
-	return &ChildExitError{Code: classified.ExitCode(), Message: "error: " + classified.Message}
 }

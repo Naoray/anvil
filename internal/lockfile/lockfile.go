@@ -29,6 +29,10 @@ type Lock struct {
 // Path returns the lock file path.
 func (l *Lock) Path() string { return l.path }
 
+// File exposes the acquired handle only for exec inheritance. Callers must not
+// close or unlock it; Release remains the owner's responsibility.
+func (l *Lock) File() *os.File { return l.file }
+
 // Acquire blocks until the exclusive lock at path is held.
 func Acquire(path string) (*Lock, error) {
 	file, err := open(path)
@@ -43,16 +47,10 @@ func Acquire(path string) (*Lock, error) {
 
 // TryAcquire attempts the lock once. It returns ErrLocked when another holder
 // owns it.
-func TryAcquire(path string) (*Lock, error) {
-	return tryAcquire(path, false)
-}
+func TryAcquire(path string) (*Lock, error) { return tryAcquire(path, false) }
 
-// TryAcquireShared attempts a shared lock once. Any number of shared holders
-// may coexist; it returns ErrLocked while an exclusive holder owns the lock,
-// and an exclusive attempt fails while any shared holder exists.
-func TryAcquireShared(path string) (*Lock, error) {
-	return tryAcquire(path, true)
-}
+// TryAcquireShared allows concurrent readers and excludes an exclusive owner.
+func TryAcquireShared(path string) (*Lock, error) { return tryAcquire(path, true) }
 
 func tryAcquire(path string, shared bool) (*Lock, error) {
 	file, err := open(path)
@@ -72,52 +70,39 @@ func tryAcquire(path string, shared bool) (*Lock, error) {
 // AcquireTimeout retries TryAcquire until timeout elapses. A zero timeout
 // tries exactly once; a negative timeout blocks like Acquire.
 func AcquireTimeout(path string, timeout time.Duration) (*Lock, error) {
-	if timeout < 0 {
-		return Acquire(path)
-	}
-	deadline := time.Now().Add(timeout)
-	for {
-		lock, err := TryAcquire(path)
-		if err == nil || !errors.Is(err, ErrLocked) {
-			return lock, err
-		}
-		if !time.Now().Before(deadline) {
-			return nil, err
-		}
-		time.Sleep(pollInterval)
-	}
+	return AcquireContext(context.Background(), path, timeout)
 }
 
-// AcquireContext retries TryAcquire until it succeeds, timeout elapses
-// (ErrLocked) or ctx is done (ctx.Err()). A zero timeout tries exactly once;
-// a negative timeout waits until ctx is done.
+// AcquireContext retries without hiding cancellation. Negative timeouts wait
+// indefinitely, zero tries once; cancellation never starts a later acquisition.
 func AcquireContext(ctx context.Context, path string, timeout time.Duration) (*Lock, error) {
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		lock, err := TryAcquire(path)
-		if err == nil || !errors.Is(err, ErrLocked) {
-			return lock, err
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.Join(err, lock.Release())
+			}
+			return lock, nil
+		}
+		if !errors.Is(err, ErrLocked) {
+			return nil, err
 		}
 		if timeout >= 0 && !time.Now().Before(deadline) {
 			return nil, err
 		}
+		timer := time.NewTimer(pollInterval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
-
-// File returns the open lock file. Passing it to a child process keeps the
-// lock held for as long as that child (or anything inheriting it) lives,
-// even if this process dies; Release still unlocks it for everyone.
-func (l *Lock) File() *os.File { return l.file }
 
 // IsHeld reports whether another holder currently owns the lock. It acquires
 // and immediately releases the lock when free, so it never blocks.

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 const idA, idB = "wt_aaaaaaaaaaaaaaaa", "wt_bbbbbbbbbbbbbbbb"
@@ -170,17 +171,23 @@ func TestDirectoriesOwnershipAndRemoval(t *testing.T) {
 	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idB, WorktreePath: "/b"}))
 	_, _, err = ProvisionDirectories(root, idA, "/a", cfg)
 	require.ErrorContains(t, err, "belongs to")
-	removed, err := RemoveDirectories(root, idA, "/a")
+	removed, err := RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/a"})
 	require.Error(t, err)
 	require.False(t, removed)
 	require.DirExists(t, dirs.Root)
 
-	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idA, WorktreePath: "/a"}))
-	removed, err = RemoveDirectories(root, idA, "/a")
+	// An owner record that changed since it was validated is left alone.
+	require.NoError(t, writeOwner(dirs.Root, Owner{WorktreeID: idA, WorktreePath: "/moved"}))
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/a"})
+	require.ErrorContains(t, err, "leaving it in place")
+	require.False(t, removed)
+
+	// The validated record matches even when it names an old path.
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/moved"})
 	require.NoError(t, err)
 	require.True(t, removed)
 	require.NoDirExists(t, dirs.Root)
-	removed, err = RemoveDirectories(root, idA, "/a")
+	removed, err = RemoveDirectories(root, Owner{WorktreeID: idA, WorktreePath: "/moved"})
 	require.NoError(t, err)
 	require.False(t, removed)
 
@@ -209,4 +216,37 @@ func TestSharedResourcesAreNeverCreated(t *testing.T) {
 	cfg.Resources.Shared = []config.SharedResource{{Name: "rel", Path: "relative"}}
 	_, _, err = DescribeShared(cfg)
 	require.ErrorContains(t, err, "must be absolute")
+}
+
+// TestLiveOwnerFollowsMovedWorktree: a worktree moved with `git worktree move`
+// keeps its identity, so its port reservations stay live, not stale.
+func TestLiveOwnerFollowsMovedWorktree(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	repo := filepath.Join(base, "repo")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+	require.NoError(t, os.MkdirAll(repo, 0o755))
+	git("init", "-b", "main")
+	git("-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "--allow-empty", "-m", "init")
+	original := filepath.Join(base, "wt")
+	git("worktree", "add", "-b", "feature", original)
+	identity, _, err := wtstate.EnsureIdentity(original)
+	require.NoError(t, err)
+
+	ports := &Ports{Root: t.TempDir(), Low: 41100, High: 41109, Owner: LiveOwner, Bindable: canBind}
+	reserved, err := ports.Allocate(identity.ID, original, []string{"web"})
+	require.NoError(t, err)
+	require.True(t, LiveOwner(reserved[0]))
+
+	moved := filepath.Join(base, "wt-moved")
+	git("worktree", "move", original, moved)
+	require.True(t, LiveOwner(reserved[0]), "moved worktree still owns its port")
+
+	git("worktree", "remove", "--force", moved)
+	require.False(t, LiveOwner(reserved[0]), "removed worktree is stale")
 }

@@ -52,7 +52,7 @@ func TestIdentityHashesEachCommandsEffectiveEnvironment(t *testing.T) {
 	t.Setenv("SHLVL", "3")
 	before := f.identityWith(t, check, f.targetEnv(nil))
 	t.Setenv("SHLVL", "4")
-	require.Equal(t, before.EnvDigest, f.identityWith(t, check, f.targetEnv(nil)).EnvDigest, "volatile session variables are ignored")
+	require.NotEqual(t, before.EnvDigest, f.identityWith(t, check, f.targetEnv(nil)).EnvDigest, "every inherited non-secret value actually received affects identity")
 
 	t.Setenv("PR27_TOKEN", "one")
 	secretA := f.identityWith(t, check, f.targetEnv(nil))
@@ -72,20 +72,24 @@ func TestInputSymlinksAreContainedAndHashedByTarget(t *testing.T) {
 
 	check := config.CheckConfig{Name: "in", Commands: cmds("true"), Inputs: []string{"fixture"}}
 	_, err := ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
-	require.ErrorContains(t, err, "must stay inside", "a link inside an input directory may not escape")
+	require.ErrorContains(t, err, "symlink", "links cannot yield a reusable identity")
 
 	require.NoError(t, os.Remove(filepath.Join(dir, "input")))
 	inside := filepath.Join(f.worktree, "data.txt")
 	require.NoError(t, os.WriteFile(inside, []byte("good"), 0o644))
 	require.NoError(t, os.Symlink(inside, filepath.Join(dir, "input")))
-	good := f.identity(t, check)
+	_, err = ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
+	require.ErrorContains(t, err, "symlink")
 	require.NoError(t, os.WriteFile(inside, []byte("bad"), 0o644))
-	require.NotEqual(t, good.InputsDigest, f.identity(t, check).InputsDigest, "a permitted link contributes its target's content")
+	_, err = ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
+	require.ErrorContains(t, err, "symlink", "changed target contents cannot reuse a pass")
 
 	leaf := config.CheckConfig{Name: "leaf", Commands: cmds("true"), Inputs: []string{"fixture/input"}}
-	before := f.identity(t, leaf)
+	_, err = ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: leaf, Env: f.env()})
+	require.ErrorContains(t, err, "symlink")
 	require.NoError(t, os.WriteFile(inside, []byte("worse"), 0o644))
-	require.NotEqual(t, before.InputsDigest, f.identity(t, leaf).InputsDigest, "a leaf link is hashed by target content")
+	_, err = ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: leaf, Env: f.env()})
+	require.ErrorContains(t, err, "symlink", "a changed leaf link cannot reuse a pass")
 }
 
 func TestDirectoryArtifactsAreRecordedAndVerified(t *testing.T) {
@@ -94,10 +98,11 @@ func TestDirectoryArtifactsAreRecordedAndVerified(t *testing.T) {
 		Artifacts: []string{"${ANVIL_ARTIFACTS_DIR}/bundle"}}
 	result, err := Run(context.Background(), f.request(check))
 	require.NoError(t, err)
-	require.Equal(t, StatusPassed, result.Status)
-	require.Len(t, result.Artifacts, 1)
+	require.Equal(t, StatusError, result.Status)
+	require.Contains(t, result.Error, "directory artifacts are unsupported")
+	require.Empty(t, result.Artifacts)
 	intact, reason := ArtifactsIntact(result)
-	require.True(t, intact, reason)
+	require.False(t, intact, reason)
 
 	bundle := filepath.Join(f.runtime, "artifacts", "bundle")
 	require.NoError(t, os.WriteFile(filepath.Join(bundle, "result"), []byte("tampered\n"), 0o644))
@@ -109,7 +114,7 @@ func TestDirectoryArtifactsAreRecordedAndVerified(t *testing.T) {
 	require.False(t, intact, "added file")
 	require.NoError(t, os.Remove(filepath.Join(bundle, "extra")))
 	intact, _ = ArtifactsIntact(result)
-	require.True(t, intact)
+	require.False(t, intact, "restoring files does not make an unsupported directory artifact reusable")
 	require.NoError(t, os.Remove(filepath.Join(bundle, "result")))
 	intact, _ = ArtifactsIntact(result)
 	require.False(t, intact, "deleted file")
@@ -170,7 +175,7 @@ func TestLockWaitHonorsCancellationAndReleasesEarlierLocks(t *testing.T) {
 	request.LockWait = -1
 	start := time.Now()
 	result, err := Run(ctx, request)
-	require.ErrorIs(t, err, ErrInterrupted)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Nil(t, result)
 	require.Less(t, time.Since(start), 3*time.Second)
 	require.NoFileExists(t, marker, "no command started")
@@ -187,15 +192,15 @@ func TestToolchainProbesAreSupervised(t *testing.T) {
 
 	check := config.CheckConfig{Name: "probe", Commands: cmds("true"), Toolchain: []string{"sleep 30 & wait"}}
 	start := time.Now()
-	identity := f.identity(t, check)
+	_, err := ComputeIdentity(context.Background(), IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
 	require.Less(t, time.Since(start), 4*time.Second, "a grandchild holding stdout does not outlive the probe deadline")
-	require.NotEqual(t, 0, identity.Toolchain[0].ExitCode)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "a probe timeout cannot produce a reusable identity")
 
 	probeTimeout = time.Minute
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	start = time.Now()
-	_, err := ComputeIdentity(ctx, IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
+	_, err = ComputeIdentity(ctx, IdentityRequest{WorktreePath: f.worktree, RuntimeDir: f.runtime, Check: check, Env: f.env()})
 	require.Less(t, time.Since(start), 4*time.Second, "cancellation ends the probe")
 	require.Error(t, err, "a cancelled probe does not produce an identity")
 }

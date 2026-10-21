@@ -196,10 +196,13 @@ func writeAtomic(path string, content []byte) (err error) {
 }
 
 // RemoveDirectories deletes a worktree's runtime directory only when its
-// owner record names exactly this worktree identity and path. Shared
-// resources and anything outside the runtime directory are never touched.
-func RemoveDirectories(root, worktreeID, worktreePath string) (bool, error) {
-	dir, err := WorktreeDir(root, worktreeID)
+// owner record is still exactly expected, the record the caller validated
+// against the worktree's verified identity before removing the worktree. A
+// moved worktree keeps its ID, so the recorded path may be its old location.
+// Shared resources and anything outside the runtime directory are never
+// touched.
+func RemoveDirectories(root string, expected Owner) (bool, error) {
+	dir, err := WorktreeDir(root, expected.WorktreeID)
 	if err != nil {
 		return false, err
 	}
@@ -213,7 +216,7 @@ func RemoveDirectories(root, worktreeID, worktreePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if owner.WorktreeID != worktreeID || owner.WorktreePath != worktreePath {
+	if owner.WorktreeID != expected.WorktreeID || owner.WorktreePath != expected.WorktreePath || !owner.CreatedAt.Equal(expected.CreatedAt) {
 		return false, fmt.Errorf("runtime directory %s is owned by %s at %s; leaving it in place", dir, owner.WorktreeID, owner.WorktreePath)
 	}
 	if err := os.RemoveAll(dir); err != nil {

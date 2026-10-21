@@ -29,6 +29,7 @@ type worktreeEnv struct {
 	ComponentErr error
 	Component    *capabilities.ComponentPlan
 	Env          *workenv.Environment
+	PrepareEnv   *workenv.Environment
 
 	// Observed runtime resources (never created by loadWorktreeEnv).
 	RuntimeRoot string
@@ -105,6 +106,10 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 		GOOS:     runtime.GOOS,
 		LookPath: exec.LookPath,
 	})
+	var invalid *capabilities.InvalidPlanError
+	if errors.As(result.ComponentErr, &invalid) {
+		return nil, agentapi.Wrap(agentapi.CodeConfigInvalid, invalid)
+	}
 	var unknown *capabilities.UnknownComponentError
 	if errors.As(result.ComponentErr, &unknown) {
 		return nil, agentapi.Errorf(agentapi.CodeComponentNotFound, "%s", unknown.Error())
@@ -124,14 +129,23 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	if result.Identity != nil && result.IdentityStatus != wtstate.IdentityCopied {
 		identity.ID = result.Identity.ID
 	}
-	resourceVars := result.describeResources(identity.ID)
-	result.Env = workenv.Build(workenv.Options{
+	resourceVars := append(result.describeResources(identity.ID), opts.Resources...)
+	result.PrepareEnv = workenv.Build(workenv.Options{
 		Identity:  identity,
 		Config:    target.Config,
 		State:     result.State,
-		Component: component,
-		Resources: append(resourceVars, opts.Resources...),
+		Resources: resourceVars,
 	})
+	result.Env = result.PrepareEnv
+	if component != nil {
+		result.Env = workenv.Build(workenv.Options{
+			Identity:  identity,
+			Config:    target.Config,
+			State:     result.State,
+			Component: component,
+			Resources: resourceVars,
+		})
+	}
 	return result, nil
 }
 

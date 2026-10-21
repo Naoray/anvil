@@ -29,7 +29,11 @@ func acquireWorktreeUse(pc *ProjectContext, target git.Worktree) (*lockfile.Lock
 	if _, err := config.WorktreeGitDir(target.Path); err != nil {
 		return nil, errors.Join(agentapi.Wrap(agentapi.CodeWorktreeNotFound, fmt.Errorf("worktree disappeared during startup: %w", err)), gate.Release())
 	}
-	registered, err := lookupWorktree(pc, target.Path)
+	worktrees, err := git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, errors.Join(agentapi.Wrap(agentapi.CodeGitFailed, err), gate.Release())
+	}
+	registered, err := resolveExactWorktree(worktrees, target.Path)
 	if err != nil {
 		return nil, errors.Join(err, gate.Release())
 	}

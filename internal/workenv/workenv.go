@@ -195,14 +195,15 @@ func Build(opts Options) *Environment {
 		setExpanded(env, opts.Config.Env, SourceProject, declared)
 	}
 	if opts.Component != nil {
-		// Component identity is seeded first so component values can
-		// reference ${ANVIL_COMPONENT} and ${ANVIL_COMPONENT_DIR}.
-		for _, key := range []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"} {
-			if value, ok := opts.Component.Env[key]; ok {
-				env.Set(Variable{Name: key, Value: value, Source: SourceComponent})
+		values := make(map[string]string, len(opts.Component.Env))
+		for key, value := range opts.Component.Env {
+			if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
+				env.Set(Variable{Name: key, Value: value, Source: SourceAnvil})
+			} else {
+				values[key] = value
 			}
 		}
-		setExpanded(env, opts.Component.Env, SourceComponent, declared)
+		setExpanded(env, values, SourceComponent, declared)
 	}
 	return env
 }

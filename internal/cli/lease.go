@@ -133,7 +133,7 @@ func leaseSubcommand(use, short, long string, mutating bool, fn func(cmd *cobra.
 			})
 		},
 	}
-	addJSONFlag(command)
+	addJSONFlag(command, agentCommand{Name: "lease " + use, Mutating: mutating, Human: printLeaseHuman})
 	return command
 }
 

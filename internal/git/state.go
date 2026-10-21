@@ -97,14 +97,8 @@ func pathDigest(path string) (string, error) {
 		}
 		return "link:" + target, nil
 	case info.IsDir():
-		// Only nested repositories and submodules appear as directories.
-		// Their own checked-out commit and dirty contents identify them;
-		// state that cannot be identified fails closed.
-		nested, err := ReadWorkingState(path)
-		if err != nil {
-			return "", fmt.Errorf("identifying nested repository %s: %w", path, err)
-		}
-		return "repo:" + nested.Digest, nil
+		// The parent porcelain status cannot identify recursive dirty contents.
+		return "", fmt.Errorf("cannot identify dirty submodule or nested repository at %s; clean it before running or reusing checks", path)
 	case !info.Mode().IsRegular():
 		return "special", nil
 	}

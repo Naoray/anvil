@@ -3,7 +3,6 @@
 package checks
 
 import (
-	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -26,10 +25,4 @@ func killGroup(cmd *exec.Cmd) {
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
 		return // ESRCH: the group is already empty
 	}
-}
-
-// inheritFiles passes the run's lock files to the command (fds 3 and up), so
-// the operating system keeps them locked while the command lives.
-func inheritFiles(cmd *exec.Cmd, files []*os.File) {
-	cmd.ExtraFiles = files
 }

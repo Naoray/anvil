@@ -287,13 +287,12 @@ func TestResolvePathsRejectsSymlinkEscapes(t *testing.T) {
 
 	for _, pattern := range []string{"escape/secret", "escape/*", "leak"} {
 		_, err := ResolvePaths(f.worktree, f.runtime, []string{pattern}, nil)
-		require.ErrorContains(t, err, "must stay inside", pattern)
+		require.ErrorContains(t, err, "symlink", pattern)
 	}
 
 	inside := filepath.Join(f.worktree, "real")
 	require.NoError(t, os.MkdirAll(inside, 0o755))
 	require.NoError(t, os.Symlink(inside, filepath.Join(f.worktree, "alias")))
-	resolved, err := ResolvePaths(f.worktree, f.runtime, []string{"alias"}, nil)
-	require.NoError(t, err)
-	require.Len(t, resolved["alias"], 1)
+	_, err := ResolvePaths(f.worktree, f.runtime, []string{"alias"}, nil)
+	require.ErrorContains(t, err, "symlink", "inside-root aliases also fail closed")
 }

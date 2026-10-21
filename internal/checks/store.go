@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/naoray/anvil/internal/lockfile"
@@ -41,16 +40,11 @@ type CommandResult struct {
 	Log        string `json:"log"`
 }
 
-// ArtifactDirectory marks a directory artifact, whose SHA256 digests its
-// whole tree and Size totals its files.
-const ArtifactDirectory = "directory"
-
-// Artifact records one produced file or directory.
+// Artifact records one produced file.
 type Artifact struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
-	Kind   string `json:"kind,omitempty"`
 }
 
 // WorktreeRef identifies where a check ran.
@@ -62,6 +56,7 @@ type WorktreeRef struct {
 
 // Result is the persisted provenance of one check run.
 type Result struct {
+	Reused           bool            `json:"-"`
 	Schema           string          `json:"schema"`
 	RunID            string          `json:"run_id"`
 	Check            string          `json:"check"`
@@ -97,25 +92,7 @@ func newRunID(now time.Time) (string, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	return now.UTC().Format(runIDTime) + "-" + hex.EncodeToString(buf), nil
-}
-
-// runIDTime orders run IDs chronologically to the nanosecond; earlier
-// versions used whole seconds (legacyRunIDTime).
-const (
-	runIDTime       = "20060102T150405.000000000Z"
-	legacyRunIDTime = "20060102T150405Z"
-)
-
-// runTime parses the start time encoded in a run ID.
-func runTime(runID string) (time.Time, bool) {
-	stamp, _, _ := strings.Cut(runID, "-")
-	for _, layout := range []string{runIDTime, legacyRunIDTime} {
-		if parsed, err := time.Parse(layout, stamp); err == nil {
-			return parsed, true
-		}
-	}
-	return time.Time{}, false
+	return now.UTC().Format("20060102T150405.000000000Z") + "-" + hex.EncodeToString(buf), nil
 }
 
 func runLockPath(runDir string) string { return filepath.Join(runDir, "run.lock") }
@@ -191,48 +168,78 @@ func (s Store) Latest(check string) (*Result, error) {
 	return &result, nil
 }
 
-// prune keeps the most recent run directories by start time (ties broken
-// by ID), and never removes keep or the run latest.json refers to.
-func (s Store) prune(check, keep string) error {
+// prune keeps the most recent run directories.
+func (s Store) prune(check string) error {
 	runs, err := os.ReadDir(filepath.Join(s.checkDir(check), "runs"))
 	if err != nil {
 		return err
 	}
-	protected := map[string]bool{keep: true}
-	if latest, err := s.Latest(check); err == nil && latest != nil {
-		protected[latest.RunID] = true
+	latest, err := s.Latest(check)
+	if err != nil {
+		return err
 	}
-	var candidates []string
-	kept := 0
+	protected := ""
+	if latest != nil {
+		protected = latest.RunID
+	}
+	type savedRun struct {
+		name    string
+		started time.Time
+	}
+	var ordered []savedRun
 	for _, run := range runs {
 		if !run.IsDir() {
 			continue
 		}
-		if protected[run.Name()] {
-			kept++
+		info, err := run.Info()
+		if err != nil {
+			return err
+		}
+		started := info.ModTime()
+		data, err := os.ReadFile(filepath.Join(s.runDir(check, run.Name()), "result.json"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil {
+			var result Result
+			if err := json.Unmarshal(data, &result); err != nil {
+				return fmt.Errorf("reading retention chronology for %s: %w", run.Name(), err)
+			}
+			if !result.StartedAt.IsZero() {
+				started = result.StartedAt
+			}
+		}
+		ordered = append(ordered, savedRun{name: run.Name(), started: started})
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].started.Equal(ordered[j].started) {
+			return ordered[i].name < ordered[j].name
+		}
+		return ordered[i].started.Before(ordered[j].started)
+	})
+	remaining := len(ordered)
+	var problems []error
+	for _, run := range ordered {
+		if remaining <= retainedRuns {
+			break
+		}
+		if run.name == protected {
 			continue
 		}
-		candidates = append(candidates, run.Name())
-	}
-	// Oldest first; unparseable names sort before every dated run.
-	sort.Slice(candidates, func(i, j int) bool {
-		ti, okI := runTime(candidates[i])
-		tj, okJ := runTime(candidates[j])
-		if okI != okJ {
-			return !okI
+		held, err := lockfile.IsHeld(runLockPath(s.runDir(check, run.name)))
+		if err != nil {
+			return errors.Join(append(problems, err)...)
 		}
-		if !ti.Equal(tj) {
-			return ti.Before(tj)
+		if held {
+			continue
 		}
-		return candidates[i] < candidates[j]
-	})
-	var problems []error
-	for len(candidates)+kept > retainedRuns && len(candidates) > 0 {
-		if err := os.RemoveAll(s.runDir(check, candidates[0])); err != nil {
+		if err := os.RemoveAll(s.runDir(check, run.name)); err != nil {
 			problems = append(problems, err)
+		} else {
+			remaining--
 		}
-		candidates = candidates[1:]
 	}
+
 	return errors.Join(problems...)
 }
 

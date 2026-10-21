@@ -62,7 +62,7 @@ checks:
 const lockedCheckYAML = `checks:
   hold:
     locks: [gpu]
-    commands: ['echo $$ > "$HOLD_PID"; exec sleep 30']
+    commands: ['trap "" TERM; echo $$ > "$HOLD_PID"; exec sleep 30']
   other:
     locks: [gpu]
     commands: ["touch other.ran"]

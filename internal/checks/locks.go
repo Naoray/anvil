@@ -75,8 +75,7 @@ func (h heldLocks) release() error {
 
 // acquireResourceLocks takes every named lock in sorted order (avoiding
 // lock-order deadlocks between checks). A held lock is waited for up to
-// wait (forever when negative) or until ctx is done, which releases the
-// locks already taken; locks are only ever released by their holder or by the operating
+// wait; locks are only ever released by their holder or by the operating
 // system when the holder exits — never because time passed.
 func acquireResourceLocks(ctx context.Context, root string, names []string, wait time.Duration, holder LockHolder) (heldLocks, error) {
 	sorted := append([]string(nil), names...)
@@ -88,9 +87,6 @@ func acquireResourceLocks(ctx context.Context, root string, names []string, wait
 		}
 		lockPath, holderPath := lockPaths(root, name)
 		lock, err := lockfile.AcquireContext(ctx, lockPath, wait)
-		if ctx.Err() != nil {
-			return nil, errors.Join(ctx.Err(), held.release())
-		}
 		if errors.Is(err, lockfile.ErrLocked) {
 			current, holderErr := ReadHolder(root, name)
 			return nil, errors.Join(&BusyError{Lock: name, Holder: current}, holderErr, held.release())

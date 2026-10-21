@@ -6,9 +6,21 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lockfile"
 )
 
 const processesKey = "processes"
+
+// RunLockFile serializes managed-process start and stop per worktree. In the
+// lock order it comes after resource locks and before the local state lock.
+const RunLockFile = "anvil-run.lock"
+
+// AcquireRunLock blocks until this process may start or stop the worktree's
+// managed processes. Holding it across check, launch and record keeps
+// concurrent starts from launching the same process twice.
+func AcquireRunLock(worktreePath string) (*lockfile.Lock, error) {
+	return lockfile.Acquire(config.WorktreeLockPath(worktreePath, RunLockFile))
+}
 
 // ProcessRecord is a managed process Anvil started for this worktree. PID
 // alone is never trusted: Identity is the kernel start identity captured at
