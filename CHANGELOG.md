@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `anvil remove --json` emits one `anvil.agent/v1` document describing the removal plan or result (processes, ports, runtime directory, databases, branch). It never prompts: the worktree argument is required and removal needs `--force` unless `--dry-run` is given.
+
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.
+- Removing a worktree is no longer blocked by a sibling worktree whose directory was deleted; it is skipped with a warning suggesting `git worktree prune`. Locked siblings that are absent (for example on unmounted removable media) still block database cleanup.
+- Dry runs of `remove`, `prune` and `unlink --clean` never prompt or require `--force`, and never start database services. `prune --dry-run` no longer fetches origin.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21
 
