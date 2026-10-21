@@ -43,9 +43,11 @@ var startCmd = &cobra.Command{
 
 Each process runs detached through 'sh -c' in its own process group with the
 worktree environment (directories, ports, project and component env), stdin
-from /dev/null and output appended to $ANVIL_LOG_DIR/<name>.log. Anvil records
-the PID together with the kernel start time so a recycled PID is never
-mistaken for it. Already running processes are left alone. Directories and
+from /dev/null and output appended to $ANVIL_LOG_DIR/<name>.log. The group is
+led by a small Anvil supervisor that lives until every process in the group
+has exited, so commands that background their work stay tracked. Anvil
+records the leader PID together with its kernel start time so a recycled PID
+is never mistaken for it. Already running processes are left alone. Directories and
 ports are provisioned first, like 'anvil ensure'.
 
 Supported on macOS and Linux. Mutating.`,

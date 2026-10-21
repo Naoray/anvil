@@ -116,3 +116,50 @@ func TestConcurrentStartLaunchesOnce(t *testing.T) {
 		}, 5*time.Second, 20*time.Millisecond, "pid %d survived stop", pid)
 	}
 }
+
+const backgroundingProcessYAML = `processes:
+  - name: web
+    command: sleep 60 & exit 0
+    stop_timeout: 2s
+`
+
+// TestRestartOfSelfBackgroundingCommandIsAlreadyRunning reproduces review
+// finding 4912: a leader that exits at once while its own group keeps
+// running must read as already running, not trigger a second launch.
+func TestRestartOfSelfBackgroundingCommandIsAlreadyRunning(t *testing.T) {
+	f := newAgentFixture(t, backgroundingProcessYAML, nil)
+	f.env = subprocessEnvFrom(append(f.env, "ANVIL_PORT_RANGE=43300-43399"))
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/a")
+	require.Equal(t, 0, code, stderr)
+
+	var mu sync.Mutex
+	var pids []int
+	killGroupsOnCleanup(t, &mu, &pids)
+
+	envelope, stderr, code := f.runJSON(f.repo, "start", "feature-a")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "started", field(t, envelope, "data", "processes", 0, "result"))
+	first := int(field(t, envelope, "data", "processes", 0, "pid").(float64))
+	mu.Lock()
+	pids = append(pids, first)
+	mu.Unlock()
+	// Let the command's shell return, leaving only its background sleep.
+	time.Sleep(time.Second)
+
+	envelope, stderr, code = f.runJSON(f.repo, "start", "feature-a")
+	require.Equal(t, 0, code, stderr)
+	second := int(field(t, envelope, "data", "processes", 0, "pid").(float64))
+	mu.Lock()
+	pids = append(pids, second)
+	mu.Unlock()
+	require.Equal(t, "already_running", field(t, envelope, "data", "processes", 0, "result"))
+	require.Equal(t, first, second)
+
+	envelope, stderr, code = f.runJSON(f.repo, "stop", "feature-a")
+	require.Equal(t, 0, code, stderr)
+	require.Equal(t, "terminated", field(t, envelope, "data", "processes", 0, "result"))
+	require.Eventually(t, func() bool {
+		err := unix.Kill(-first, 0)
+		return errors.Is(err, unix.ESRCH)
+	}, 5*time.Second, 20*time.Millisecond, "background group stopped")
+}

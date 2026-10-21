@@ -30,9 +30,12 @@ type Started struct {
 	Identity string
 }
 
-// Start launches `sh -c Command` detached in its own session (so its PID is
-// also its process group ID), with stdin from /dev/null and output appended
-// to LogPath. The process keeps running after Anvil exits.
+// Start launches Command detached in its own session (so its PID is also its
+// process group ID), with stdin from /dev/null and output appended to
+// LogPath. The leader is this binary acting as supervisor: it runs
+// `sh -c Command` and lives until the whole group has exited, so a command
+// that backgrounds its work and returns still has a verifiable leader. The
+// process keeps running after Anvil exits.
 func Start(spec Spec) (Started, error) {
 	logFile, err := os.OpenFile(spec.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -42,7 +45,11 @@ func Start(spec Spec) (Started, error) {
 	if err != nil {
 		return Started{}, errors.Join(err, logFile.Close())
 	}
-	cmd := exec.Command("sh", "-c", spec.Command)
+	self, err := os.Executable()
+	if err != nil {
+		return Started{}, errors.Join(fmt.Errorf("locating supervisor: %w", err), logFile.Close(), devNull.Close())
+	}
+	cmd := exec.Command(self, SuperviseArg, spec.Command)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
 	cmd.Stdin = devNull
@@ -57,12 +64,9 @@ func Start(spec Spec) (Started, error) {
 	pid := cmd.Process.Pid
 	identity, err := StartIdentity(pid)
 	if errors.Is(err, ErrNoProcess) {
-		// The leader already exited (for example a command that backgrounds
-		// work and returns). Its process group may still hold our
-		// descendants: record it without an identity. Stop may then signal
-		// only a surviving group of the dead leader; once the PID is reused
-		// by anyone, the empty identity reads as unknown and is never
-		// signaled.
+		// The supervisor already exited, so the command finished and left
+		// no process in its group. The empty identity never verifies, so
+		// nothing is ever signaled for this record.
 		reap(cmd)
 		return Started{PID: pid}, closeErr
 	}

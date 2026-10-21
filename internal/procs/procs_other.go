@@ -32,6 +32,9 @@ const (
 	StopUnverifiable  StopResult = "not_signaled_unverifiable"
 )
 
+// Supervise never runs where managed processes are unsupported.
+func Supervise([]string) (int, bool) { return 0, false }
+
 // Start is unsupported without a verifiable process identity.
 func Start(Spec) (Started, error) { return Started{}, ErrUnsupported }
 

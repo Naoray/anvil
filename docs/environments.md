@@ -183,7 +183,10 @@ processes:
 
 `anvil start [WORKTREE] [--process NAME]` runs each process detached through
 `sh -c` in its own session/process group, with the worktree environment and
-output appended to `$ANVIL_LOG_DIR/<name>.log`. The PID is recorded in
+output appended to `$ANVIL_LOG_DIR/<name>.log`. The group leader is a small
+Anvil supervisor that stays alive until every process in the group has
+exited, so a command that backgrounds its work and returns (`server &`) is
+still `already_running` on the next start. The leader PID is recorded in
 `.anvil.local` together with the kernel start time (Linux `/proc/<pid>/stat`
 start ticks + boot ID; macOS `kern.proc.pid` start time). `anvil stop` signals
 the group only when the PID still has that start identity, or when the leader
