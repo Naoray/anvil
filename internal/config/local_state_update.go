@@ -72,10 +72,32 @@ func WorktreeExternalLockPath(worktreePath, name string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("anvil-locks-%d", os.Getuid()), hex.EncodeToString(sum[:8])+"-"+name)
 }
 
-// ReadLocalStateMap returns the raw .anvil.local document. A missing file is
-// an empty document.
-func ReadLocalStateMap(worktreePath string) (map[string]any, error) {
+// ReadLocalStateMap reads one snapshot under the writer's cross-process lock.
+// On Windows an open reader can block replacement, and replacement can block
+// an unlocked reader. A missing file is an empty document.
+func ReadLocalStateMap(worktreePath string) (doc map[string]any, err error) {
+	lock, err := lockfile.Acquire(WorktreeLockPath(worktreePath, LocalStateLockFile))
+	if err != nil {
+		return nil, fmt.Errorf("locking local state: %w", err)
+	}
+	defer func() { err = errors.Join(err, lock.Release()) }()
+	return readLocalStateMapLocked(worktreePath)
+}
+
+// readLocalStateMapLocked requires the caller to hold LocalStateLockFile.
+// Keep the only local-state file read here, shared by readers and updates.
+func readLocalStateMapLocked(worktreePath string) (map[string]any, error) {
 	path := filepath.Join(worktreePath, LocalStateFile)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stating local state: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("local state %s must be a regular file", path)
+	}
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return map[string]any{}, nil
@@ -96,7 +118,8 @@ func ReadLocalStateMap(worktreePath string) (map[string]any, error) {
 // UpdateLocalState performs one atomic, cross-process read-modify-write of
 // .anvil.local. fn receives the raw document and may mutate it; unknown fields
 // are preserved because the whole document round-trips. Returning an error
-// from fn leaves the file untouched. fn must not call UpdateLocalState.
+// from fn leaves the file untouched. fn must inspect doc rather than calling
+// local-state readers or writers: the state lock is already held.
 func UpdateLocalState(worktreePath string, fn func(doc map[string]any) error) (err error) {
 	lock, err := lockfile.Acquire(WorktreeLockPath(worktreePath, LocalStateLockFile))
 	if err != nil {
@@ -115,7 +138,7 @@ func UpdateLocalState(worktreePath string, fn func(doc map[string]any) error) (e
 		return fmt.Errorf("stating local state: %w", statErr)
 	}
 
-	doc, err := ReadLocalStateMap(worktreePath)
+	doc, err := readLocalStateMapLocked(worktreePath)
 	if err != nil {
 		return err
 	}

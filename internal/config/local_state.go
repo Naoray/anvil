@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -162,22 +161,12 @@ func ValidateOwnedDatabases(databases []OwnedDatabase) error {
 
 // ReadLocalState reads worktree-local state from .anvil.local.
 func ReadLocalState(worktreePath string) (*LocalState, error) {
-	configPath := filepath.Join(worktreePath, LocalStateFile)
-
-	if _, err := os.Stat(configPath); err != nil {
-		if os.IsNotExist(err) {
-			return &LocalState{}, nil
-		}
-		return nil, fmt.Errorf("stating local state: %w", err)
-	}
-
-	content, err := os.ReadFile(configPath)
+	doc, err := ReadLocalStateMap(worktreePath)
 	if err != nil {
-		return nil, fmt.Errorf("reading local state: %w", err)
+		return nil, err
 	}
-
 	var state LocalState
-	if err := yaml.Unmarshal(content, &state); err != nil {
+	if err := DecodeSection(doc, &state); err != nil {
 		return nil, fmt.Errorf("parsing local state: %w", err)
 	}
 
