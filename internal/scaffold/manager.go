@@ -222,6 +222,11 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	if err != nil {
 		return nil, fmt.Errorf("getting scaffold steps: %w", err)
 	}
+	for _, stepConfig := range stepConfigs {
+		if err := steps.ValidatePaths(worktreePath, stepConfig); err != nil {
+			return nil, err
+		}
+	}
 
 	if len(ctx.DatabaseActions) > 0 || len(ctx.ResetDatabases) > 0 {
 		found := false

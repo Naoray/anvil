@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/wtstate"
 )
@@ -195,6 +196,9 @@ type prepareRecorder struct {
 
 func (r *prepareRecorder) BeforeStep(index int, _ types.ScaffoldStep) (bool, string, error) {
 	entry := r.plan[index]
+	if err := steps.ValidatePaths(r.worktreePath, entry.cfg); err != nil {
+		return false, "", err
+	}
 	record, ok := r.records[entry.key]
 	if r.skipCompleted && entry.cacheable && ok && record.Definition == entry.definition {
 		root := stepRoot(r.worktreePath, entry.cfg)
@@ -229,6 +233,9 @@ func (r *prepareRecorder) AfterStep(index int, _ types.ScaffoldStep, stepErr err
 		return nil
 	}
 	entry := r.plan[index]
+	if err := steps.ValidatePaths(r.worktreePath, entry.cfg); err != nil {
+		return err
+	}
 	inputs, err := InputsDigest(stepRoot(r.worktreePath, entry.cfg), entry.cfg.Inputs)
 	if err != nil {
 		return fmt.Errorf("recording step inputs: %w", err)

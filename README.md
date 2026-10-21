@@ -1201,6 +1201,11 @@ All steps support these configuration options:
 
 Steps execute in the order they appear in the configuration file.
 
+Step directories, declared inputs/outputs and file conditions must remain inside
+the canonical worktree root, including through symlinks. Existing escaping links
+are rejected before preparation changes state or runs any step. Internal links
+are allowed.
+
 ### Conditions
 
 Steps can be conditionally executed based on environment. Conditions support both single values and arrays:

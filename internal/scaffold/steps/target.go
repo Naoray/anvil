@@ -31,7 +31,11 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 		if err := config.ValidateRelativePath(t.dir); err != nil {
 			return "", nil, err
 		}
-		dir = filepath.Join(ctx.WorktreePath, t.dir)
+		resolved, err := config.ResolveContainedPath(ctx.WorktreePath, filepath.Join(ctx.WorktreePath, t.dir))
+		if err != nil {
+			return "", nil, err
+		}
+		dir = resolved
 		info, err := os.Stat(dir)
 		if err != nil {
 			return "", nil, fmt.Errorf("step directory %s: %w", t.dir, err)
