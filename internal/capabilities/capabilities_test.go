@@ -24,7 +24,6 @@ func TestNodePackageManagerDetection(t *testing.T) {
 	cases := map[string][]string{
 		"pnpm install --frozen-lockfile": {"package.json", "pnpm-lock.yaml"},
 		"bun install --frozen-lockfile":  {"package.json", "bun.lock"},
-		"yarn install --immutable":       {"package.json", "yarn.lock", ".yarnrc.yml"},
 		"yarn install --frozen-lockfile": {"package.json", "yarn.lock"},
 		"npm ci":                         {"package.json", "package-lock.json"},
 		"npm install":                    {"package.json"},
@@ -39,6 +38,36 @@ func TestNodePackageManagerDetection(t *testing.T) {
 		require.Contains(t, c.Prepare[0].Inputs, "package.json")
 	}
 	require.Empty(t, Contribute("node", t.TempDir(), "linux").Prepare, "no manifest, no default command")
+}
+
+func TestYarnBerryOutputsFollowTheLinker(t *testing.T) {
+	cases := map[string][]string{
+		"":                           {".pnp.cjs"}, // PnP is Yarn Berry's default linker
+		"nodeLinker: pnp\n":          {".pnp.cjs"},
+		"nodeLinker: \"pnp\"\n":      {".pnp.cjs"},
+		"nodeLinker: node-modules\n": {"node_modules"},
+		"nodeLinker: pnpm\n":         {"node_modules"},
+	}
+	for yarnrc, want := range cases {
+		dir := t.TempDir()
+		write(t, dir, "package.json", "yarn.lock")
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".yarnrc.yml"), []byte(yarnrc), 0o644))
+		c := Contribute("node", dir, "linux")
+		require.Len(t, c.Prepare, 1, yarnrc)
+		require.Equal(t, "yarn install --immutable", c.Prepare[0].Run)
+		require.Equal(t, want, c.Prepare[0].Outputs, yarnrc)
+		require.Contains(t, c.Prepare[0].Inputs, ".yarnrc.yml", "linker configuration is a cache input")
+	}
+}
+
+func TestPythonRequirementsUsesPlatformInterpreter(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "requirements.txt")
+	posix := Contribute("python", dir, "linux").Prepare[0].Run
+	require.Contains(t, posix, "'.venv/bin/python' -m pip install")
+	windows := Contribute("python", dir, "windows").Prepare[0].Run
+	require.Contains(t, windows, "'.venv/Scripts/python.exe' -m pip install")
+	require.NotContains(t, windows, ".venv/bin/")
 }
 
 func TestStackDetection(t *testing.T) {

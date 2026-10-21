@@ -66,9 +66,9 @@ capability only contributes its requirements.
 
 | Capability | Detects | Default command | Inputs → outputs | Environment |
 |------------|---------|-----------------|------------------|-------------|
-| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile → `node_modules` | `node_modules/.bin` on PATH |
+| `node` | `pnpm-lock.yaml`, `bun.lock(b)`, `yarn.lock` (+`.yarnrc.yml` → Berry), `package-lock.json`, `package.json` | `pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --immutable` / `--frozen-lockfile`, `npm ci`, `npm install` | manifest + lockfile (+ `.yarnrc.yml`) → `node_modules`, or `.pnp.cjs` for Yarn Plug'n'Play (Berry's default `nodeLinker`) | `node_modules/.bin` on PATH |
 | `rust` | `Cargo.toml` (+`Cargo.lock`) | `cargo fetch [--locked]` | `Cargo.toml`, `Cargo.lock`, `rust-toolchain(.toml)` | — |
-| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` on PATH |
+| `python` | `uv.lock`, `poetry.lock`, `requirements.txt` | `uv sync --frozen`, `poetry install --no-interaction`, venv + pip | lockfile → `.venv` | `VIRTUAL_ENV`, `.venv/bin` (`.venv\Scripts` on Windows) on PATH |
 | `go` | `go.mod` | `go mod download` | `go.mod`, `go.sum` | — |
 | `php` | `composer.lock` | `composer install --no-interaction` | `composer.json`, `composer.lock` → `vendor` | `vendor/bin` on PATH |
 | `tauri` | `src-tauri/Cargo.toml` | `cargo fetch` in `src-tauri` | Cargo inputs under `src-tauri` | — |
@@ -77,7 +77,15 @@ capability only contributes its requirements.
 Anvil does not build projects by default (no `cargo build`, `tauri build`,
 `swift build`); declare such commands in `prepare` when you want them. Toolchain
 versions are not part of a step's identity — use `anvil ensure --refresh` after
-upgrading a toolchain.
+upgrading a toolchain. The declared environment is: changing a project `env`
+value, or a component or command `env` value after expansion, reruns the steps
+that receive it. Only a digest is recorded, never the values; `PATH` is left
+out so shell differences do not invalidate preparation.
+
+Component and prepare-command `env` values may reference `${ANVIL_COMPONENT}`
+and `${ANVIL_COMPONENT_DIR}`. Conditions (`when`, `platforms`) of every
+component are validated before any effect, including components skipped on
+this machine.
 
 The Laravel/PHP presets are unchanged and keep running through `scaffold`
 steps; components may be combined with a preset in one repository.
@@ -103,7 +111,16 @@ anvil run feature-x --require-ready -- make lint
 ```
 
 `--` is required. The child replaces Anvil (exit status passes through; 127 =
-not found, 126 = not executable). `run` is read-only and works whether or not a
+not found, 126 = not executable). COMMAND is looked up on the exported `PATH`
+(and `PATHEXT` on Windows), so component-local tools such as
+`node_modules/.bin` or `.venv/bin` win over global ones; a relative path is
+resolved against the child's directory.
+
+`--require-ready` refuses (`not_prepared`, exit 6) unless worktree preparation
+is complete; with `--component` the component's requirements must also be met
+and each of its applicable steps must have a current completion record (an
+opt-in component needs `anvil ensure --component NAME` first). Without
+`--require-ready` these are warnings on stderr. `run` is read-only and works whether or not a
 testing database exists. `anvil exec` keeps its database-specific semantics.
 
 ## Runtime resources
