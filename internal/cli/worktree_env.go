@@ -68,6 +68,10 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 		GOOS:     runtime.GOOS,
 		LookPath: exec.LookPath,
 	})
+	var invalid *capabilities.InvalidPlanError
+	if errors.As(result.ComponentErr, &invalid) {
+		return nil, agentapi.Wrap(agentapi.CodeConfigInvalid, invalid)
+	}
 	var unknown *capabilities.UnknownComponentError
 	if errors.As(result.ComponentErr, &unknown) {
 		return nil, agentapi.Errorf(agentapi.CodeComponentNotFound, "%s", unknown.Error())

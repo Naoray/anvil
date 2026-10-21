@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/types"
 )
 
 // Component plan statuses.
@@ -47,6 +48,9 @@ type Options struct {
 // does not exist, or when an applicable component with on_missing: fail lacks
 // required commands, so preparation can refuse before any effect.
 func Plan(worktreePath string, cfg *config.Config, opts Options) ([]ComponentPlan, error) {
+	if err := validateConditions(cfg.Components); err != nil {
+		return nil, &InvalidPlanError{Err: err}
+	}
 	selected := map[string]bool{}
 	for _, name := range opts.Selected {
 		if _, ok := cfg.FindComponent(name); !ok {
@@ -290,4 +294,28 @@ func Steps(plans []ComponentPlan) []config.StepConfig {
 		}
 	}
 	return steps
+}
+
+// InvalidPlanError identifies configuration errors independently of missing tools.
+type InvalidPlanError struct{ Err error }
+
+func (e *InvalidPlanError) Error() string { return e.Err.Error() }
+func (e *InvalidPlanError) Unwrap() error { return e.Err }
+
+func validateConditions(components []config.Component) error {
+	for _, component := range components {
+		if err := types.ValidateConditions(component.When); err != nil {
+			return fmt.Errorf("component %q: %w", component.Name, err)
+		}
+		steps, err := compileSteps(component, nil, component.ComponentDir(), nil)
+		if err != nil {
+			return fmt.Errorf("component %q: %w", component.Name, err)
+		}
+		for _, step := range steps {
+			if err := types.ValidateConditions(step.Condition); err != nil {
+				return fmt.Errorf("component %q prepare command: %w", component.Name, err)
+			}
+		}
+	}
+	return nil
 }
