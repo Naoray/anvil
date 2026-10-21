@@ -200,6 +200,16 @@ func (m *ScaffoldManager) Validate(request ScaffoldRequest) error {
 	return checkContainment(request.WorktreePath, stepConfigs)
 }
 
+// ValidateSteps creates steps without running them, validating their
+// options and conditions. Unlike Validate it checks no paths, so it can
+// cover steps of components that do not apply on this machine.
+func (m *ScaffoldManager) ValidateSteps(configs []config.StepConfig) error {
+	if _, err := m.stepsFromConfig(configs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	return nil
+}
+
 // RunScaffoldWithOptions validates every step before any effect, then runs
 // them under the worktree's preparation lock, persisting each completion as
 // it happens so interrupted or failed runs resume safely.
@@ -283,6 +293,7 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	opts.CopyMode = request.Warm.CopyMode
 
 	plan, planDigest := buildPlan(stepConfigs)
+	applyEnvDigests(plan, ctx.Env, sortedEnvKeys(cfg.Env))
 	recorder := &prepareRecorder{
 		worktreePath:  worktreePath,
 		plan:          plan,
@@ -685,4 +696,13 @@ func (m *ScaffoldManager) checkMissingFiles(ctx *types.ScaffoldContext, value an
 	}
 
 	return missing, errors
+}
+
+func sortedEnvKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
