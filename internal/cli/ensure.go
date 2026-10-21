@@ -92,27 +92,19 @@ type ensureOptions struct {
 	ReviewCommit string
 	Role         string
 	Task         wtstate.Task
-	LeaseOwner   string
-	LeaseToken   string
-	LeaseTTL     time.Duration
-	SessionID    string
-	Takeover     bool
+	Lease        leaseOptions
 }
 
 func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, error) {
 	opts := ensureOptions{
-		Role:       mustGetString(cmd, "role"),
-		Task:       wtstate.Task{ID: mustGetString(cmd, "task-id"), URL: mustGetString(cmd, "task-url"), PR: mustGetString(cmd, "pr")},
-		LeaseOwner: mustGetString(cmd, "lease-owner"),
-		LeaseToken: os.Getenv(LeaseTokenEnv),
-		SessionID:  mustGetString(cmd, "session-id"),
-		Takeover:   mustGetBool(cmd, "takeover-stale"),
+		Role: mustGetString(cmd, "role"),
+		Task: wtstate.Task{ID: mustGetString(cmd, "task-id"), URL: mustGetString(cmd, "task-url"), PR: mustGetString(cmd, "pr")},
 	}
-	ttl, err := cmd.Flags().GetDuration("lease-ttl")
+	lease, err := parseLeaseOptions(cmd)
 	if err != nil {
-		return opts, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return opts, err
 	}
-	opts.LeaseTTL = ttl
+	opts.Lease = lease
 	if opts.Role != "" && !wtstate.ValidRole(opts.Role) {
 		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--role must be implementation or review")
 	}
@@ -127,9 +119,6 @@ func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, 
 		opts.ReviewCommit, opts.Role = sha, wtstate.RoleReview
 	} else if opts.Role == wtstate.RoleReview {
 		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktrees are pinned to a commit: use --review COMMIT")
-	}
-	if opts.Takeover && opts.LeaseOwner == "" {
-		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--takeover-stale requires --lease-owner")
 	}
 	return opts, nil
 }
@@ -360,30 +349,8 @@ func recordEnsureClaims(target *git.Worktree, opts ensureOptions, data *ensureDa
 	} else if data.Metadata, err = wtstate.ReadMetadata(target.Path); err != nil {
 		return agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	if opts.LeaseOwner == "" {
-		lease, err := wtstate.ReadLease(target.Path)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeInternal, err)
-		}
-		data.Lease = newLeaseView(lease, now, "")
-		if lease.State(now) == wtstate.LeaseActive {
-			*warnings = append(*warnings, fmt.Sprintf("worktree is leased by %q (task %q); leases are advisory", lease.Owner, lease.TaskID))
-		}
-		return nil
-	}
-	lease, token, err := wtstate.AcquireLease(target.Path, wtstate.AcquireRequest{
-		WorktreeID: identity.ID, Token: opts.LeaseToken, Owner: opts.LeaseOwner, TaskID: opts.Task.ID,
-		SessionID: opts.SessionID, TTL: opts.LeaseTTL, TakeoverStale: opts.Takeover, Now: now,
-	})
-	if err != nil {
-		return leaseAPIError(err)
-	}
-	issued := ""
-	if token != opts.LeaseToken {
-		issued = token
-	}
-	data.Lease = newLeaseView(lease, now, issued)
-	return nil
+	data.Lease, err = applyLeaseOptions(target.Path, identity.ID, opts.Lease, opts.Task.ID, now, warnings)
+	return err
 }
 
 // prepareFailure names the failed step without copying child output into JSON.

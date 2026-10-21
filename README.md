@@ -152,6 +152,13 @@ anvil prune
 # Preview every merged worktree without prompting or fetching
 anvil prune --dry-run
 
+# Register Anvil identity for worktrees created outside Anvil (no scaffolding)
+anvil adopt --all
+
+# Evidence-based bulk prune: list candidates, then apply after rechecking
+anvil prune candidates --json --output candidates.json
+anvil prune apply --from candidates.json --dry-run
+
 # Run scaffold steps on an existing worktree
 anvil scaffold main
 anvil scaffold feature/user-auth
@@ -427,6 +434,112 @@ when lockfiles change. Toolchain version changes are not detected; use
 `--borrow-app-db`) behave exactly as on `work` and `scaffold`.
 
 See [docs/agent-api.md](docs/agent-api.md) for the JSON contract and exit codes.
+
+### `anvil adopt [WORKTREE] [--all]`
+
+Register an Anvil worktree identity for existing Git worktrees of the linked
+project **without** scaffolding or preparing anything:
+
+```bash
+anvil adopt feature-x                       # one worktree (exact folder, branch, path or ID)
+anvil adopt --all --json                    # every registered worktree on disk
+anvil adopt feature-x --lease-owner codex   # also acquire an advisory lease
+anvil adopt --all --dry-run                 # preview; writes nothing
+```
+
+Retrying is safe and keeps existing state exactly as `anvil ensure` would:
+`adopted` (new ID), `unchanged` (identity already matches), `updated` (the
+worktree moved: ID and lease kept, path updated) or `reassigned` (the state was
+copied from another live worktree: new ID, the original's lease and process
+records dropped from the copy). `--all` skips bare entries, missing
+directories and the main checkout (adopt the main checkout by naming it).
+Lease flags (`--lease-owner`, `--lease-ttl`, `--session-id`,
+`--takeover-stale`) behave as on `ensure`: an active lease held by another
+owner is never replaced (`lease_held`, exit 7).
+
+### `anvil prune candidates` / `anvil prune apply`
+
+An auditable alternative to interactive `anvil prune` for one project:
+
+```bash
+anvil prune candidates --json --output candidates.json   # read-only
+anvil prune apply --from candidates.json --dry-run        # recheck, change nothing
+anvil prune apply --from candidates.json --json           # recheck, then remove
+```
+
+`candidates` lists every worktree with `candidate`, `reasons[]` and
+`blockers[]` plus the evidence: merge state against `origin/<default>` (never
+fetched unless `--fetch`), GitHub PR state through `gh pr list` when available
+(an open PR blocks; an unavailable lookup does not; only a PR merged into the
+default branch counts as merged; `--no-pr` skips it), commits missing from
+every remote, tracked changes, untracked files (node_modules excluded),
+gitignored files, the lease (active blocks, stale warns), protected patterns,
+recent activity and processes holding files open beneath the worktree. Any
+evidence that is missing, failed or unsupported is a blocker. Git runs with
+`--no-optional-locks`, so the read-only scan never rewrites an index. The main
+checkout, bare, detached, locked and missing worktrees and the default branch
+are never candidates, and worktrees without an Anvil identity are blocked
+until adopted.
+
+- **Protected patterns**: `prune.protected` (globs matched against the branch
+  and the folder name) in the global `~/.config/anvil/anvil.yaml` and in the
+  project `anvil.yaml`, plus `--protect GLOB`. The default branch is always
+  protected.
+- **Ignored files**: removing a worktree deletes its gitignored files too
+  (`.env`, SQLite databases, `storage/`, build output). Every ignored path
+  outside `node_modules`, `vendor` and Anvil's `.anvil.local` blocks unless
+  allowed by `--allow-ignored GLOB` or `prune.allow_ignored` (global and
+  project, combined). A pattern matches the path relative to the worktree or
+  one of its parent directories, so `storage` allows everything below it.
+  Typical: `--allow-ignored .env` for scaffolded env files you can recreate.
+
+  ```yaml
+  prune:
+    protected:
+      - release/*
+    allow_ignored:
+      - .env
+      - storage
+  ```
+- **Recent activity** (`--recent`, default `24h`, minimum `10m`; it cannot be
+  disabled): the newest of the HEAD reflog (a missing reflog only warns),
+  tracked, untracked and ignored file modification times (excluding
+  `node_modules`, `vendor` and `.git`), the lease renewal and the latest check
+  result. Running checks always block.
+- **Open files**: on Linux every `/proc/<pid>` is inspected for `cwd`, `root`,
+  `exe`, open descriptors and memory maps beneath the worktree (a shell whose
+  current directory is inside it counts); on macOS `lsof` is used; elsewhere
+  the evidence is unsupported and blocks. Your own processes that cannot be
+  inspected (for example non-dumpable agents such as `ssh-agent`) block unless
+  you vouch for them with `--allow-uninspectable NAME`. That exempts every
+  process with that command name (the kernel's `comm`: truncated to 15
+  characters, and any process of yours can set it) in every worktree, so name
+  only processes that can never use one.
+- **Known gaps**: other users' processes that cannot be inspected only warn
+  by default (Linux counts them as `skipped_other_users`; on macOS they are
+  invisible to `lsof` and reported as `null`). A root-owned container (Docker,
+  Laravel Sail) or another account using the worktree is therefore **not
+  detected** unless you pass `--strict-processes`, which makes them block (on
+  macOS it always blocks, since they cannot be inspected there). Processes in
+  other mount or PID namespaces are not detected at all. The default is
+  permissive here only because system daemons are always uninspectable for
+  non-root users, so blocking would make pruning unusable; use leases or
+  `--strict-processes` when containers share worktrees.
+
+`apply` validates the file (schema `anvil.prune-candidates/v1`, the same Git
+common directory as the current project) and, for each entry marked
+`candidate: true`, that it is still a registered worktree at the same
+canonical path with the same worktree ID, branch and HEAD (a file listing a
+path or ID twice is refused). It then collects all
+evidence again, and once more under the exclusive lifecycle gate immediately
+before removal; any blocker skips the entry. Its own `--recent`, `--protect`
+and process flags apply, only ever strengthened by the file's settings
+(ignored paths may be deleted only if both the file and the current
+invocation allow them), so a stale or edited file cannot override current
+checks. Removal goes through the
+same lifecycle as `anvil remove` (never `--ignore-lease`; `--keep-db`
+supported; branches are kept). A process that starts using the worktree outside
+Anvil between the final recheck and `git worktree remove` is not detected.
 
 ### `anvil run [WORKTREE] -- COMMAND`
 

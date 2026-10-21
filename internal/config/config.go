@@ -134,6 +134,7 @@ type Config struct {
 	Processes  []ProcessConfig   `mapstructure:"-"`
 	Checks     Checks            `mapstructure:"-"`
 	Roles      RolesConfig       `mapstructure:"-"`
+	Prune      PruneConfig       `mapstructure:"-"`
 }
 
 // environmentDocument holds the case-sensitive environment sections of anvil.yaml.
@@ -145,6 +146,7 @@ type environmentDocument struct {
 	Processes  []ProcessConfig   `yaml:"processes"`
 	Checks     Checks            `yaml:"checks"`
 	Roles      RolesConfig       `yaml:"roles"`
+	Prune      PruneConfig       `yaml:"prune"`
 }
 
 func (d environmentDocument) apply(c *Config) {
@@ -155,6 +157,7 @@ func (d environmentDocument) apply(c *Config) {
 	c.Processes = d.Processes
 	c.Checks = d.Checks
 	c.Roles = d.Roles
+	c.Prune = d.Prune
 }
 
 // SyncConfig represents sync configuration for the sync command
@@ -283,6 +286,7 @@ type GlobalConfig struct {
 	SetupComplete       bool                    `mapstructure:"setup_complete"`
 	DefaultProjectsRoot string                  `mapstructure:"default_projects_root"`
 	SiteDriver          SiteDriver              `mapstructure:"site_driver"`
+	Prune               PruneConfig             `mapstructure:"prune"`
 }
 
 // ResolveSiteDriver returns the configured site driver, or detects one from PATH.
@@ -380,6 +384,9 @@ func LoadProject(path string) (*Config, error) {
 	environment.apply(&config)
 	if err := config.ValidateEnvironment(); err != nil {
 		return nil, fmt.Errorf("invalid environment configuration: %w", err)
+	}
+	if err := config.Prune.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return &config, nil
 }
@@ -726,6 +733,17 @@ func SaveGlobalConfig(config *GlobalConfig) error {
 
 	if config.SiteDriver != "" {
 		configMap["site_driver"] = config.SiteDriver
+	}
+
+	if len(config.Prune.Protected) > 0 || len(config.Prune.AllowIgnored) > 0 {
+		prune := map[string]any{}
+		if len(config.Prune.Protected) > 0 {
+			prune["protected"] = config.Prune.Protected
+		}
+		if len(config.Prune.AllowIgnored) > 0 {
+			prune["allow_ignored"] = config.Prune.AllowIgnored
+		}
+		configMap["prune"] = prune
 	}
 
 	if config.Projects != nil {

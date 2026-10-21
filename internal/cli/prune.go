@@ -44,7 +44,14 @@ against origin/<default-branch>, and provides an interactive review before remov
 --dry-run previews every merged worktree without prompting, without --force
 and without fetching: merge status is checked against the current
 remote-tracking refs, and nothing is removed (coordination lock files are
-still taken).`,
+still taken).
+
+For an auditable, evidence-based workflow use the subcommands:
+  anvil prune candidates --json --output FILE   (read-only)
+  anvil prune apply --from FILE [--dry-run]     (rechecks everything)`,
+		// Unknown words are refused rather than ignored, so a mistyped
+		// subcommand never runs a bulk removal.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, deps)
 		},
@@ -336,5 +343,6 @@ func pruneProjectWithDependencies(
 }
 
 func init() {
+	pruneCmd.AddCommand(newPruneCandidatesCommand(), newPruneApplyCommand())
 	rootCmd.AddCommand(pruneCmd)
 }

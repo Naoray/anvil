@@ -1,0 +1,129 @@
+package procs
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
+
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// startHolder runs `sleep` with its working directory elsewhere and stdin
+// opened on file, so only its file descriptor table references dir.
+func startHolder(t *testing.T, file, cwd string) *exec.Cmd {
+	t.Helper()
+	handle, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "60")
+	cmd.Dir = cwd
+	cmd.Stdin = handle
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cmd.Process.Kill(); err != nil {
+			t.Logf("killing holder: %v", err)
+		}
+		if err := cmd.Wait(); err != nil {
+			t.Logf("holder exited: %v", err)
+		}
+	})
+	return cmd
+}
+
+func TestOpenFileSnapshotFindsFileDescriptorHolder(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("procfs scanning is Linux-only; macOS uses lsof")
+	}
+	dir := canonicalTempDir(t)
+	file := filepath.Join(dir, "held.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := canonicalTempDir(t)
+	holder := startHolder(t, file, other)
+
+	var holders []Holder
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot, err := ScanOpenFiles()
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if snapshot.Method != MethodProcfs {
+			t.Fatalf("method = %q, want %q", snapshot.Method, MethodProcfs)
+		}
+		holders = snapshot.Holders(dir)
+		if len(holders) > 0 || time.Now().After(deadline) {
+			if got := snapshot.Holders(other); len(got) != 1 || got[0].PID != holder.Process.Pid {
+				// The holder's cwd is `other`; it must be reported via cwd.
+				t.Fatalf("holders of cwd directory = %+v", got)
+			}
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(holders) != 1 || holders[0].PID != holder.Process.Pid {
+		t.Fatalf("holders = %+v, want pid %d", holders, holder.Process.Pid)
+	}
+	if !strings.Contains(strings.Join(holders[0].Via, ","), "fd") {
+		t.Fatalf("via = %v, want fd", holders[0].Via)
+	}
+	if holders[0].Path != file {
+		t.Fatalf("path = %q, want %q", holders[0].Path, file)
+	}
+}
+
+func TestOpenFileSnapshotIgnoresSiblingPrefix(t *testing.T) {
+	snapshot := Snapshot{Method: MethodProcfs, processes: []processPaths{{pid: 7, command: "x", paths: map[string][]string{"/w/app-2/f": {"fd"}}}}}
+	if got := snapshot.Holders("/w/app"); len(got) != 0 {
+		t.Fatalf("a sibling sharing a name prefix is not beneath the directory: %+v", got)
+	}
+	if got := snapshot.Holders("/w/app-2"); len(got) != 1 {
+		t.Fatalf("holders = %+v", got)
+	}
+}
+
+func TestParseLsofOutput(t *testing.T) {
+	output := "p101\ncvim\nfcwd\nn/w/app\nf3\nn/w/app/main.go\np202\ncbash\nfcwd\nn/home/me\n"
+	snapshot, err := parseLsof([]byte(output), 999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := snapshot.Holders("/w/app")
+	if len(got) != 1 || got[0].PID != 101 || got[0].Command != "vim" {
+		t.Fatalf("holders = %+v", got)
+	}
+	if len(snapshot.Holders("/home/me")) != 1 {
+		t.Fatalf("cwd holder missing")
+	}
+	if _, err := parseLsof([]byte("pnotanumber\n"), 999); err == nil {
+		t.Fatal("malformed lsof output must fail closed")
+	}
+}
+
+func TestParseLsofOutputSkipsSelf(t *testing.T) {
+	snapshot, err := parseLsof([]byte("p5\ncanvil\nn/w/app\n"), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.Holders("/w/app"); len(got) != 0 {
+		t.Fatalf("own process must be skipped: %+v", got)
+	}
+}
