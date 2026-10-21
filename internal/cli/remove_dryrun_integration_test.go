@@ -213,6 +213,42 @@ func TestRemoveDryRunIsNonInteractiveAndMutatesNothing(t *testing.T) {
 	require.NoError(t, err, "dry runs never stop processes")
 }
 
+// databases.suffix appears only when legacy suffix-based cleanup applies: a
+// db_suffix, no exact records and a db.destroy step that would act.
+func TestRemoveJSONReportsSuffixOnlyForLegacyCleanup(t *testing.T) {
+	for name, tc := range map[string]struct {
+		yaml    string
+		records bool
+		keepDB  bool
+		suffix  any
+	}{
+		"no db.destroy step":    {yaml: "", suffix: nil},
+		"exact records":         {yaml: "cleanup:\n  steps:\n    - name: db.destroy\n", records: true, suffix: nil},
+		"keep-db":               {yaml: "cleanup:\n  steps:\n    - name: db.destroy\n", keepDB: true, suffix: nil},
+		"legacy suffix cleanup": {yaml: "cleanup:\n  steps:\n    - name: db.destroy\n", suffix: "legacy_sfx"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAgentFixture(t, tc.yaml, nil)
+			wt := f.worktreePath("feature-x")
+			require.NoError(t, os.MkdirAll(filepath.Dir(wt), 0o755))
+			gitRun(t, f.repo, "worktree", "add", "-b", "feature/x", wt)
+			state := config.LocalState{DbSuffix: "legacy_sfx"}
+			if tc.records {
+				state.Databases = []config.OwnedDatabase{ownedDatabaseRecord("demo_x")}
+			}
+			require.NoError(t, config.WriteLocalState(wt, state))
+			args := []string{"remove", "feature-x", "--dry-run"}
+			if tc.keepDB {
+				args = append(args, "--keep-db")
+			}
+			envelope, stderr, code := f.runJSON(f.repo, args...)
+			require.Equal(t, 0, code, stderr)
+			databases := field(t, envelope, "data", "databases").(map[string]any)
+			require.Equal(t, tc.suffix, databases["suffix"])
+		})
+	}
+}
+
 func TestRemoveJSONNeverPrompts(t *testing.T) {
 	f := newRemoveFixture(t)
 	a := f.worktreePath("feature-a")

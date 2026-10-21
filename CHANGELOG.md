@@ -12,10 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `anvil adopt [WORKTREE] | --all` records Anvil identity (and, with `--lease-owner`, a lease) for existing worktrees without scaffolding; safe to retry, keeps moved/copied semantics of `ensure`, never replaces another owner's active lease; `--dry-run` and `--json`.
 - `anvil prune candidates` (read-only) reports per-worktree prune candidacy with reasons, blockers and evidence: merge and GitHub PR state, unpushed commits, tracked/untracked/ignored files, leases, protected patterns (`prune.protected`, `--protect`), recent activity (minimum 10m window) and processes holding files open (procfs on Linux including mount namespaces, lsof on macOS). Missing evidence blocks.
 - `anvil prune apply --from FILE --force|--dry-run` removes only the file's candidates after validating them against the current repository and rechecking all evidence, last under the exclusive lifecycle gate; a stale or edited file cannot weaken current checks.
+- `anvil remove --json` emits one `anvil.agent/v1` document describing the removal plan or result (processes, ports, runtime directory, databases, branch). It never prompts: the worktree argument is required and removal needs `--force` unless `--dry-run` is given.
 
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.
+- Removing a worktree is no longer blocked by a sibling worktree whose directory was deleted; it is skipped with a warning suggesting `git worktree prune`. Locked siblings that are absent (for example on unmounted removable media) still block database cleanup.
+- Dry runs of `remove`, `prune` and `unlink --clean` never prompt or require `--force`, and never start database services. `prune --dry-run` no longer fetches origin.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21
 

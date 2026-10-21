@@ -282,7 +282,9 @@ not running, `targets` holds only the recorded names and a warning says
 `parallel-worker databases not enumerated: service not running`.
 `databases.action` is `drop` (a `db.destroy` cleanup step is configured; its
 condition is not evaluated for the plan), `preserve` (`--keep-db`) or
-`untouched`; a legacy worktree reports `suffix` instead of names. `branch.delete` reflects `--delete-branch`. Errors:
+`untouched`; `suffix` appears only when legacy suffix-based cleanup applies: the
+worktree has a `db_suffix`, no exact database records, and `action` is `drop`.
+`branch.delete` reflects `--delete-branch`. Errors:
 `worktree_not_found` (3), `lease_held` (7), `cleanup_blocked` (7: checks or
 preparation running, a borrower, unreadable or malformed state, a locked
 worktree, a locked registered worktree that is absent). An unlocked registered

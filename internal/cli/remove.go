@@ -127,7 +127,8 @@ type removeDatabases struct {
 	// drop, including enumerated parallel-worker databases. Empty when the
 	// step did not run or its service was not running during a dry run.
 	Targets []string `json:"targets"`
-	// Suffix identifies a legacy worktree's databases when names are unknown.
+	// Suffix identifies a legacy worktree's databases when names are unknown:
+	// present only with a db_suffix, no exact records and action drop.
 	Suffix string `json:"suffix,omitempty"`
 }
 
@@ -140,6 +141,9 @@ type removeBranch struct {
 type removeReport struct {
 	data     *removeData
 	warnings []string
+	// legacySuffix is a db_suffix without exact records; it is reported only
+	// when db.destroy acts on it.
+	legacySuffix string
 }
 
 // note prints a lifecycle message; WARNING-prefixed messages are also
@@ -296,6 +300,7 @@ func runRemoveLifecycle(
 		options.Report.data.Databases.Action = "untouched"
 		if !cleanupOpts.SkipDatabaseCleanup && hasCleanupStep(config.StepDbDestroy, resolvedPreset.CleanupSteps(), pc.Config.Cleanup.Steps) {
 			options.Report.data.Databases.Action = "drop"
+			options.Report.data.Databases.Suffix = options.Report.legacySuffix
 		}
 	}
 
@@ -679,7 +684,7 @@ func (r *removeReport) recordDatabases(path string, keepDB bool, read func(strin
 		r.data.Databases.Names = append(r.data.Databases.Names, database.Name)
 	}
 	if len(state.Databases) == 0 {
-		r.data.Databases.Suffix = state.DbSuffix
+		r.legacySuffix = state.DbSuffix
 	}
 	if keepDB {
 		r.data.Databases.Action = "preserve"
