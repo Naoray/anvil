@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Component is one independently prepared part of a repository, such as a
@@ -177,5 +178,137 @@ func (c *Config) ValidateEnvironment() error {
 			}
 		}
 	}
+	if err := c.validateResources(); err != nil {
+		problems = append(problems, err)
+	}
 	return errors.Join(problems...)
+}
+
+// ResourcesConfig declares runtime resources owned by each worktree.
+type ResourcesConfig struct {
+	// Directories are extra named writable directories in the worktree's
+	// runtime area, exported as ANVIL_DIR_<NAME>. The standard state, tmp,
+	// cache, logs and artifacts directories always exist.
+	Directories []string `yaml:"directories"`
+	// Ports are stable per-worktree development ports, exported as
+	// ANVIL_PORT_<NAME> (and Env when set).
+	Ports []PortConfig `yaml:"ports"`
+	// Shared are read-only resources used in place, never copied or deleted.
+	Shared []SharedResource `yaml:"shared"`
+}
+
+// PortConfig declares one named port.
+type PortConfig struct {
+	Name string `yaml:"name"`
+	Env  string `yaml:"env"`
+}
+
+// SharedResource is a machine-wide resource (for example cached model
+// weights) exported as ANVIL_SHARED_<NAME>. Anvil never copies, writes or
+// deletes it; read-only use is a convention, not an enforced permission.
+type SharedResource struct {
+	Name     string `yaml:"name"`
+	Path     string `yaml:"path"`
+	Env      string `yaml:"env"`
+	Required bool   `yaml:"required"`
+}
+
+// ProcessConfig declares one managed development process.
+type ProcessConfig struct {
+	Name      string            `yaml:"name"`
+	Command   string            `yaml:"command"`
+	Component string            `yaml:"component"`
+	Env       map[string]string `yaml:"env"`
+	// StopTimeout is how long `anvil stop` waits after SIGTERM before SIGKILL.
+	StopTimeout string `yaml:"stop_timeout"`
+}
+
+var resourceNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// ResourceEnvSuffix converts a resource name into an environment suffix.
+func ResourceEnvSuffix(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+}
+
+func (c *Config) validateResources() error {
+	var problems []error
+	names := func(kind string, list []string) {
+		seen := map[string]bool{}
+		for _, name := range list {
+			if !resourceNamePattern.MatchString(name) {
+				problems = append(problems, fmt.Errorf("resources.%s: invalid name %q (use lowercase letters, digits, '_' or '-')", kind, name))
+			}
+			if seen[name] {
+				problems = append(problems, fmt.Errorf("resources.%s: duplicate name %q", kind, name))
+			}
+			seen[name] = true
+		}
+	}
+	reserved := map[string]bool{"state": true, "tmp": true, "cache": true, "logs": true, "artifacts": true}
+	for _, name := range c.Resources.Directories {
+		if reserved[name] {
+			problems = append(problems, fmt.Errorf("resources.directories: %q is always provided", name))
+		}
+	}
+	names("directories", c.Resources.Directories)
+	var portNames, sharedNames []string
+	for _, port := range c.Resources.Ports {
+		portNames = append(portNames, port.Name)
+		if port.Env != "" && !IsValidEnvName(port.Env) {
+			problems = append(problems, fmt.Errorf("resources.ports %q: invalid env name %q", port.Name, port.Env))
+		}
+	}
+	names("ports", portNames)
+	for _, shared := range c.Resources.Shared {
+		sharedNames = append(sharedNames, shared.Name)
+		if shared.Path == "" {
+			problems = append(problems, fmt.Errorf("resources.shared %q: path is required", shared.Name))
+		}
+		if shared.Env != "" && !IsValidEnvName(shared.Env) {
+			problems = append(problems, fmt.Errorf("resources.shared %q: invalid env name %q", shared.Name, shared.Env))
+		}
+	}
+	names("shared", sharedNames)
+
+	var processNames []string
+	for _, process := range c.Processes {
+		processNames = append(processNames, process.Name)
+		if strings.TrimSpace(process.Command) == "" {
+			problems = append(problems, fmt.Errorf("processes %q: command is required", process.Name))
+		}
+		if process.Component != "" {
+			if _, ok := c.FindComponent(process.Component); !ok {
+				problems = append(problems, fmt.Errorf("processes %q: unknown component %q", process.Name, process.Component))
+			}
+		}
+		if err := validateEnvMap(process.Env); err != nil {
+			problems = append(problems, fmt.Errorf("processes %q: env: %w", process.Name, err))
+		}
+		if process.StopTimeout != "" {
+			if _, err := time.ParseDuration(process.StopTimeout); err != nil {
+				problems = append(problems, fmt.Errorf("processes %q: stop_timeout: %w", process.Name, err))
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, name := range processNames {
+		if !resourceNamePattern.MatchString(name) {
+			problems = append(problems, fmt.Errorf("processes: invalid name %q", name))
+		}
+		if seen[name] {
+			problems = append(problems, fmt.Errorf("processes: duplicate name %q", name))
+		}
+		seen[name] = true
+	}
+	return errors.Join(problems...)
+}
+
+// FindProcess returns the named process definition.
+func (c *Config) FindProcess(name string) (*ProcessConfig, bool) {
+	for i := range c.Processes {
+		if c.Processes[i].Name == name {
+			return &c.Processes[i], true
+		}
+	}
+	return nil, false
 }

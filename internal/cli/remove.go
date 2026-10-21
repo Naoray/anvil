@@ -137,6 +137,24 @@ func runRemoveLifecycle(
 		deps.printInfoMessage(message)
 	}
 
+	runtimePlan, err := planRuntimeCleanup(worktree.Path)
+	if err != nil {
+		return fmt.Errorf("inspecting runtime resources: %w", err)
+	}
+	if options.DryRun {
+		for _, line := range runtimePlan.describe("[DRY RUN] Would ") {
+			deps.printInfoMessage(line)
+		}
+	} else {
+		stopped, err := runtimePlan.stopProcesses(pc.Config)
+		for _, status := range stopped {
+			deps.printInfoMessage(fmt.Sprintf("Process %s: %s", status.Name, status.Result))
+		}
+		if err != nil {
+			return fmt.Errorf("stopping managed processes (worktree kept): %w", err)
+		}
+	}
+
 	resolvedPreset := deps.resolvePreset(pc, "", worktree.Path)
 
 	if options.Verbose && resolvedPreset.Name() != "" {
@@ -166,6 +184,14 @@ func runRemoveLifecycle(
 
 	if err := deps.removeWorktree(pc.GitDir, worktree.Path, true); err != nil {
 		return fmt.Errorf("removing worktree: %w", err)
+	}
+	for _, line := range runtimePlan.describe("Released: ") {
+		if options.Verbose {
+			deps.printInfoMessage(line)
+		}
+	}
+	if err := runtimePlan.release(); err != nil {
+		return fmt.Errorf("worktree removed, but runtime cleanup failed: %w", err)
 	}
 	return nil
 }

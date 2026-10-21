@@ -128,6 +128,15 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 			Cause:   wenv.ComponentErr,
 		}
 	}
+	if wenv.SharedErr != nil {
+		summary, warnings := summarizeWorktree(*target)
+		data.Worktree = summary
+		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
+			Code:    agentapi.CodePrepareFailed,
+			Message: fmt.Sprintf("%v (nothing was changed)", wenv.SharedErr),
+			Cause:   wenv.SharedErr,
+		}
+	}
 	targetPC := wenv.PC
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
@@ -144,6 +153,12 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
+	}
+	if err := provisionResources(wenv); err != nil {
+		return agentResult{Data: data}, err
+	}
+	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+		return agentResult{}, err
 	}
 	// Match the naming used by the command that would otherwise have run:
 	// `anvil work` for new worktrees, `anvil scaffold` for existing ones.
