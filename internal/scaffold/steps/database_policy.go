@@ -10,10 +10,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
+	"github.com/naoray/anvil/internal/resources"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/utils"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 type databaseAction struct {
@@ -260,6 +263,11 @@ func (s *DbMigrateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 			return fmt.Errorf("database %q role=testing is not recorded as owned by this worktree; refusing %s", action.Name, action.Action)
 		}
 		if action.Action == "fresh" {
+			if !opts.DryRun {
+				if err := ensureNoRunningChecks(ctx.WorktreePath, action.Name); err != nil {
+					return err
+				}
+			}
 			if err := ensureUnsharedDatabase(ctx, action.Name); err != nil {
 				return err
 			}
@@ -422,7 +430,39 @@ func ensureUnsharedDatabase(ctx *types.ScaffoldContext, name string) error {
 	return nil
 }
 
-const freshRefusalRemedy = "use database_actions: {testing: migrate} for a non-destructive migration, or remove the other worktree's record of it"
+const freshRefusalRemedy = "rerun without --db-action testing=fresh for a non-destructive migration, or remove the other worktree's record of it"
+
+// ensureNoRunningChecks refuses a fresh rebuild while any check of this
+// worktree runs, since checks may use the testing database. Checks only hold
+// the shared lifecycle gate, like preparation, so this is the sole guard; a
+// runtime directory that cannot be resolved fails closed. anvil exec sessions
+// hold no lock and cannot be detected.
+func ensureNoRunningChecks(worktreePath, name string) error {
+	const unverified = "cannot verify that no checks are running in this worktree; refusing migrate:fresh of %q: %s"
+	identity, status, err := wtstate.ReadIdentity(worktreePath)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	if identity == nil || status == wtstate.IdentityCopied {
+		return fmt.Errorf(unverified, name, "the worktree has no verified Anvil identity")
+	}
+	root, err := resources.Root()
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	dir, err := resources.WorktreeDir(root, identity.ID)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	running, err := checks.RunningChecks(dir)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	if len(running) > 0 {
+		return fmt.Errorf("checks are running in this worktree (%s); refusing migrate:fresh of %q while they may use it — wait for them to finish, then rerun with --db-action testing=fresh", strings.Join(running, ", "), name)
+	}
+	return nil
+}
 
 // migrationRemedy names the corrective command for a failed migration.
 func migrationRemedy(role string) string {

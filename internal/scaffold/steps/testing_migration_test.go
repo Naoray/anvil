@@ -12,9 +12,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
+	"github.com/naoray/anvil/internal/lockfile"
+	"github.com/naoray/anvil/internal/resources"
 	"github.com/naoray/anvil/internal/scaffold/types"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 const (
@@ -354,6 +358,7 @@ func TestTestingDatabaseFreshRefusesNameReferencedBySibling(t *testing.T) {
 	require.NoError(t, err, string(out))
 	writeTestingFixture(t, owner, ownedFixtureDatabase(testingFixtureTest, config.DbRoleTesting))
 	writeTestingFixture(t, sibling, ownedFixtureDatabase(testingFixtureTest, config.DbRoleTesting))
+	prepareFreshIdentity(t, owner)
 	client := NewMockDatabaseClient()
 	client.AddDatabase(testingFixtureTest)
 	freshContext := func() *types.ScaffoldContext {
@@ -364,7 +369,7 @@ func TestTestingDatabaseFreshRefusesNameReferencedBySibling(t *testing.T) {
 	err = (&DbMigrateStep{clientFactory: MockClientFactory(client)}).Run(freshContext(), types.StepOptions{})
 	require.ErrorContains(t, err, "also recorded by worktree")
 	require.ErrorContains(t, err, testingFixtureTest)
-	require.ErrorContains(t, err, "database_actions: {testing: migrate}")
+	require.ErrorContains(t, err, "rerun without --db-action testing=fresh")
 	require.Empty(t, readPolicyLog(t, log))
 
 	// Once the sibling no longer references it, the rebuild proceeds.
@@ -454,6 +459,7 @@ func TestFreshHoldsDatabaseLockAcrossCommand(t *testing.T) {
 	out, err := exec.Command("git", "init", root).CombinedOutput()
 	require.NoError(t, err, string(out))
 	writeTestingFixture(t, root, ownedFixtureDatabase(testingFixtureTest, config.DbRoleTesting))
+	prepareFreshIdentity(t, root)
 	bin := t.TempDir()
 	probe := filepath.Join(t.TempDir(), "probe")
 	script := "#!/bin/sh\nif flock -n \"$ANVIL_POLICY_LOCK\" true; then echo unlocked > \"$ANVIL_POLICY_PROBE\"; else echo locked > \"$ANVIL_POLICY_PROBE\"; fi\n"
@@ -473,4 +479,69 @@ func TestFreshHoldsDatabaseLockAcrossCommand(t *testing.T) {
 	release, err := dblifecycle.Lock(root)
 	require.NoError(t, err, "the lock is released after the step")
 	require.NoError(t, release())
+}
+
+// prepareFreshIdentity gives root the worktree identity and isolated runtime
+// root that a real scaffold establishes before db.migrate runs, and returns
+// the worktree's runtime directory.
+func prepareFreshIdentity(t *testing.T, root string) string {
+	t.Helper()
+	runtimeRoot := t.TempDir()
+	t.Setenv(resources.RootEnv, runtimeRoot)
+	identity, _, err := wtstate.EnsureIdentity(root)
+	require.NoError(t, err)
+	dir, err := resources.WorktreeDir(runtimeRoot, identity.ID)
+	require.NoError(t, err)
+	return dir
+}
+
+// Opt-in fresh refuses while any check of this worktree is running, since the
+// check may be using the testing database.
+func TestFreshRefusedWhileCheckRuns(t *testing.T) {
+	log := installPolicyPHP(t)
+	root := t.TempDir()
+	out, err := exec.Command("git", "init", root).CombinedOutput()
+	require.NoError(t, err, string(out))
+	writeTestingFixture(t, root, ownedFixtureDatabase(testingFixtureTest, config.DbRoleTesting))
+	runtimeDir := prepareFreshIdentity(t, root)
+	lockPath := filepath.Join(runtimeDir, "checks", "unit", "active.lock")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lockPath), 0o755))
+	active, err := lockfile.TryAcquire(lockPath)
+	require.NoError(t, err)
+	running, err := checks.RunningChecks(runtimeDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"unit"}, running, "fixture lock must look like a running check")
+	client := NewMockDatabaseClient()
+	client.AddDatabase(testingFixtureTest)
+	freshContext := func() *types.ScaffoldContext {
+		ctx := testingFixtureContext(root, "false")
+		ctx.DatabaseActions = map[string]string{"testing": "fresh"}
+		return ctx
+	}
+	err = (&DbMigrateStep{clientFactory: MockClientFactory(client)}).Run(freshContext(), types.StepOptions{})
+	require.ErrorContains(t, err, "checks are running in this worktree (unit)")
+	require.ErrorContains(t, err, testingFixtureTest)
+	require.Empty(t, readPolicyLog(t, log))
+
+	require.NoError(t, active.Release())
+	require.NoError(t, (&DbMigrateStep{clientFactory: MockClientFactory(client)}).Run(freshContext(), types.StepOptions{}))
+	require.Equal(t, testingFixtureTest+"|mysql|artisan migrate:fresh --no-interaction\n", readPolicyLog(t, log))
+}
+
+// Without a verified worktree identity the runtime directory of running
+// checks is unknown, so fresh fails closed. Default migrate is unaffected.
+func TestFreshFailsClosedWithoutVerifiedIdentity(t *testing.T) {
+	log := installPolicyPHP(t)
+	root := t.TempDir()
+	t.Setenv(resources.RootEnv, t.TempDir())
+	writeTestingFixture(t, root, ownedFixtureDatabase(testingFixtureTest, config.DbRoleTesting))
+	client := NewMockDatabaseClient()
+	client.AddDatabase(testingFixtureTest)
+	ctx := testingFixtureContext(root, "false")
+	ctx.DatabaseActions = map[string]string{"testing": "fresh"}
+	err := (&DbMigrateStep{clientFactory: MockClientFactory(client)}).Run(ctx, types.StepOptions{})
+	require.ErrorContains(t, err, "cannot verify that no checks are running")
+	require.Empty(t, readPolicyLog(t, log))
+	require.NoError(t, (&DbMigrateStep{clientFactory: MockClientFactory(client)}).Run(testingFixtureContext(root, "false"), types.StepOptions{}))
+	require.Equal(t, testingFixtureTest+"|mysql|artisan migrate --no-interaction\n", readPolicyLog(t, log))
 }

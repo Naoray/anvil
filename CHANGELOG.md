@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Laravel scaffolding now leaves the worktree's own testing database schema-ready: `db.migrate` runs a non-destructive `artisan migrate` (no seed) on the owned, isolated `role: testing` database on every scaffold/ensure, through a per-command database environment without editing `.env`. Unrecorded, auxiliary, borrowed, shared, legacy and mismatched databases are never targeted. Testing databases are no longer existence-only by default; `database_actions: {testing: skip}` restores that.
-- `--db-action testing=fresh` / `database_actions: {testing: fresh}` opts into rebuilding that testing database with `migrate:fresh` (no seed); it is refused for any other target or when another registered worktree records or borrows the name, and runs under the repository database lock.
+- The one-off `--db-action testing=fresh` flag opts into rebuilding that testing database with `migrate:fresh` (no seed). `database_actions` in `anvil.yaml` rejects `fresh`. The rebuild runs under the repository database lock and is refused for any other target, while a check of the worktree is running (or the worktree's runtime directory cannot be resolved), or when another registered worktree records or borrows the name. Running `anvil exec` sessions cannot be detected.
 - Failed migrations name the database, role, action and the corrective command (`anvil scaffold`, or `testing: skip` to opt out).
 
 ### Fixed

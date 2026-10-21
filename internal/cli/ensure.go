@@ -55,8 +55,9 @@ Preparation runs the same scaffold steps as 'anvil scaffold', but skips steps
 whose recorded completion still matches their definition, declared inputs and
 outputs. Database, site-link and store_as steps always run under their own
 safety policies; db.migrate migrates the owned testing database with a
-non-destructive 'migrate' each time, never 'migrate:fresh' unless
---db-action testing=fresh or database_actions selects it. Each completed step is recorded immediately, so a failed or
+non-destructive 'migrate' each time; only the one-off --db-action
+testing=fresh rebuilds it with 'migrate:fresh', refused while a check of the
+worktree runs. Each completed step is recorded immediately, so a failed or
 interrupted run resumes where it stopped. Concurrent ensures of one worktree
 wait for each other.
 

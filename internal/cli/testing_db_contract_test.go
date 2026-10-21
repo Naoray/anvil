@@ -10,7 +10,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lockfile"
+	"github.com/naoray/anvil/internal/resources"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 // fakeYerdScript emulates the Yerd commands db.create/db.migrate use: one
@@ -87,6 +91,11 @@ type testingDBFixture struct {
 
 func newTestingDBFixture(t *testing.T) *testingDBFixture {
 	t.Helper()
+	return newTestingDBFixtureWithYAML(t, "preset: laravel\n")
+}
+
+func newTestingDBFixtureWithYAML(t *testing.T, anvilYAML string) *testingDBFixture {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX shell stand-ins for php and yerd")
 	}
@@ -96,7 +105,7 @@ func newTestingDBFixture(t *testing.T) *testingDBFixture {
 		".env.example":  "APP_NAME=demo\nAPP_KEY=base64:fixture\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=3306\nDB_USERNAME=root\nDB_PASSWORD=fixture-secret-value\n",
 		".gitignore":    ".anvil.local\n.env\n*.count\n",
 	}
-	f := newAgentFixture(t, "preset: laravel\n", files)
+	f := newAgentFixture(t, anvilYAML, files)
 	fakeBin := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "yerd"), []byte(fakeYerdScript), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "php"), []byte(fakePHPScript), 0o755))
@@ -260,4 +269,57 @@ func TestScaffoldTestingMigrationFailureIsNotReady(t *testing.T) {
 	stdout, stderr, code = f.run(f.repo, "scaffold", filepath.Base(wt))
 	require.Equal(t, 0, code, stdout+stderr)
 	require.Equal(t, "schema\n", f.contents(t, testing))
+}
+
+// fresh is a one-off flag: a persistent anvil.yaml declaration would rebuild
+// the testing database on every ensure, so it is a configuration error.
+func TestDatabaseActionsFreshInConfigIsRejected(t *testing.T) {
+	f := newTestingDBFixtureWithYAML(t, "preset: laravel\nscaffold:\n  database_actions:\n    testing: fresh\n")
+	stdout, stderr, code := f.run(f.repo, "work", "feature/declared-fresh")
+	require.NotEqual(t, 0, code, stdout+stderr)
+	require.Contains(t, stdout+stderr, "fresh is not accepted in anvil.yaml; pass --db-action testing=fresh")
+	entries, err := os.ReadDir(f.schemaLog)
+	require.NoError(t, err)
+	require.Empty(t, entries, "no migration runs")
+}
+
+// A running check may be using the testing database, so the opt-in rebuild is
+// refused until it finishes.
+func TestDbActionFreshRefusedWhileCheckRuns(t *testing.T) {
+	f := newTestingDBFixture(t)
+	stdout, stderr, code := f.run(f.repo, "work", "feature/busy")
+	require.Equal(t, 0, code, stdout+stderr)
+	wt := f.worktreePath("feature-busy")
+	_, testing := f.databases(t, wt)
+
+	identity, _, err := wtstate.ReadIdentity(wt)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	var runtimeRoot string
+	for _, entry := range f.env {
+		if value, ok := strings.CutPrefix(entry, resources.RootEnv+"="); ok {
+			runtimeRoot = value
+		}
+	}
+	require.NotEmpty(t, runtimeRoot)
+	runtimeDir, err := resources.WorktreeDir(runtimeRoot, identity.ID)
+	require.NoError(t, err)
+	lockPath := filepath.Join(runtimeDir, "checks", "unit", "active.lock")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lockPath), 0o755))
+	active, err := lockfile.TryAcquire(lockPath)
+	require.NoError(t, err)
+	running, err := checks.RunningChecks(runtimeDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"unit"}, running)
+
+	stdout, stderr, code = f.run(f.repo, "scaffold", filepath.Base(wt), "--db-action", "testing=fresh")
+	require.NotEqual(t, 0, code, stdout+stderr)
+	require.Contains(t, stdout+stderr, "checks are running in this worktree (unit)")
+	require.Equal(t, []string{"mysql migrate --no-interaction"}, f.migrations(t, testing), "no rebuild while a check runs")
+	requireFailedPreparation(t, f.agentFixture, "feature-busy")
+
+	require.NoError(t, active.Release())
+	stdout, stderr, code = f.run(f.repo, "scaffold", filepath.Base(wt), "--db-action", "testing=fresh")
+	require.Equal(t, 0, code, stdout+stderr)
+	require.Equal(t, "mysql migrate:fresh --no-interaction", f.migrations(t, testing)[1])
 }

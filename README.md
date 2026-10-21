@@ -716,16 +716,23 @@ targeted by default. `laravel-shared-db` has no testing database, so nothing
 is migrated.
 
 Rebuilding the testing database (for example after a branch switch that
-rewrote migrations) is opt-in: `--db-action testing=fresh` or
-`database_actions: {testing: fresh}` runs `artisan migrate:fresh` without
-`--seed`, discarding its rows. `fresh` is refused for any other target. It
-also re-checks isolation: it holds the repository database lock from that
-check through the command and refuses when another registered worktree of the
-repository records or borrows the same name (unreadable sibling state also
-refuses). Don't run it while tests use the database. Prefer the one-off
-`--db-action testing=fresh` flag: `database_actions: {testing: fresh}` in
-`anvil.yaml` is persistent, so every scaffold and `anvil ensure` would rebuild
-the testing database again.
+rewrote migrations) is a one-off opt-in: `--db-action testing=fresh` on
+`anvil scaffold`, `work` or `ensure` runs `artisan migrate:fresh` without
+`--seed`, discarding its rows. It is accepted only as that flag:
+`database_actions` in `anvil.yaml` rejects `fresh` with a configuration error,
+because a declaration would rebuild the database on every ensure. `fresh` is
+refused for any other target. Before the command it holds the repository
+database lock and refuses when:
+
+- a check of this worktree is running (`anvil check` may be using the
+  database). If the worktree's identity or runtime directory cannot be
+  resolved, it refuses rather than guess;
+- another registered worktree of the repository records or borrows the same
+  name (unreadable sibling state also refuses).
+
+`anvil exec` sessions (for example a running `anvil exec php artisan test`)
+hold no lock and cannot be detected, and a check started after the guard is
+not blocked: don't run `testing=fresh` while tests use the database.
 
 Overrides: `database_actions: {testing: skip}` (or `--db-action testing=skip`)
 keeps the testing database untouched. `--dry-run` prints the planned line
@@ -831,6 +838,9 @@ protection; use `--keep-db` to retain databases when removing a worktree.
   migrate the new testing database; the policy never touches the unrecorded
   application database). `anvil exec` never creates or modifies databases or
   `.anvil.local`.
+- `--db-action testing=fresh` cannot detect running `anvil exec` sessions or
+  checks that start after its guard; only use it while nothing tests against
+  the database.
 - The opt-in `testing=fresh` isolation check sees only worktrees registered in
   this repository. A legacy worktree of another repository whose migrated
   `db_suffix` and site name produce the same database name can adopt an

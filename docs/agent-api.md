@@ -139,9 +139,10 @@ first has its completion record removed, so a failed or interrupted rerun can
 never leave the earlier success in place. `env.read` (which sets template
 variables without `store_as`) always runs, like `store_as` producers.
 `db.migrate` runs on every ensure; for the worktree's owned testing database it
-runs a non-destructive `migrate`, never `migrate:fresh` unless
-`--db-action testing=fresh` (or `database_actions`) selects it, so re-ensuring
-is safe while checks use that database. Step
+runs a non-destructive `migrate`, never `migrate:fresh` unless the one-off
+`--db-action testing=fresh` flag selects it (`database_actions` in `anvil.yaml`
+rejects `fresh`), so re-ensuring is safe while checks use that database. A
+`fresh` rebuild is refused while a check of the worktree is running. Step
 directories and declared `inputs`/`outputs` must resolve inside the worktree,
 including through symlinks; escapes are refused before any effect.
 
