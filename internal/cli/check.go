@@ -139,9 +139,9 @@ func acquireCheckGate(path string) (*lockfile.Lock, error) {
 	if err != nil {
 		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	// Removal may have finished just before: the worktree (and with it the
-	// gate's location) must still exist under the lock.
-	if _, statErr := os.Stat(path); statErr != nil || checks.GatePath(path) != gatePath {
+	// Removal may have finished just before: the worktree must still exist
+	// under the lock.
+	if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr != nil {
 		return nil, errors.Join(agentapi.Errorf(agentapi.CodeWorktreeNotFound, "worktree %s no longer exists", path), gate.Release())
 	}
 	return gate, nil
