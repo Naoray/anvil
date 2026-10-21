@@ -448,7 +448,7 @@ func TestDbCreateStep(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to create database after 5 attempts")
 	})
 
-	t.Run("skips when database ping fails", func(t *testing.T) {
+	t.Run("fails when configured database ping fails", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		envFile := filepath.Join(tmpDir, ".env")
@@ -466,8 +466,9 @@ func TestDbCreateStep(t *testing.T) {
 		}
 
 		err := step.Run(ctx, types.StepOptions{Verbose: false})
-		assert.NoError(t, err, "Should not error when ping fails, just skip")
-		assert.Empty(t, ctx.GetDbSuffix(), "DbSuffix should not be set when skipped")
+		assert.ErrorContains(t, err, "connection refused", "a configured engine that cannot be reached fails the step")
+		assert.Empty(t, mockClient.GetCreateCalls())
+		assert.Empty(t, ctx.GetDbSuffix(), "DbSuffix should not be set when the database is unreachable")
 	})
 }
 
@@ -578,7 +579,9 @@ func TestDbCreateStep_TestingRolePersistedUnrecordedCollisionFailsClosed(t *test
 	}, *state)
 }
 
-func TestDbCreateStep_TestingRoleNoSuffixOrSQLiteSkips(t *testing.T) {
+func TestDbCreateStep_TestingRoleNoSuffixFailsSQLiteSkips(t *testing.T) {
+	// Scaffolding always assigns a suffix before steps run, so a server
+	// testing database without one is an inconsistent state, not an opt-out.
 	t.Run("no suffix", func(t *testing.T) {
 		client := NewMockDatabaseClient()
 		step := NewDbCreateStepWithFactory(config.StepConfig{
@@ -586,7 +589,9 @@ func TestDbCreateStep_TestingRoleNoSuffixOrSQLiteSkips(t *testing.T) {
 			Role: config.DbRoleTesting,
 		}, MockClientFactory(client))
 		ctx := &types.ScaffoldContext{WorktreePath: t.TempDir(), SiteName: "Dashboard"}
-		require.NoError(t, step.Run(ctx, types.StepOptions{}))
+		err := step.Run(ctx, types.StepOptions{})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "no database suffix")
 		assert.Empty(t, client.GetCreateCalls())
 	})
 

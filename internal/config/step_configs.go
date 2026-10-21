@@ -62,17 +62,27 @@ func validateEnvCopyStepConfig(cfg StepConfig) error {
 	return nil
 }
 
+func validateDatabaseStepType(stepName string, cfg StepConfig) error {
+	if cfg.Type == "" {
+		return nil
+	}
+	if _, err := ParseDatabaseType(cfg.Type); err != nil {
+		return fmt.Errorf("%s: %w", stepName, err)
+	}
+	return nil
+}
+
 func validateDbCreateStepConfig(cfg StepConfig) error {
 	switch cfg.Role {
 	case "", DbRoleApplication, DbRoleTesting:
-		return nil
 	default:
 		return fmt.Errorf("db.create: invalid role %q (supported roles: application, testing)", cfg.Role)
 	}
+	return validateDatabaseStepType(StepDbCreate, cfg)
 }
 
-func validateDbDestroyStepConfig(StepConfig) error {
-	return nil
+func validateDbDestroyStepConfig(cfg StepConfig) error {
+	return validateDatabaseStepType(StepDbDestroy, cfg)
 }
 
 // ValidateStepConfig validates a StepConfig based on its step type.

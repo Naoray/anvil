@@ -1056,6 +1056,15 @@ All steps support template variables that are replaced at runtime:
 - Retries up to 5 times on collision
 - Persists the suffix and every created database to `.anvil.local` for exact
   cleanup
+- Fails closed: when the engine is configured (explicit `type` or a MySQL,
+  MariaDB or PostgreSQL `DB_CONNECTION`) and the database service cannot be
+  reached, the step fails with a hint to start the service or check its
+  connection settings. `anvil work`/`scaffold` then exit non-zero and
+  `anvil status --json` reports `ready: false` with the failed step. `type`
+  is case-insensitive and also accepts `postgres`/`postgresql`; an unsupported
+  `type` is rejected before any step runs. Only a project with neither `type` nor a
+  recognised `DB_CONNECTION` skips the step. SQLite creates a worktree-local
+  file and skips `role: testing`
 
 **Multiple databases with shared suffix:**
 

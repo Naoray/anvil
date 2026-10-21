@@ -361,3 +361,14 @@ func TestStepPathsRejectSymlinkEscapes(t *testing.T) {
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(dir, "real", "sub", "ok"))
 }
+
+func TestRunScaffoldRefusesUnsupportedDatabaseTypeBeforeEffects(t *testing.T) {
+	dir := prepareFixture(t)
+	_, err := ensureRun(t, dir, []config.StepConfig{
+		countingStep("before", nil),
+		{Name: config.StepDbCreate, Type: "mssql"},
+	})
+	require.ErrorContains(t, err, "unsupported database type: mssql")
+	require.Equal(t, 0, runCount(t, dir, "before"), "validation must refuse before any step runs")
+	require.NoFileExists(t, filepath.Join(dir, ".anvil.local"))
+}
