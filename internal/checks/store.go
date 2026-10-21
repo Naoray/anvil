@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/naoray/anvil/internal/lockfile"
@@ -40,11 +41,16 @@ type CommandResult struct {
 	Log        string `json:"log"`
 }
 
-// Artifact records one produced file.
+// ArtifactDirectory marks a directory artifact, whose SHA256 digests its
+// whole tree and Size totals its files.
+const ArtifactDirectory = "directory"
+
+// Artifact records one produced file or directory.
 type Artifact struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 // WorktreeRef identifies where a check ran.
@@ -91,7 +97,25 @@ func newRunID(now time.Time) (string, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	return now.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(buf), nil
+	return now.UTC().Format(runIDTime) + "-" + hex.EncodeToString(buf), nil
+}
+
+// runIDTime orders run IDs chronologically to the nanosecond; earlier
+// versions used whole seconds (legacyRunIDTime).
+const (
+	runIDTime       = "20060102T150405.000000000Z"
+	legacyRunIDTime = "20060102T150405Z"
+)
+
+// runTime parses the start time encoded in a run ID.
+func runTime(runID string) (time.Time, bool) {
+	stamp, _, _ := strings.Cut(runID, "-")
+	for _, layout := range []string{runIDTime, legacyRunIDTime} {
+		if parsed, err := time.Parse(layout, stamp); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func runLockPath(runDir string) string { return filepath.Join(runDir, "run.lock") }
@@ -167,25 +191,47 @@ func (s Store) Latest(check string) (*Result, error) {
 	return &result, nil
 }
 
-// prune keeps the most recent run directories.
-func (s Store) prune(check string) error {
+// prune keeps the most recent run directories by start time (ties broken
+// by ID), and never removes keep or the run latest.json refers to.
+func (s Store) prune(check, keep string) error {
 	runs, err := os.ReadDir(filepath.Join(s.checkDir(check), "runs"))
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(runs))
-	for _, run := range runs {
-		if run.IsDir() {
-			names = append(names, run.Name())
-		}
+	protected := map[string]bool{keep: true}
+	if latest, err := s.Latest(check); err == nil && latest != nil {
+		protected[latest.RunID] = true
 	}
-	sort.Strings(names)
+	var candidates []string
+	kept := 0
+	for _, run := range runs {
+		if !run.IsDir() {
+			continue
+		}
+		if protected[run.Name()] {
+			kept++
+			continue
+		}
+		candidates = append(candidates, run.Name())
+	}
+	// Oldest first; unparseable names sort before every dated run.
+	sort.Slice(candidates, func(i, j int) bool {
+		ti, okI := runTime(candidates[i])
+		tj, okJ := runTime(candidates[j])
+		if okI != okJ {
+			return !okI
+		}
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return candidates[i] < candidates[j]
+	})
 	var problems []error
-	for len(names) > retainedRuns {
-		if err := os.RemoveAll(s.runDir(check, names[0])); err != nil {
+	for len(candidates)+kept > retainedRuns && len(candidates) > 0 {
+		if err := os.RemoveAll(s.runDir(check, candidates[0])); err != nil {
 			problems = append(problems, err)
 		}
-		names = names[1:]
+		candidates = candidates[1:]
 	}
 	return errors.Join(problems...)
 }

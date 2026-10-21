@@ -3,6 +3,7 @@
 package checks
 
 import (
+	"os"
 	"os/exec"
 	"time"
 )
@@ -14,3 +15,7 @@ func configureGroup(cmd *exec.Cmd) {
 }
 
 func killGroup(*exec.Cmd) {}
+
+// inheritFiles is a no-op: Windows cannot pass extra handles through
+// os/exec, so locks end with Anvil there (documented limitation).
+func inheritFiles(*exec.Cmd, []*os.File) {}

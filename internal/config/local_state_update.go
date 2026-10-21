@@ -53,6 +53,14 @@ func WorktreeLockPath(worktreePath, name string) string {
 	if dir, err := WorktreeGitDir(worktreePath); err == nil {
 		return filepath.Join(dir, name)
 	}
+	return WorktreeExternalLockPath(worktreePath, name)
+}
+
+// WorktreeExternalLockPath returns a per-path lock outside the worktree and
+// its Git directory, in a per-user directory under the system temp
+// directory. Locks held while the worktree is removed must live here:
+// Windows cannot delete a directory containing an open file.
+func WorktreeExternalLockPath(worktreePath, name string) string {
 	canonical := worktreePath
 	if abs, err := filepath.Abs(worktreePath); err == nil {
 		canonical = abs

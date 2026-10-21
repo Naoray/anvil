@@ -39,8 +39,9 @@ type Options struct {
 	// Selected names opt-in components to include. Naming a component also
 	// makes missing requirements fatal for it.
 	Selected []string
-	// Scope restricts applicability before requirements are evaluated. Empty
-	// means all declared components. Excluded components remain visible as skipped.
+	// Scope, when non-nil, limits the plan to these components (for example
+	// roles.review.components); the others are skipped before their
+	// requirements or directories are evaluated.
 	Scope    []string
 	GOOS     string
 	LookPath func(string) (string, error)
@@ -60,6 +61,10 @@ func Plan(worktreePath string, cfg *config.Config, opts Options) ([]ComponentPla
 	var problems []error
 	plans := make([]ComponentPlan, 0, len(cfg.Components))
 	for _, component := range cfg.Components {
+		if opts.Scope != nil && !contains(opts.Scope, component.Name) {
+			plans = append(plans, outOfScope(worktreePath, component))
+			continue
+		}
 		plan, err := planComponent(worktreePath, component, selected[component.Name], opts)
 		if err != nil {
 			problems = append(problems, err)
@@ -91,14 +96,8 @@ func planComponent(worktreePath string, component config.Component, selected boo
 	if plan.Path == "" {
 		plan.Path = "."
 	}
-	if len(opts.Scope) > 0 && !contains(opts.Scope, component.Name) {
-		return skipped(plan, "outside role component scope"), nil
-	}
 
-	contributions := make([]Contribution, 0, len(component.Uses))
-	for _, capability := range component.Uses {
-		contributions = append(contributions, Contribute(capability, absDir, opts.GOOS))
-	}
+	contributions := contributionsFor(component, absDir, opts.GOOS)
 	if len(plan.Platforms) == 0 {
 		for _, contribution := range contributions {
 			plan.Platforms = append(plan.Platforms, contribution.Platforms...)
@@ -120,6 +119,13 @@ func planComponent(worktreePath string, component config.Component, selected boo
 		}
 		return plan, fmt.Errorf("component %q: directory %s does not exist", component.Name, plan.Path)
 	}
+	// A component directory that escapes through a symlink is refused
+	// regardless of on_missing: commands would run outside the worktree.
+	if dir != "" {
+		if err := config.CheckContained(worktreePath, dir); err != nil {
+			return skipped(plan, err.Error()), fmt.Errorf("component %q: %w", component.Name, err)
+		}
+	}
 
 	for _, command := range plan.Requires {
 		if _, err := opts.LookPath(command); err != nil {
@@ -140,6 +146,50 @@ func planComponent(worktreePath string, component config.Component, selected boo
 	}
 	plan.Steps = steps
 	return plan, nil
+}
+
+func contributionsFor(component config.Component, absDir, goos string) []Contribution {
+	contributions := make([]Contribution, 0, len(component.Uses))
+	for _, capability := range component.Uses {
+		contributions = append(contributions, Contribute(capability, absDir, goos))
+	}
+	return contributions
+}
+
+// ValidationSteps compiles the preparation steps of every declared
+// component, applicable on this machine or not, so callers can validate all
+// conditions before any effect. A component condition without prepare
+// commands is represented by a no-op step carrying it.
+func ValidationSteps(worktreePath string, cfg *config.Config, goos string) ([]config.StepConfig, error) {
+	var steps []config.StepConfig
+	var problems []error
+	for _, component := range cfg.Components {
+		dir := component.ComponentDir()
+		absDir := filepath.Join(worktreePath, dir)
+		contributions := contributionsFor(component, absDir, goos)
+		compiled, err := compileSteps(component, contributions, dir, componentEnv(component, contributions, absDir, goos))
+		if err != nil {
+			problems = append(problems, fmt.Errorf("component %q: %w", component.Name, err))
+			continue
+		}
+		if len(compiled) == 0 && len(component.When) > 0 {
+			compiled = []config.StepConfig{{Name: config.StepCommandRun, Command: "true", ConditionHolder: config.ConditionHolder{Condition: component.When}}}
+		}
+		steps = append(steps, compiled...)
+	}
+	return steps, errors.Join(problems...)
+}
+
+func outOfScope(worktreePath string, component config.Component) ComponentPlan {
+	plan := ComponentPlan{
+		Name: component.Name, Path: component.ComponentDir(), AbsPath: filepath.Join(worktreePath, component.ComponentDir()),
+		Uses: append([]string{}, component.Uses...), Requires: []string{}, OptIn: component.OptIn,
+		Platforms: append([]string(nil), component.Platforms...),
+	}
+	if plan.Path == "" {
+		plan.Path = "."
+	}
+	return skipped(plan, "outside role component scope")
 }
 
 func skipped(plan ComponentPlan, reason string) ComponentPlan {

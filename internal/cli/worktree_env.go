@@ -47,14 +47,15 @@ type worktreeEnv struct {
 }
 
 type worktreeEnvOptions struct {
-	// Role supplies the effective role before a new worktree records metadata.
-	Role string
 	// Component selects one component for its directory and environment.
 	Component string
 	// Selected opt-in components to include in the plan.
 	Selected []string
 	// Resources are extra exported variables (directories, ports).
 	Resources []workenv.Variable
+	// Role overrides the recorded role (ensure applies the requested one
+	// before recording it).
+	Role string
 }
 
 // loadWorktreeEnv derives configuration, components and environment for wt
@@ -89,7 +90,9 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	var scope []string
 	if role == wtstate.RoleReview {
 		result.Unset = append([]string(nil), target.Config.Roles.Review.EnvUnset...)
-		scope = target.Config.Roles.Review.Components
+		if components := target.Config.Roles.Review.Components; len(components) > 0 {
+			scope = append([]string{}, components...)
+		}
 	}
 
 	selected := append([]string(nil), opts.Selected...)

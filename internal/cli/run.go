@@ -10,6 +10,7 @@ import (
 
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/capabilities"
+	"github.com/naoray/anvil/internal/scaffold"
 	"github.com/naoray/anvil/internal/wtstate"
 )
 
@@ -29,11 +30,13 @@ WORKTREE is matched exactly (folder, branch, path or worktree ID). Without it,
 the worktree containing the current directory is used and the command runs in
 the current directory. With WORKTREE the command runs at the worktree root;
 --component runs it in the component directory. '--' is required before
-COMMAND. The child's exit status is passed through; 127 means not found and
-126 means not executable.
+COMMAND. COMMAND is looked up on the exported PATH (component-local tools
+win) relative to the child's directory. The child's exit status is passed
+through; 127 means not found and 126 means not executable.
 
 Read-only: run never prepares, allocates or writes state. It warns on stderr
-when preparation is incomplete; --require-ready refuses instead.`,
+when preparation is incomplete, including the selected component's own
+steps and requirements; --require-ready refuses instead.`,
 	SilenceUsage:      true,
 	SilenceErrors:     true,
 	ValidArgsFunction: completeWorktreeNames,
@@ -86,9 +89,55 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "warning: worktree preparation is %s; run 'anvil ensure' to prepare it\n", status)
 	}
+	if componentName != "" && wenv.Component != nil {
+		if err := checkComponentReady(pc, wenv, mustGetBool(cmd, "require-ready")); err != nil {
+			return err
+		}
+	}
 
 	env := wenv.Env.Environ(os.Environ(), wenv.Unset, runtime.GOOS == "windows")
 	return runChildIn(dir, command, env)
+}
+
+// checkComponentReady verifies the selected component's own preparation:
+// its requirements are met and each applicable step has a current
+// completion record. It refuses with --require-ready and warns otherwise.
+func checkComponentReady(pc *ProjectContext, wenv *worktreeEnv, requireReady bool) error {
+	component := wenv.Component
+	problem := ""
+	if component.Status != capabilities.StatusActive {
+		problem = fmt.Sprintf("component %s is %s: %s", component.Name, component.Status, component.Reason)
+	} else {
+		// Steps are verified against the environment ensure exports, which
+		// carries no selected component.
+		base, err := loadWorktreeEnv(pc, wenv.Worktree, worktreeEnvOptions{})
+		if err != nil {
+			return err
+		}
+		ready, reason, err := wenv.PC.ScaffoldManager().StepsPrepared(scaffold.ReadinessRequest{
+			WorktreePath: wenv.Worktree.Path,
+			Branch:       wenv.Worktree.Branch,
+			Env:          base.Env.Map(),
+			Config:       wenv.PC.Config,
+			Steps:        component.Steps,
+		})
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		if !ready {
+			problem = fmt.Sprintf("component %s is not prepared: %s", component.Name, reason)
+		}
+	}
+	if problem == "" {
+		return nil
+	}
+	if requireReady {
+		return agentapi.Errorf(agentapi.CodeNotPrepared, "%s; run 'anvil ensure --component %s' first", problem, component.Name)
+	}
+	if component.Status == capabilities.StatusActive {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", problem)
+	}
+	return nil
 }
 
 // runDirectory picks the child's working directory.

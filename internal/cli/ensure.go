@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -159,16 +160,8 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		return agentResult{}, err
 	}
 	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
-	if err := checkRoleCompatible(target.Path, opts, created); err != nil {
+	if opts, err = effectiveRole(target, opts, created); err != nil {
 		return agentResult{}, err
-	}
-	metadata, err := wtstate.ReadMetadata(target.Path)
-	if err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
-	}
-	effectiveRole := opts.Role
-	if effectiveRole == "" {
-		effectiveRole = metadata.Role
 	}
 
 	data := ensureData{Components: []capabilities.ComponentPlan{}, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
@@ -195,13 +188,24 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	envOptions := worktreeEnvOptions{Selected: selected, Role: effectiveRole}
+	envOptions := worktreeEnvOptions{Selected: selected, Role: opts.Role}
 	wenv, err := loadWorktreeEnv(pc, *target, envOptions)
 	if err != nil {
 		return agentResult{}, err
 	}
-	reviewMinimal := effectiveRole == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
+	reviewMinimal := opts.Role == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
+	components := wenv.Components
 	data.Components = wenv.Components
+	// Every component's conditions are validated, including components
+	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
+	// configuration is refused before any effect.
+	validation, err := capabilities.ValidationSteps(wenv.Worktree.Path, wenv.PC.Config, runtime.GOOS)
+	if err == nil {
+		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
+	}
+	if err != nil {
+		return agentResult{Data: data}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
 	if failure := environmentPreconditions(wenv); failure != nil {
 		summary, summaryWarnings := summarizeWorktree(*target)
 		data.Worktree = summary
@@ -211,7 +215,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	extraSteps := capabilities.Steps(wenv.Components)
+	extraSteps := capabilities.Steps(components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
 	prepareConfig, defaultSteps := targetPC.Config, resolvedPreset.DefaultSteps()
 	presetName := resolvedPreset.Name()
@@ -222,7 +226,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		minimal.Scaffold = config.ScaffoldConfig{Override: true}
 		prepareConfig, defaultSteps, presetName = &minimal, nil, ""
 	}
-	request := scaffold.ScaffoldRequest{Config: prepareConfig, DefaultSteps: defaultSteps, ExtraSteps: extraSteps}
+	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: prepareConfig, DefaultSteps: defaultSteps, ExtraSteps: extraSteps}
 	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
@@ -278,11 +282,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, runErr)
 		}
 		data.Prepare.Status = wtstate.PrepareFailed
-		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
-			Code:    agentapi.CodePrepareFailed,
-			Message: fmt.Sprintf("preparation failed: %v", runErr),
-			Cause:   runErr,
-		}
+		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
@@ -308,36 +308,46 @@ func environmentPreconditions(wenv *worktreeEnv) error {
 	return nil
 }
 
-// checkRoleCompatible refuses before any write when flags contradict the
-// recorded role or pin.
-func checkRoleCompatible(path string, opts ensureOptions, created bool) error {
+// effectiveRole applies the recorded role and verifies review worktrees
+// before any write. A recorded review role is kept on plain re-ensure; an
+// existing worktree without role metadata is never adopted as a review; and
+// a review worktree must still be detached at its pinned commit (reviewer
+// changes are never reset to make it so).
+func effectiveRole(target *git.Worktree, opts ensureOptions, created bool) (ensureOptions, error) {
+	path := target.Path
 	metadata, err := wtstate.ReadMetadata(path)
 	if err != nil {
-		return agentapi.Wrap(agentapi.CodeInternal, err)
+		return opts, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
 	if opts.Role != "" && metadata.Role != "" && metadata.Role != opts.Role {
-		return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s has role %q, not %q", path, metadata.Role, opts.Role)
-	}
-	if opts.ReviewCommit != "" && metadata.PinnedCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
-		return agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s has role %q, not %q", path, metadata.Role, opts.Role)
 	}
 	if opts.ReviewCommit != "" && metadata.Role == "" && !created {
-		return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; create a new detached review instead", path)
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; review worktrees are created by 'anvil ensure --review' (choose another name)", path)
 	}
-	if metadata.Role == wtstate.RoleReview {
-		detached, err := git.IsDetachedHEAD(path)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeGitFailed, err)
-		}
-		head, err := git.HeadCommit(path)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeGitFailed, err)
-		}
-		if !detached || metadata.PinnedCommit == "" || head != metadata.PinnedCommit {
-			return agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s must remain detached at its pinned commit %s (actual HEAD %s); reviewer changes were preserved", path, metadata.PinnedCommit, head)
-		}
+	if metadata.Role != wtstate.RoleReview {
+		return opts, nil
 	}
-	return nil
+	opts.Role = wtstate.RoleReview
+	if opts.ReviewCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
+	}
+	if metadata.PinnedCommit == "" {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s has no recorded pin; refusing to prepare it", path)
+	}
+	detached, err := git.IsDetachedHEAD(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	head, err := git.HeadCommit(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	if head != metadata.PinnedCommit || !detached {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s must remain detached at pinned commit %s (HEAD is %s, detached=%t); refusing to prepare it (reviewer changes are kept)", path, metadata.PinnedCommit, head, detached)
+	}
+	opts.ReviewCommit = metadata.PinnedCommit
+	return opts, nil
 }
 
 // recordEnsureClaims assigns identity, records metadata and acquires the
@@ -381,6 +391,34 @@ func recordEnsureClaims(target *git.Worktree, opts ensureOptions, data *ensureDa
 	}
 	data.Lease = newLeaseView(lease, now, issued)
 	return nil
+}
+
+// prepareFailure returns a JSON-safe error. Step errors embed the command's
+// combined output, which may contain secrets, so only the failing step is
+// named; the full diagnostics go to stderr.
+func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
+	fmt.Fprintf(os.Stderr, "preparation failed:\n%v\n", runErr)
+	step := "a step"
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+		}
+	}
+	return &agentapi.Error{
+		Code:    agentapi.CodePrepareFailed,
+		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
+		Details: map[string]any{"failed_step": failedKey(report)},
+		Cause:   runErr,
+	}
+}
+
+func failedKey(report *scaffold.PrepareReport) string {
+	for _, outcome := range report.Steps {
+		if outcome.Result == scaffold.OutcomeFailed {
+			return outcome.Key
+		}
+	}
+	return ""
 }
 
 // ensureWorktreeExists resolves the target, creating it under the

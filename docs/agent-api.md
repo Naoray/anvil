@@ -34,6 +34,10 @@ Rules:
 - Diagnostics, progress and child process output go to **stderr**. stdout
   carries only the envelope, with no ANSI escapes.
 - `--json` never prompts. Agent commands never use partial name matching.
+- Argument and flag errors (unknown flags, extra arguments) also produce one
+  `invalid_arguments` envelope when `--json` appears anywhere before `--`.
+- Mutating commands without a side-effect-free mode refuse `--dry-run` with
+  `invalid_arguments` before any effect; inspect with read-only commands.
 - Secrets are never included. Error messages keep only the first line of a
   failing step's error; full command output is not echoed into JSON.
 
@@ -122,7 +126,18 @@ Step `result` is `ran`, `up_to_date`, `skipped` (with `reason`), `failed` or
 `not_reached`. `prepare.status` is `complete`, `failed`, `running`,
 `interrupted` (a previous run died; the next `ensure` resumes) or `unprepared`.
 `ready` is `true` only when status is `complete`. A failure returns `ok: false`,
-`error.code: "prepare_failed"`, exit status 6 and the partial `data`.
+`error.code: "prepare_failed"` (with `details.failed_step`), exit status 6 and
+the partial `data`. The error message only names the failing step: step errors
+embed command output, which goes to stderr and is never written to JSON or
+`.anvil.local`.
+
+A step that runs again (`--refresh`, changed definition, declared environment,
+inputs or outputs)
+first has its completion record removed, so a failed or interrupted rerun can
+never leave the earlier success in place. `env.read` (which sets template
+variables without `store_as`) always runs, like `store_as` producers. Step
+directories and declared `inputs`/`outputs` must resolve inside the worktree,
+including through symlinks; escapes are refused before any effect.
 
 ## `anvil check [CHECK...] --json` (mutating) and `anvil check --list --json` (read-only)
 
@@ -134,7 +149,7 @@ Run:
   "results": [
     {
       "schema": "anvil.check-result/v1",
-      "run_id": "20261020T201500Z-1a2b3c4d",
+      "run_id": "20261020T201500.123456789Z-1a2b3c4d",
       "check": "fast",
       "status": "passed",
       "exit_code": 0,
@@ -148,7 +163,7 @@ Run:
         "identity_digest": "…"
       },
       "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
-      "artifacts": [{"path": "…", "sha256": "…", "size": 123}],
+      "artifacts": [{"path": "…", "sha256": "…", "size": 123}, {"path": "…/bundle", "sha256": "…", "size": 456, "kind": "directory"}],
       "locks": [], "anvil_version": "…", "run_dir": "…",
       "reused": false
     }
@@ -158,7 +173,10 @@ Run:
 
 A non-passing check sets `ok: false`, `error.code: "check_failed"` with
 `details.{check,status,run_id}`, and exits with the failing command's status
-(124 timeout, 130 interrupted). Child output never appears in stdout with
+(124 timeout, 130 interrupted). Interrupted while waiting for a resource lock,
+nothing runs: `check_failed`, `details.status: "interrupted"`, exit 130 and no
+result. A check cannot start while its worktree is being removed
+(`cleanup_blocked`). Child output never appears in stdout with
 `--json`; it streams to stderr and is kept in the logs.
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
@@ -175,19 +193,15 @@ anvil ensure feature/x --lease-owner codex --lease-ttl 2h --session-id S [--take
 
 `data.metadata`: `{role, pinned_commit, task: {id, url, pr}, created_at}`.
 Recorded roles and pins are never changed implicitly (`invalid_arguments`).
-Re-ensuring a review by name, path, ID or from its directory preserves its
-minimal preparation policy without repeating `--review`. Scaffold steps still
-require `--full-prepare` or `roles.review.scaffold`.
-An existing worktree without role metadata cannot become a review, even when
-its HEAD matches the requested commit. This includes the main checkout and
-legacy branch worktrees. `--review` creates a separate detached worktree.
-Every review re-ensure checks that the checkout remains detached at its recorded
-pin, including calls without `--review` and calls with `--skip-prepare`.
-A moved or branch-attached HEAD returns `invalid_arguments` before state or
-preparation changes. Anvil preserves reviewer edits and never resets the checkout.
-`roles.review.components` limits component preparation and requirement checks.
-Excluded components appear as skipped in `ensure` and `context`; their missing
-tools or directories do not block review readiness. `status` uses the same scope.
+A review worktree keeps its role on every later `ensure` (by name, path, ID or
+from inside it, with or without `--review`), so its minimal preparation and
+`roles.review.components` scope always apply. `--review` never adopts an
+existing worktree without role metadata (a branch worktree, the main worktree
+or one made by `work`/`scaffold`): choose another name. Reusing a review
+worktree requires its checkout to still be detached at the pinned commit;
+otherwise `ensure` refuses with `invalid_arguments` and changes nothing.
+`roles.review.components` limits the plan before requirements are evaluated:
+an excluded component's missing tools or directory never block a review.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases
@@ -213,14 +227,15 @@ refuse an active lease with `lease_held` unless `--ignore-lease`; a stale lease
 only warns.
 `prune --ignore-lease` and `unlink --clean --ignore-lease` apply the same explicit
 override to every selected worktree. `--force` alone does not bypass leases.
-Lease mutations and `ensure` hold the shared per-worktree lifecycle gate before
-reading or writing claims. Cleanup holds the exclusive gate through Git removal
-and resource release. A mutation during cleanup fails with `cleanup_blocked`
-and leaves state unchanged. After taking the gate, mutating commands revalidate
-the target's Git directory, registration, and HEAD before any claim writes.
+Lease mutations, `ensure`, preparation and checks hold the shared per-worktree
+lifecycle gate. Cleanup holds it exclusively through Git removal and resource
+release. A mutation during cleanup fails with `cleanup_blocked` and leaves state
+unchanged. After taking the gate, CLI callers revalidate the target's Git
+directory, registration and HEAD before claim writes or starting checks.
 The lock order is lifecycle, preparation, repository database lifecycle, check
-active, sorted resources, run, then local state. Gate files remain in the common
-Git directory after removal so concurrent callers use the same lock.
+active, sorted resources, run, then local state. Lifecycle and preparation gates
+live outside the worktree and Git directory and remain after removal, so
+concurrent callers use the same lock even during deletion.
 
 ## `anvil status --json`
 
@@ -241,10 +256,10 @@ Git directory after removal so concurrent callers use the same lock.
 ```
 
 `ready` requires complete preparation, satisfied component requirements and
-present required shared resources. Process `state` is `running`, `exited`,
+present required shared resources. With `--all`, a value that cannot be read
+for a worktree (`role`, `lease`, `prepare`) is reported as `unknown` with a
+warning, never as absent. Process `state` is `running`, `exited`,
 `reused` (PID recycled — never signaled), `unknown` or `foreign`.
-`status --all` reports a lease as `unknown` when its record cannot be decoded,
-and includes the worktree path and read error in `warnings`.
 
 ## Integrations
 

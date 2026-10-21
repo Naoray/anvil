@@ -40,15 +40,18 @@ type PrepareState struct {
 
 // StepRecord attests that one step definition completed against an input identity.
 type StepRecord struct {
-	Name        string    `yaml:"name" json:"name"`
-	Definition  string    `yaml:"definition" json:"definition"`
-	Inputs      string    `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Name       string `yaml:"name" json:"name"`
+	Definition string `yaml:"definition" json:"definition"`
+	Inputs     string `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	// Env digests the declared environment the step received; raw values
+	// are never stored.
+	Env         string    `yaml:"env,omitempty" json:"env,omitempty"`
 	CompletedAt time.Time `yaml:"completed_at" json:"completed_at"`
 }
 
 // PrepareLockPath returns the per-worktree preparation lock.
 func PrepareLockPath(worktreePath string) string {
-	return config.WorktreeLockPath(worktreePath, PrepareLockFile)
+	return config.WorktreeExternalLockPath(worktreePath, PrepareLockFile)
 }
 
 // AcquirePrepareLock blocks until this process may prepare the worktree.

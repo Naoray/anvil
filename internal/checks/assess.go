@@ -52,7 +52,11 @@ func ArtifactsIntact(result *Result) (bool, string) {
 		if _, err := os.Stat(artifact.Path); err != nil {
 			return false, "artifact " + artifact.Path + " is missing"
 		}
-		sum, _, err := fileDigest(artifact.Path)
+		digest := fileDigest
+		if artifact.Kind == ArtifactDirectory {
+			digest = treeDigest
+		}
+		sum, _, err := digest(artifact.Path)
 		if err != nil || sum != artifact.SHA256 {
 			return false, "artifact " + artifact.Path + " changed"
 		}
