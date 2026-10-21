@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Laravel/PHP preset installs declare their manifest/lockfile inputs.
 - `remove`, `prune` and `unlink --clean` stop verified owned processes before cleanup, then release ports and delete only the owned runtime directory; `--dry-run` lists them.
 
+### Fixed
+
+- `ensure` rejects `--dry-run` before mutations and emits one JSON error envelope for invalid arguments and flags. Failed preparation keeps child output on stderr.
+- Step reruns invalidate old completion records before execution, so failed or killed refreshes resume safely. `env.read` rebuilds context on every preparation.
+- Step paths and file conditions reject symlink escapes before preparation; environment overrides expand against one immutable worktree/inherited snapshot.
+
 ## [v1.12.0](https://github.com/naoray/anvil/compare/v1.11.0...v1.12.0) - 2026-10-19
 
 ### Added

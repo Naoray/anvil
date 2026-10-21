@@ -52,8 +52,8 @@ func (r *Registry) Create(name string, cfg config.StepConfig) (types.ScaffoldSte
 		return nil, fmt.Errorf("invalid condition for step %q: %w", name, err)
 	}
 	step := factory(cfg)
-	if len(cfg.Condition) != 0 || cfg.Enabled != nil {
-		return &configuredStep{ScaffoldStep: step, condition: cfg.Condition, enabled: cfg.Enabled, dir: cfg.Dir}, nil
+	if len(cfg.Condition) != 0 || cfg.Enabled != nil || cfg.Dir != "" || len(cfg.Inputs)+len(cfg.Outputs) != 0 {
+		return &configuredStep{ScaffoldStep: step, condition: cfg.Condition, enabled: cfg.Enabled, dir: cfg.Dir, cfg: cfg}, nil
 	}
 	return step, nil
 }
@@ -152,6 +152,7 @@ type configuredStep struct {
 	condition map[string]any
 	enabled   *bool
 	dir       string
+	cfg       config.StepConfig
 }
 
 func (s *configuredStep) IsEnabled() bool {
@@ -165,6 +166,9 @@ func (s *configuredStep) IsEnabled() bool {
 }
 
 func (s *configuredStep) Condition(ctx *types.ScaffoldContext) (bool, error) {
+	if err := ValidatePaths(ctx.WorktreePath, s.cfg); err != nil {
+		return false, err
+	}
 	root := ctx.WorktreePath
 	if s.dir != "" {
 		root = filepath.Join(ctx.WorktreePath, s.dir)

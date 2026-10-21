@@ -36,6 +36,11 @@ type processesData struct {
 	Processes []processStatus `json:"processes"`
 }
 
+var (
+	startAgentCommand = agentCommand{Name: "start", Mutating: true, Human: printProcessesHuman}
+	stopAgentCommand  = agentCommand{Name: "stop", Mutating: true, DryRun: true, Human: printProcessesHuman}
+)
+
 var startCmd = &cobra.Command{
 	Use:   "start [WORKTREE]",
 	Short: "Start a worktree's managed development processes",
@@ -54,7 +59,7 @@ Supported on macOS and Linux. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "start", Mutating: true, Human: printProcessesHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, startAgentCommand, func() (agentResult, error) {
 			return runStart(cmd, args)
 		})
 	},
@@ -73,7 +78,7 @@ port they listen on. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "stop", Mutating: true, DryRun: true, Human: printProcessesHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, stopAgentCommand, func() (agentResult, error) {
 			return runStop(cmd, args)
 		})
 	},
@@ -306,8 +311,8 @@ func printProcessesHuman(result agentResult) error {
 }
 
 func init() {
-	for _, command := range []*cobra.Command{startCmd, stopCmd} {
-		addJSONFlag(command)
+	for command, spec := range map[*cobra.Command]agentCommand{startCmd: startAgentCommand, stopCmd: stopAgentCommand} {
+		addJSONFlag(command, spec)
 		command.Flags().StringArray("process", nil, "Limit to this declared process (repeatable)")
 		rootCmd.AddCommand(command)
 	}

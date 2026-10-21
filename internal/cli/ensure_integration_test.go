@@ -158,6 +158,26 @@ func TestEnsureJSONErrors(t *testing.T) {
 	require.Equal(t, 2, code, stderr)
 }
 
+func TestEnsureRejectsDryRunBeforeEffects(t *testing.T) {
+	f := newAgentFixture(t, ensureFixtureYAML, map[string]string{"deps.lock": "v1"})
+	for _, args := range [][]string{
+		{"ensure", "--dry-run"},
+		{"ensure", "dry-run-created", "--dry-run"},
+		{"ensure", "dry-run-skipped", "--dry-run", "--skip-prepare"},
+	} {
+		envelope, stderr, code := f.runJSON(f.repo, args...)
+		require.Equal(t, 2, code, stderr)
+		require.Equal(t, false, envelope["ok"])
+		require.Equal(t, "invalid_arguments", field(t, envelope, "error", "code"))
+	}
+	require.NoFileExists(t, filepath.Join(f.repo, ".anvil.local"))
+	require.NoFileExists(t, filepath.Join(f.repo, "once.count"))
+	require.NoDirExists(t, f.worktreePath("dry-run-created"))
+	require.NoDirExists(t, f.worktreePath("dry-run-skipped"))
+	require.Equal(t, "main", gitRun(t, f.repo, "branch", "--format=%(refname:short)"))
+	require.Len(t, strings.Split(gitRun(t, f.repo, "worktree", "list"), "\n"), 1)
+}
+
 func TestEnsureHumanOutputAndAmbiguity(t *testing.T) {
 	f := newAgentFixture(t, ensureFixtureYAML, map[string]string{"deps.lock": "v1"})
 	stdout, stderr, code := f.run(f.repo, "ensure", "feature/human")
@@ -172,7 +192,7 @@ func TestEnsureHumanOutputAndAmbiguity(t *testing.T) {
 }
 
 // Review #24 blocker 1: ensure must not have effects under --dry-run.
-func TestEnsureRejectsDryRunBeforeEffects(t *testing.T) {
+func TestEnsureDryRunPreservesExistingPreparationState(t *testing.T) {
 	f := newAgentFixture(t, "scaffold:\n  override: true\n  steps:\n    - name: command.run\n      command: touch dry.marker\n", nil)
 	envelope, _, code := f.runJSON(f.repo, "ensure", "feature/new", "--dry-run")
 	require.Equal(t, 2, code)

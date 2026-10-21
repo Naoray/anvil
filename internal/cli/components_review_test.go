@@ -59,7 +59,7 @@ const optInComponentsYAML = `components:
         outputs: [built]
 `
 
-func TestRunRequireReadyChecksSelectedComponent(t *testing.T) {
+func TestReviewRunRequireReadyChecksSelectedComponent(t *testing.T) {
 	f := newAgentFixture(t, optInComponentsYAML, map[string]string{"app/.keep": "", "extras/.keep": ""})
 	logPath := fakeToolchain(t, f, "extras-tool")
 	_, stderr, code := f.run(f.repo, "ensure", "feature/x")

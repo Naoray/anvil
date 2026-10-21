@@ -24,6 +24,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Python for Windows venv preparation
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Make POSIX shell available on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "$env:ProgramFiles/Git/bin"
+
       - name: Run tests
         run: go test ./... -v
 

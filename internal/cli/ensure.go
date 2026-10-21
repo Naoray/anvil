@@ -24,6 +24,8 @@ import (
 // worktree instead of racing `git worktree add`.
 const worktreeCreateLockFile = "anvil-worktree-create.lock"
 
+var ensureAgentCommand = agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}
+
 var ensureCmd = &cobra.Command{
 	Use:   "ensure [WORKTREE]",
 	Short: "Create a worktree if needed and prepare it idempotently",
@@ -45,7 +47,7 @@ Mutating. Use --json for one versioned JSON document on stdout.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, ensureAgentCommand, func() (agentResult, error) {
 			return runEnsure(cmd, args)
 		})
 	},
@@ -79,12 +81,13 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		return agentResult{}, err
 	}
 
-	data := ensureData{Components: []capabilities.ComponentPlan{}, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
+	summary, warnings := summarizeWorktree(*target)
+	data := ensureData{Components: []capabilities.ComponentPlan{}, Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	if mustGetBool(cmd, "skip-prepare") {
 		if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
-			return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
-		summary, warnings := summarizeWorktree(*target)
+		summary, warnings = summarizeWorktree(*target)
 		data.Worktree = summary
 		state, err := wtstate.ReadPrepare(target.Path)
 		if err == nil {
@@ -99,11 +102,11 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 
 	selected, err := cmd.Flags().GetStringArray("component")
 	if err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
 	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected})
 	if err != nil {
-		return agentResult{}, err
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	data.Components = wenv.Components
 	// Every component's conditions are validated, including components
@@ -114,7 +117,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
 	}
 	if err != nil {
-		return agentResult{Data: data}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
 	if wenv.ComponentErr != nil {
 		summary, warnings := summarizeWorktree(*target)
@@ -136,20 +139,20 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	}
 	targetPC := wenv.PC
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
 	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
 	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: targetPC.Config, DefaultSteps: resolvedPreset.DefaultSteps(), ExtraSteps: extraSteps}
 	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
 	// Identity is the first write; the exported environment includes it.
 	if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
-		return agentResult{}, err
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	if err := provisionResources(wenv); err != nil {
 		return agentResult{Data: data}, err
@@ -178,7 +181,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		SkipCompleted: !mustGetBool(cmd, "refresh"),
 	})
 
-	summary, warnings := summarizeWorktree(*target)
+	summary, warnings = summarizeWorktree(*target)
 	data.Worktree = summary
 	if report != nil {
 		data.Prepare.PlanDigest = report.PlanDigest
@@ -199,32 +202,22 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	return agentResult{Data: data, Warnings: warnings}, nil
 }
 
-// prepareFailure returns a JSON-safe error. Step errors embed the command's
-// combined output, which may contain secrets, so only the failing step is
-// named; the full diagnostics go to stderr.
+// prepareFailure names the failed step without copying child output into JSON.
 func prepareFailure(report *scaffold.PrepareReport, runErr error) error {
-	fmt.Fprintf(os.Stderr, "preparation failed:\n%v\n", runErr)
-	step := "a step"
+	fmt.Fprintf(os.Stderr, "preparation failed: %v\n", runErr)
+	step, key := "a step", ""
 	for _, outcome := range report.Steps {
 		if outcome.Result == scaffold.OutcomeFailed {
 			step = fmt.Sprintf("step %d (%s)", outcome.Index+1, outcome.Name)
+			key = outcome.Key
 		}
 	}
 	return &agentapi.Error{
 		Code:    agentapi.CodePrepareFailed,
 		Message: fmt.Sprintf("preparation failed at %s; command output is on stderr", step),
-		Details: map[string]any{"failed_step": failedKey(report)},
+		Details: map[string]any{"failed_step": key},
 		Cause:   runErr,
 	}
-}
-
-func failedKey(report *scaffold.PrepareReport) string {
-	for _, outcome := range report.Steps {
-		if outcome.Result == scaffold.OutcomeFailed {
-			return outcome.Key
-		}
-	}
-	return ""
 }
 
 // ensureWorktreeExists resolves the target, creating it under the
@@ -319,7 +312,7 @@ func printEnsureHuman(result agentResult) error {
 }
 
 func init() {
-	addJSONFlag(ensureCmd)
+	addJSONFlag(ensureCmd, ensureAgentCommand)
 	addDatabaseFlags(ensureCmd)
 	ensureCmd.Flags().StringP("base", "b", "", "Base branch for a newly created worktree")
 	ensureCmd.Flags().Bool("no-track", false, "Skip remote tracking for a newly created branch")

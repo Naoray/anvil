@@ -149,7 +149,7 @@ func TestEnsureResumesAfterInterruptedRun(t *testing.T) {
 	steps := []config.StepConfig{countingStep("first", nil), countingStep("second", nil)}
 	// Simulate a process killed after the first step completed.
 	require.NoError(t, wtstate.BeginPrepare(dir, "plan", timeNow()))
-	plan, _ := buildPlan(steps)
+	plan, _ := buildPlan(steps, nil)
 	recorder := &prepareRecorder{worktreePath: dir, plan: plan, now: timeNow, reasons: map[int]string{}}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "first.count"), []byte("run\n"), 0o644))
 	require.NoError(t, recorder.AfterStep(0, nil, nil))
@@ -286,7 +286,7 @@ func TestRerunForgetsRecordBeforeExecuting(t *testing.T) {
 	require.NoError(t, err)
 	state, err := wtstate.ReadPrepare(dir)
 	require.NoError(t, err)
-	plan, _ := buildPlan(steps)
+	plan, _ := buildPlan(steps, nil)
 	// A refresh decides to run; if the process is then killed, no record survives.
 	recorder := &prepareRecorder{worktreePath: dir, plan: plan, records: state.Steps, now: timeNow, reasons: map[int]string{}}
 	skip, _, err := recorder.BeforeStep(0, nil)
