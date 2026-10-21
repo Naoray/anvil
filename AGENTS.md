@@ -47,6 +47,7 @@ anvil remove feature-my-feature  # When done
 | Runtime directories, ports, shared resources | `internal/resources/` |
 | Managed process identity and lifecycle | `internal/procs/` |
 | Check runner, provenance, resource locks | `internal/checks/` |
+| Machine-wide slots for expensive checks | `internal/slots/` |
 | Synthetic example repositories | `examples/` |
 | UI components | `internal/ui/` |
 | Shell completions | `internal/cli/completion.go` |
@@ -231,7 +232,8 @@ processes, checks, roles). Observations live in exactly one place each:
 `.anvil.local` (database ownership, warm provenance, identity, preparation,
 metadata, lease, process records), `<runtime root>/ports.json` (port
 reservations), `<runtime root>/worktrees/<id>/` (directories, check results,
-logs) and `<runtime root>/locks/` (resource locks). New sections are decoded
+logs), `<runtime root>/locks/` (resource locks) and `<runtime root>/slots/`
+(machine-wide check slots and their queue). New sections are decoded
 with case-preserving YAML in `config.LoadProject`, never through viper.
 
 ### Local State Writes
