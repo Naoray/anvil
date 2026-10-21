@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Machine-wide slots for expensive checks: checks marked `expensive` (weight 1) or declaring `slots: N` share one semaphore across all projects and worktrees (global `checks: {slots, max_load, load_wait}`; `ANVIL_CHECK_SLOTS`, `ANVIL_CHECK_MAX_LOAD`, `ANVIL_CHECK_LOAD_WAIT`). Waiters queue in strict order (`anvil check --priority N`, then arrival), with optional load-average gating, `--slot-wait` and crash-safe lock-file slots. New read-only `anvil slots --json`; `check --list --json` and `status --json` report slot holders and queue; results carry `queued_ms`.
+
+### Changed
+
+- Expensive checks are now limited machine-wide: by default at most `max(2, CPUs/4)` run at once across every project and worktree; further runs wait in the slot queue (default without time limit — `--slot-wait 0` waits until interrupted, unlike `--lock-wait 0`).
+- `started_at` and `duration_ms` of check results exclude time spent waiting for a slot; that wait is reported separately as `queued_ms`.
+
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.

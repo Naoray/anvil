@@ -65,6 +65,7 @@ Codes are stable and never reused for a different meaning.
 | `anvil status [WT] --json` / `--all` | no | Readiness, Git state and pin match, lease, processes, ports, check currency, cleanup preview |
 | `anvil check --list --json` | no | Checks with latest result and currency |
 | `anvil check [CHECK...] --json` | yes | Run checks, record provenance |
+| `anvil slots --json` | no | Machine-wide check slots: capacity, load, holders, queue |
 | `anvil start` / `anvil stop [WT] --json` | yes | Managed processes |
 | `anvil lease acquire\|renew\|release\|break [WT] --json` | yes | Advisory leases |
 | `anvil lease show [WT] --json` | no | Lease state |
@@ -155,7 +156,7 @@ Run:
       "check": "fast",
       "status": "passed",
       "exit_code": 0,
-      "started_at": "…", "finished_at": "…", "duration_ms": 812,
+      "started_at": "…", "finished_at": "…", "duration_ms": 812, "queued_ms": 0,
       "worktree": {"id": "wt_…", "path": "…", "branch": "feature/x"},
       "identity": {
         "git": {"head": "<sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
@@ -183,7 +184,65 @@ while its worktree is being removed
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
 `locks`, `commands`, `latest` (a result or `null`), `assessment`
-(`current`, `passing_and_current`, `stale_reasons[]`) and `lock_holders[]`.
+(`current`, `passing_and_current`, `stale_reasons[]`), `lock_holders[]` and
+`slots` (`null` for checks that take no slot, otherwise `{weight, capacity,
+in_use, queued, holders[], queue[]}`: machine-wide counts plus this check's own
+slot holders and queue entries, shaped as in `anvil slots`).
+
+### Machine-wide check slots
+
+Checks marked `expensive: true` (weight 1) or declaring `slots: N` (weight N)
+share one semaphore across every project and worktree on the machine, under
+`<runtime root>/slots/`. Capacity comes from the global config
+(`~/.config/anvil/anvil.yaml`: `checks: {slots: 2, max_load: 6.0, load_wait: 2m}`),
+overridden by `ANVIL_CHECK_SLOTS`, `ANVIL_CHECK_MAX_LOAD` and
+`ANVIL_CHECK_LOAD_WAIT`; the default capacity is `max(2, CPUs/4)` and load
+gating is off unless `max_load` is set. A check whose weight exceeds the capacity
+fails before anything runs with `config_invalid` (exit 5).
+
+- **Order.** Waiters are admitted strictly head-of-line: higher
+  `--priority N` first, then arrival. Only the head may take slots, so a
+  request never overtakes an earlier request of equal or higher priority,
+  even when it would fit. Responsive tickets come first: a ticket whose owner
+  has not heartbeated for 30s queues behind them until it polls again.
+- **Load.** With `max_load` set, the head waits (`waiting_for: "load"`) while
+  the 1-minute load average exceeds it. `load_wait` (default 2m) bounds each
+  check's load wait, measured from when it queued; when it elapses the check
+  proceeds with a warning, because slot capacity
+  still bounds concurrency. Where the load average is unavailable (not Linux
+  or macOS), gating is skipped with a warning and never blocks.
+- **Waiting.** `--slot-wait D` bounds the whole wait; the default `0` waits
+  until interrupted. This differs from `--lock-wait`, whose `0` fails
+  immediately. On timeout nothing runs: `resource_busy` (exit 7) with
+  `details.{waiting_for, position, queued, capacity, in_use, holders[]}`.
+  Ctrl-C or SIGTERM while queued removes the ticket and behaves like any
+  interruption before execution (`check_failed`, exit 130, no result).
+  While queued, `check NAME: waiting for slot (position 2 of 3)` lines go to
+  stderr (suppressed by `--quiet`). A queued check keeps holding its
+  worktree's shared lifecycle gate and the check's active lock, so the
+  worktree cannot be removed (`cleanup_blocked`) and the same check cannot
+  start again there while it waits.
+- **Nesting.** A slot-gated check whose command runs another slot-gated
+  `anvil check` waits for a second slot while holding the first: at capacity
+  1 with the default unbounded `--slot-wait` this never completes. Do not nest
+  expensive checks, or bound the inner wait.
+- **Queue state.** `queue.json` only orders waiters. If it is lost or
+  malformed it is reset with a warning; capacity stays enforced by the slot
+  lock files. Writes are atomic and synced.
+- **Crash safety.** A weight-w run holds w lock files; the supervisor of each
+  command inherits them like resource locks, so capacity is freed only when
+  the run and its process group are gone, and always when they die. Every
+  participant deletes queue tickets whose PID exited or now has a different
+  kernel start identity. A live ticket that stops heartbeating for 30s (a
+  stopped or wedged process) queues behind responsive tickets but keeps its
+  ticket, and regains its place when it polls again.
+- **Reuse.** `--reuse` is assessed (under the resource locks) before queueing;
+  a hit executes nothing and takes no slot. On a miss, one non-blocking slot
+  attempt is made while those locks are still held; if it succeeds the
+  assessment stands (toolchain probes run once). Otherwise the locks are
+  released, the check queues, and it is reassessed after admission.
+- **Timing.** Results carry `queued_ms`, the slot queue wait (`0` for
+  ungated checks); `started_at` and `duration_ms` exclude it.
 
 Check identities fingerprint each resolved command directory and effective
 non-secret environment, including component values, expanded command overrides
@@ -215,12 +274,17 @@ Gate and preparation lock files live in a per-user directory outside the
 worktree and its Git directory. Gate files are never deleted.
 
 Lock order is lifecycle gate → preparation lock → repository database lock →
-check active lock → resource locks sorted by name → run lock → `.anvil.local`
-state lock. Never upgrade a shared gate; acquire multiple worktree gates in
+check active lock → machine-wide check slots → resource locks sorted by name →
+run lock → `.anvil.local` state lock. A queued check holds no resource lock;
+the slot queue file lock is held only briefly and never while waiting. One
+exception: on a `--reuse` miss a gated check, while still holding its resource
+locks, waits up to 2s for the queue file lock and makes one non-blocking slot
+attempt (queued behind earlier requests like any ticket); this cannot deadlock
+because a queue-lock holder never waits on resource or slot locks. Never upgrade a shared gate; acquire multiple worktree gates in
 canonical path order. Lease mutations must use the same shared gate.
 
 On Unix, checks and toolchain probes run beneath a separate supervisor which
-inherits the lifecycle, active, resource and run locks. Parent death closes a
+inherits the lifecycle, active, slot, resource and run locks. Parent death closes a
 heartbeat, terminates the process group, and retains exclusion until the group
 is gone. Commands must keep descendants in that group rather than daemonizing.
 A group whose termination cannot be established keeps the locks (fail closed).
@@ -277,9 +341,28 @@ release. A mutation during cleanup fails with `cleanup_blocked` and leaves state
 unchanged. After taking the gate, CLI callers revalidate the target's Git
 directory, registration and HEAD before claim writes or starting checks.
 The lock order is lifecycle, preparation, repository database lifecycle, check
-active, sorted resources, run, then local state. Lifecycle and preparation gates
-live outside the worktree and Git directory and remain after removal, so
+active, check slots, sorted resources, run, then local state (with the
+non-blocking `--reuse` slot attempt described above as the only exception). Lifecycle and
+preparation gates live outside the worktree and Git directory and remain after removal, so
 concurrent callers use the same lock even during deletion.
+
+## `anvil slots --json` (read-only)
+
+```json
+"data": {
+  "dir": "…/anvil/slots",
+  "capacity": 2, "in_use": 1,
+  "load": {"supported": true, "value": 3.12, "max": 6, "wait_seconds": 120},
+  "holders": [{"slot": 0, "weight": 1, "pid": 4242, "check": "bench", "worktree": "…", "worktree_id": "wt_…", "run_id": "…", "priority": 0, "since": "…"}],
+  "queue": [{"position": 1, "waiting_for": "slot", "priority": 5, "weight": 2, "check": "e2e", "worktree": "…", "worktree_id": "wt_…", "pid": 4310, "enqueued_at": "…", "heartbeat": "…", "responsive": true}]
+}
+```
+
+Machine-wide and project-independent. `load.max` is `0` when load gating is
+off; `load.value` is `null` (and `supported` false) where the load average is
+unavailable, and `load.error` then says why (omitted otherwise). `queue` is in admission order and omits tickets of dead or
+recycled PIDs; only position 1 can be `waiting_for: "load"`. Holders are
+reported only while their slot lock is held. The view creates nothing.
 
 ## `anvil status --json`
 
@@ -291,6 +374,7 @@ concurrent callers use the same lock even during deletion.
   "processes": [{"name": "web", "state": "running", "pid": 123, "command": "…", "log": "…"}],
   "ports": [{"port": 20431, "name": "web", "worktree_id": "wt_…", "listening": true}],
   "checks": [{"name": "fast", "status": "passed", "run_id": "…", "current": true, "passing_and_current": true, "stale_reasons": []}],
+  "slots": {"capacity": 2, "in_use": 1, "queued": 1, "holders": [], "queue": [{"position": 1, "waiting_for": "slot", "check": "e2e", "…": "…"}]},
   "cleanup": {
     "allowed": false,
     "blocked_by": ["active lease by \"codex\" (task \"SOLO-7\"); release it or use --ignore-lease"],
@@ -298,6 +382,10 @@ concurrent callers use the same lock even during deletion.
   }
 }
 ```
+
+`slots` is the machine-wide check slot `capacity`, `in_use` and `queued`
+counts with this worktree's own `holders[]` and `queue[]` entries (shaped as
+in `anvil slots`), or `null` with a warning when slot settings are invalid.
 
 `ready` requires complete preparation, satisfied component requirements and
 present required shared resources. With `--all`, a value that cannot be read

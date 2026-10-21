@@ -214,6 +214,7 @@ checks:
     expensive: true          # never implicit; needs --allow-expensive
     reusable: true           # allows --reuse of a current passing result
     locks: [gpu]             # exclusive machine-wide resource
+    slots: 2                 # weight in the machine-wide slot semaphore (expensive default: 1)
     inputs: ["${ANVIL_ARTIFACTS_DIR}/recordings", eval/contract.yaml]
     artifacts: ["${ANVIL_ARTIFACTS_DIR}/bench/*.json"]
     commands: [...]
@@ -284,6 +285,26 @@ computed, so the recorded identity is the state the commands ran against.
 Locks remain held through supervisor cleanup and are never stolen because
 time passed. The same check cannot run twice concurrently in one worktree; different
 checks without shared locks run concurrently.
+
+**Machine-wide slots.** Expensive checks (weight 1) and checks declaring
+`slots: N` (weight N) share a counting semaphore across every project and
+worktree (`<runtime root>/slots/`, inspect with `anvil slots`). Capacity is
+`checks.slots` in `~/.config/anvil/anvil.yaml` (default `max(2, CPUs/4)`;
+`ANVIL_CHECK_SLOTS` overrides). Waiters are admitted strictly in order —
+higher `--priority` first, then arrival; a request never overtakes an earlier
+responsive request of equal or higher priority — and a slot is taken after the
+check's active lock and before its resource locks, so a queued check never
+holds a resource lock. Optional `checks.max_load` makes the head of the queue
+wait while the 1-minute load average is higher; `checks.load_wait` (default
+2m) bounds each check's load wait from when it queued, then it proceeds with
+a warning; where the load
+average is unavailable gating is skipped with a warning. `--slot-wait`
+bounds the wait and fails with `resource_busy`; its default `0` waits until
+interrupted (unlike `--lock-wait 0`). Results record the wait as `queued_ms`;
+`started_at` and `duration_ms` exclude it.
+Slots are lock files inherited by the supervisor, so a killed run frees them
+once its process group is gone; queue tickets of dead or recycled PIDs are
+discarded by the next participant. A `--reuse` hit takes no slot.
 
 **Reuse and benchmark caching.** `--reuse` returns the latest result instead of
 running only when the check is declared `reusable`, the latest result passed,

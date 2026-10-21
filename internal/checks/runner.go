@@ -39,6 +39,8 @@ type RunRequest struct {
 	Now          func() time.Time
 	Reuse        bool
 	ReuseMiss    func(string)
+	// Slot gates expensive or slot-weighted checks machine-wide.
+	Slot SlotOptions
 }
 
 // ErrAlreadyRunning reports a concurrent run of the same check in the same worktree.
@@ -79,39 +81,20 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	if err != nil {
 		return nil, err
 	}
-	locks, err := acquireResourceLocks(ctx, req.RuntimeRoot, req.Check.Locks, req.LockWait, LockHolder{
-		PID: os.Getpid(), WorktreeID: req.Worktree.ID, Worktree: req.Worktree.Path, Check: req.Check.Name, RunID: runID, Since: started,
-	})
+	adm, err := admit(ctx, req, store, gate, active, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { err = errors.Join(err, locks.release()) }()
-
-	guards := append([]*lockfile.Lock{gate, active}, locks...)
-	identityReq := IdentityRequest{Guards: guards, WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
-	targets, err := resolveTargets(identityReq)
-	if err != nil {
-		return nil, err
+	defer func() { err = errors.Join(err, adm.release()) }()
+	if adm.assessment.Reused != nil {
+		return adm.assessment.Reused, nil
 	}
-	identityReq.Targets = targets
-	identity, err := ComputeIdentity(ctx, identityReq)
-	if err != nil {
-		return nil, fmt.Errorf("computing check identity: %w", err)
+	if req.Reuse && req.ReuseMiss != nil {
+		req.ReuseMiss(adm.assessment.Reason)
 	}
-
-	if req.Reuse {
-		reused, reason, err := store.reusable(req.Check, identity)
-		if err != nil {
-			return nil, err
-		}
-		if reused != nil {
-			reused.Reused = true
-			return reused, nil
-		}
-		if req.ReuseMiss != nil {
-			req.ReuseMiss(reason)
-		}
-	}
+	started = started.Add(adm.queued) // timings exclude the slot queue
+	guards := adm.guards(gate, active)
+	targets, identity := adm.assessment.Targets, adm.assessment.Identity
 
 	runDir := store.runDir(req.Check.Name, runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
@@ -126,7 +109,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 
 	result = &Result{
 		Schema: ResultSchema, RunID: runID, Check: req.Check.Name, Status: StatusRunning,
-		StartedAt: started, Worktree: req.Worktree, Identity: identity,
+		StartedAt: started, QueuedMS: adm.queued.Milliseconds(), Worktree: req.Worktree, Identity: identity,
 		Commands: []CommandResult{}, Artifacts: []Artifact{}, Locks: append([]string{}, req.Check.Locks...),
 		AnvilVersion: req.AnvilVersion, RunDir: runDir,
 	}

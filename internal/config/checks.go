@@ -24,6 +24,10 @@ type CheckConfig struct {
 	Reusable bool `yaml:"reusable" json:"reusable"`
 	// Locks are exclusive machine-wide resources held while the check runs.
 	Locks []string `yaml:"locks" json:"locks,omitempty"`
+	// Slots is the check's weight in the machine-wide slot semaphore shared
+	// by expensive checks across projects and worktrees (0: 1 when
+	// Expensive, otherwise ungated).
+	Slots int `yaml:"slots" json:"slots,omitempty"`
 	// Artifacts are produced paths (globs; worktree-relative or under
 	// ${ANVIL_RUNTIME_DIR}) recorded with content digests.
 	Artifacts []string `yaml:"artifacts" json:"artifacts,omitempty"`
@@ -124,6 +128,9 @@ func (c *Config) validateChecks() error {
 		}
 		if _, err := ParseOptionalDuration(check.Timeout); err != nil {
 			problems = append(problems, fmt.Errorf("%s: timeout: %w", label, err))
+		}
+		if check.Slots < 0 {
+			problems = append(problems, fmt.Errorf("%s: slots must be at least 1 when set", label))
 		}
 		for _, lock := range check.Locks {
 			if !resourceNamePattern.MatchString(lock) {
