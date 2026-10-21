@@ -127,9 +127,15 @@ func python(dir, goos string) Contribution {
 		venv.Env["POETRY_VIRTUALENVS_IN_PROJECT"] = "true"
 		venv.Prepare = []Command{{Run: "poetry install --no-interaction", Inputs: []string{"pyproject.toml", "poetry.lock"}, Outputs: []string{".venv"}}}
 	case exists(dir, "requirements.txt"):
-		venv.Requires = []string{"python3"}
+		pythonCommand := "python3"
+		interpreter := filepath.Join(bin, "python")
+		if goos == "windows" {
+			pythonCommand = "python"
+			interpreter += ".exe"
+		}
+		venv.Requires = []string{pythonCommand}
 		venv.Prepare = []Command{{
-			Run:     "python3 -m venv .venv && .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt",
+			Run:     pythonCommand + " -m venv .venv && " + shellQuote(filepath.ToSlash(interpreter)) + " -m pip install --disable-pip-version-check -r requirements.txt",
 			Inputs:  []string{"requirements.txt"},
 			Outputs: []string{".venv"},
 		}}
