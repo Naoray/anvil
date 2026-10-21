@@ -61,12 +61,13 @@ type slotsData struct {
 // checkSlotInfo is a gated check's slot weight with the machine-wide
 // summary and this check's own holders and tickets.
 type checkSlotInfo struct {
-	Weight   int                `json:"weight"`
-	Capacity int                `json:"capacity"`
-	InUse    int                `json:"in_use"`
-	Queued   int                `json:"queued"`
-	Holders  []slots.Holder     `json:"holders"`
-	Queue    []slots.QueueEntry `json:"queue"`
+	Weight    int                `json:"weight"`
+	Capacity  int                `json:"capacity"`
+	InUse     int                `json:"in_use"`
+	Queued    int                `json:"queued"`
+	Holders   []slots.Holder     `json:"holders"`
+	Queue     []slots.QueueEntry `json:"queue"`
+	QueueBusy bool               `json:"queue_busy"`
 }
 
 func newCheckSlotInfo(check config.CheckConfig, status slots.Status) *checkSlotInfo {
@@ -75,7 +76,10 @@ func newCheckSlotInfo(check config.CheckConfig, status slots.Status) *checkSlotI
 		return nil
 	}
 	info := &checkSlotInfo{Weight: weight, Capacity: status.Capacity, InUse: status.InUse, Queued: len(status.Queue),
-		Holders: []slots.Holder{}, Queue: []slots.QueueEntry{}}
+		Holders: []slots.Holder{}, Queue: []slots.QueueEntry{}, QueueBusy: status.QueueBusy}
+	if status.QueueBusy {
+		info.Holders, info.Queue = nil, nil // unavailable, not empty
+	}
 	for _, holder := range status.Holders {
 		if holder.Check == check.Name {
 			info.Holders = append(info.Holders, holder)
@@ -92,11 +96,12 @@ func newCheckSlotInfo(check config.CheckConfig, status slots.Status) *checkSlotI
 // worktreeSlots is the machine-wide slot summary with one worktree's own
 // holders and queued tickets (anvil status --json).
 type worktreeSlots struct {
-	Capacity int                `json:"capacity"`
-	InUse    int                `json:"in_use"`
-	Queued   int                `json:"queued"`
-	Holders  []slots.Holder     `json:"holders"`
-	Queue    []slots.QueueEntry `json:"queue"`
+	Capacity  int                `json:"capacity"`
+	InUse     int                `json:"in_use"`
+	Queued    int                `json:"queued"`
+	Holders   []slots.Holder     `json:"holders"`
+	Queue     []slots.QueueEntry `json:"queue"`
+	QueueBusy bool               `json:"queue_busy"`
 }
 
 func describeWorktreeSlots(wenv *worktreeEnv, warnings *[]string) *worktreeSlots {
@@ -119,7 +124,11 @@ func describeWorktreeSlots(wenv *worktreeEnv, warnings *[]string) *worktreeSlots
 		}
 		return git.PathsEqual(path, wenv.Worktree.Path)
 	}
-	out := &worktreeSlots{Capacity: status.Capacity, InUse: status.InUse, Queued: len(status.Queue), Holders: []slots.Holder{}, Queue: []slots.QueueEntry{}}
+	out := &worktreeSlots{Capacity: status.Capacity, InUse: status.InUse, Queued: len(status.Queue), Holders: []slots.Holder{}, Queue: []slots.QueueEntry{},
+		QueueBusy: status.QueueBusy}
+	if status.QueueBusy {
+		out.Holders, out.Queue = nil, nil // unavailable, not empty
+	}
 	for _, holder := range status.Holders {
 		if mine(holder.WorktreeID, holder.Worktree) {
 			out.Holders = append(out.Holders, holder)
@@ -168,12 +177,21 @@ func checkSlotOptions(cmd *cobra.Command, wenv *worktreeEnv, selected []config.C
 	if wait < 0 {
 		return checks.SlotOptions{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "--slot-wait must not be negative (0 waits until interrupted)")
 	}
-	gated := false
-	for _, check := range selected {
-		gated = gated || checks.SlotWeight(check) > 0
+	var gated *config.CheckConfig
+	for i := range selected {
+		if checks.SlotWeight(selected[i]) > 0 && gated == nil {
+			gated = &selected[i]
+		}
 	}
-	if !gated {
+	if gated == nil {
 		return checks.SlotOptions{}, nil
+	}
+	// A nested gated check waits for capacity its ancestor holds; at full
+	// capacity an unbounded wait never ends, so require an explicit bound.
+	if holder := os.Getenv(checks.SlotHolderEnv); holder != "" && wait == 0 {
+		return checks.SlotOptions{}, agentapi.Errorf(agentapi.CodeConfigInvalid,
+			"check %q needs a machine-wide slot but is running inside check %q, which already holds one; nested slot-gated checks can deadlock. Pass --slot-wait to bound the wait, or do not nest expensive checks",
+			gated.Name, holder)
 	}
 	manager, err := slotManager(wenv.PC.GlobalConfig)
 	if err != nil {

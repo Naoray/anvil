@@ -13,6 +13,11 @@ import (
 	"github.com/naoray/anvil/internal/slots"
 )
 
+// SlotHolderEnv names the check whose commands run while it holds a
+// machine-wide slot. A slot-gated check started beneath it (a nested
+// `anvil check`) could wait forever for capacity its own ancestor holds.
+const SlotHolderEnv = "ANVIL_CHECK_SLOT_HOLDER"
+
 // SlotOptions admits slot-weighted checks through the machine-wide
 // semaphore. A nil Manager disables gating.
 type SlotOptions struct {

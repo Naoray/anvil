@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Machine-wide slots for expensive checks: checks marked `expensive` (weight 1) or declaring `slots: N` share one semaphore across all projects and worktrees (global `checks: {slots, max_load, load_wait}`; `ANVIL_CHECK_SLOTS`, `ANVIL_CHECK_MAX_LOAD`, `ANVIL_CHECK_LOAD_WAIT`). Waiters queue in strict order (`anvil check --priority N`, then arrival), with optional load-average gating, `--slot-wait` and crash-safe lock-file slots. New read-only `anvil slots --json`; `check --list --json` and `status --json` report slot holders and queue; results carry `queued_ms`.
+- Machine-wide slots for expensive checks: checks marked `expensive` (weight 1) or declaring `slots: N` share one semaphore across all projects and worktrees (global `checks: {slots, max_load, load_wait}`; `ANVIL_CHECK_SLOTS`, `ANVIL_CHECK_MAX_LOAD`, `ANVIL_CHECK_LOAD_WAIT`). Waiters queue in strict order (`anvil check --priority N`, then arrival), with optional load-average gating, `--slot-wait` and crash-safe lock-file slots. New read-only `anvil slots --json`; `check --list --json` and `status --json` report slot holders and queue; results carry `queued_ms`. A slot-gated check started from inside a running slot-gated check is refused (`config_invalid`) unless `--slot-wait` bounds its wait, instead of deadlocking.
 
 ### Changed
 
