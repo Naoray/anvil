@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -105,6 +106,16 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		return agentResult{}, err
 	}
 	data.Components = wenv.Components
+	// Every component's conditions are validated, including components
+	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
+	// configuration is refused before any effect.
+	validation, err := capabilities.ValidationSteps(wenv.Worktree.Path, wenv.PC.Config, runtime.GOOS)
+	if err == nil {
+		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
+	}
+	if err != nil {
+		return agentResult{Data: data}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
 	if wenv.ComponentErr != nil {
 		summary, warnings := summarizeWorktree(*target)
 		data.Worktree = summary

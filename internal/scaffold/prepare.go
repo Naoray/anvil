@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/scaffold/steps"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/wtstate"
 )
@@ -64,6 +65,8 @@ type planEntry struct {
 	definition string
 	cfg        config.StepConfig
 	cacheable  bool
+	// env digests the declared environment the step receives.
+	env string
 }
 
 // definitionDigest identifies a step definition independent of its position.
@@ -93,6 +96,41 @@ func buildPlan(configs []config.StepConfig) ([]planEntry, string) {
 		writeHashString(planHash, definition)
 	}
 	return plan, hex.EncodeToString(planHash.Sum(nil))
+}
+
+// applyEnvDigests records, per step, a digest of the declared environment
+// it receives: the project env keys and the step's own keys, with the
+// values after expansion. PATH is left out so differences in the caller's
+// shell PATH do not invalidate preparation; its declared prefix is part of
+// the step definition.
+func applyEnvDigests(plan []planEntry, base map[string]string, projectKeys []string) {
+	for i := range plan {
+		resolved := steps.ResolveEnv(base, plan[i].cfg.Env)
+		keys := map[string]bool{}
+		for _, key := range projectKeys {
+			keys[key] = true
+		}
+		for key := range plan[i].cfg.Env {
+			keys[key] = true
+		}
+		delete(keys, "PATH")
+		if len(keys) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(keys))
+		for key := range keys {
+			names = append(names, key)
+		}
+		sort.Strings(names)
+		h := sha256.New()
+		for _, name := range names {
+			writeHashString(h, name)
+			value, ok := resolved[name]
+			writeHashString(h, fmt.Sprintf("%t", ok))
+			writeHashString(h, value)
+		}
+		plan[i].env = hex.EncodeToString(h.Sum(nil))
+	}
 }
 
 func writeHashString(w io.Writer, value string) {
@@ -219,24 +257,39 @@ func (r *prepareRecorder) BeforeStep(index int, _ types.ScaffoldStep) (bool, str
 	if !r.skipCompleted || record.Definition != entry.definition {
 		return false, "", r.invalidate(entry.key)
 	}
-	root := stepRoot(r.worktreePath, entry.cfg)
+	current, reason, err := recordCurrent(r.worktreePath, entry, record)
+	if err != nil {
+		return false, "", err
+	}
+	if !current {
+		r.reasons[index] = reason
+		return false, "", r.invalidate(entry.key)
+	}
+	return true, SkipUpToDate, nil
+}
+
+// recordCurrent reports whether a completion record with a matching
+// definition still describes the step's environment, inputs and outputs.
+func recordCurrent(worktreePath string, entry planEntry, record wtstate.StepRecord) (bool, string, error) {
+	if record.Env != entry.env {
+		return false, "environment changed", nil
+	}
+	root := stepRoot(worktreePath, entry.cfg)
 	inputs, err := InputsDigest(root, entry.cfg.Inputs)
 	if err != nil {
 		return false, "", err
 	}
 	if inputs != record.Inputs {
-		r.reasons[index] = "inputs changed"
-		return false, "", r.invalidate(entry.key)
+		return false, "inputs changed", nil
 	}
 	present, missing, err := OutputsPresent(root, entry.cfg.Outputs)
 	if err != nil {
 		return false, "", err
 	}
 	if !present {
-		r.reasons[index] = fmt.Sprintf("output %s missing", missing)
-		return false, "", r.invalidate(entry.key)
+		return false, fmt.Sprintf("output %s missing", missing), nil
 	}
-	return true, SkipUpToDate, nil
+	return true, "", nil
 }
 
 // invalidate durably drops a completion record before its step reruns, so
@@ -263,6 +316,7 @@ func (r *prepareRecorder) AfterStep(index int, _ types.ScaffoldStep, stepErr err
 		Name:        entry.cfg.Name,
 		Definition:  entry.definition,
 		Inputs:      inputs,
+		Env:         entry.env,
 		CompletedAt: r.now(),
 	})
 }
@@ -298,4 +352,74 @@ func buildReport(plan []planEntry, planDigest string, results []ExecutionResult,
 		}
 	}
 	return report
+}
+
+// ReadinessRequest describes a subset of preparation steps to verify, for
+// example one component's.
+type ReadinessRequest struct {
+	WorktreePath string
+	Branch       string
+	// Env is the worktree environment ensure exports to steps.
+	Env    map[string]string
+	Config *config.Config
+	Steps  []config.StepConfig
+}
+
+// StepsPrepared reports whether every applicable step has a completion
+// record for its current definition that still matches its environment,
+// inputs and outputs. Steps whose conditions are not met are ignored. It
+// never writes state.
+func (m *ScaffoldManager) StepsPrepared(request ReadinessRequest) (bool, string, error) {
+	state, err := wtstate.ReadPrepare(request.WorktreePath)
+	if err != nil {
+		return false, "", err
+	}
+	byDefinition := map[string]wtstate.StepRecord{}
+	if state != nil {
+		for _, record := range state.Steps {
+			byDefinition[record.Definition] = record
+		}
+	}
+	stepsList, err := m.stepsFromConfig(request.Steps)
+	if err != nil {
+		return false, "", fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	ctx := m.newScaffoldContext(request.WorktreePath, request.Branch, "", "", "")
+	for key, value := range request.Env {
+		ctx.Env[key] = value
+	}
+	var projectKeys []string
+	if request.Config != nil {
+		projectKeys = sortedEnvKeys(request.Config.Env)
+	}
+	plan, _ := buildPlan(request.Steps)
+	applyEnvDigests(plan, ctx.Env, projectKeys)
+	for i, entry := range plan {
+		applicable, err := stepsList[i].Condition(&ctx)
+		if err != nil {
+			return false, "", fmt.Errorf("step %d (%s) condition: %w", i+1, entry.cfg.Name, err)
+		}
+		if !applicable {
+			continue
+		}
+		label := fmt.Sprintf("step %d (%s)", i+1, entry.cfg.Name)
+		if entry.cfg.Command != "" {
+			label = fmt.Sprintf("step %d (%s)", i+1, entry.cfg.Command)
+		}
+		record, ok := byDefinition[entry.definition]
+		if !ok {
+			return false, label + " has not run", nil
+		}
+		if !entry.cacheable {
+			continue
+		}
+		current, reason, err := recordCurrent(request.WorktreePath, entry, record)
+		if err != nil {
+			return false, "", err
+		}
+		if !current {
+			return false, label + ": " + reason, nil
+		}
+	}
+	return true, "", nil
 }
