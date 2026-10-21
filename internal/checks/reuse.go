@@ -152,6 +152,9 @@ func lockIndex(checkDir string) (*lockfile.Lock, error) {
 	return lock, err
 }
 
+// sweepStaleTemps is removeStaleTemps; tests replace it to simulate failure.
+var sweepStaleTemps = removeStaleTemps
+
 // removeStaleTemps deletes writeJSON temporary files older than staleTempAge
 // (left behind by a crashed writer) in an index content directory (called with the index lock held). Newer
 // ones may belong to a write in progress elsewhere and are left alone.
@@ -181,7 +184,9 @@ func removeStaleTemps(dir string, now time.Time) error {
 }
 
 // record points the index at a clean passing result this worktree executed.
-func (x ReuseIndex) record(result *Result, now time.Time) (err error) {
+// Sweeping stale temporaries is housekeeping: its failure goes to warn and
+// never withdraws the recorded entry.
+func (x ReuseIndex) record(result *Result, now time.Time, warn func(string)) (err error) {
 	digest := result.Identity.ContentDigest
 	if !x.enabled() || digest == "" || result.Status != StatusPassed || result.ReusedFrom != nil || !validWorktreeID(result.Worktree.ID) {
 		return nil
@@ -191,14 +196,17 @@ func (x ReuseIndex) record(result *Result, now time.Time) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, lock.Release()) }()
-	cleanErr := removeStaleTemps(x.dir(result.Check, digest), time.Now())
-	if errors.Is(cleanErr, os.ErrNotExist) {
-		cleanErr = nil
-	}
-	return errors.Join(cleanErr, writeJSON(filepath.Join(x.dir(result.Check, digest), result.Worktree.ID+".json"), reuseIndexEntry{
+	dir := x.dir(result.Check, digest)
+	if err := writeJSON(filepath.Join(dir, result.Worktree.ID+".json"), reuseIndexEntry{
 		Schema: reuseIndexSchema, Check: result.Check, ContentDigest: digest, WorktreeID: result.Worktree.ID, WorktreePath: result.Worktree.Path,
 		RunID: result.RunID, Result: filepath.Join(result.RunDir, "result.json"), RecordedAt: now.UTC(),
-	}))
+	}); err != nil {
+		return err
+	}
+	if cleanErr := sweepStaleTemps(dir, time.Now()); cleanErr != nil && warn != nil {
+		warn(fmt.Sprintf("check %s: removing stale reuse index temporaries: %v", result.Check, cleanErr))
+	}
+	return nil
 }
 
 // forgetVanished removes an entry whose result file no longer exists (pruned
@@ -235,7 +243,7 @@ func removeEntry(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := removeStaleTemps(filepath.Dir(path), time.Now()); err != nil {
+	if err := sweepStaleTemps(filepath.Dir(path), time.Now()); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) && !isNotEmpty(err) {

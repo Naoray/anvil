@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -665,4 +666,28 @@ func TestReuseIndexRemovesStaleTemporaryFiles(t *testing.T) {
 	require.NoFileExists(t, fresh)
 	require.NoError(t, ForgetWorktree(f.root, author.id))
 	require.NoDirExists(t, digestDir, "the empty content directory is removed")
+}
+
+// A failed housekeeping sweep never withdraws a result the index recorded:
+// the entry is offered for reuse and the sweep problem is its own warning.
+func TestReuseIndexSweepFailureStillOffersResult(t *testing.T) {
+	skipWithoutCheckExecution(t)
+	original := sweepStaleTemps
+	sweepStaleTemps = func(string, time.Time) error { return errors.New("sweep refused") }
+	t.Cleanup(func() { sweepStaleTemps = original })
+	f := newCrossFixture(t)
+	author := f.add("author", wtstate.RoleImplementation, 41001)
+	var warnings []string
+	request := f.request(author, reusableCheck(), nil)
+	request.Reuse = false
+	request.Warn = func(message string) { warnings = append(warnings, message) }
+	result, err := Run(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, StatusPassed, result.Status)
+	entries, err := filepath.Glob(filepath.Join(f.root, "reuse", "*", "fast", "*", author.id+".json"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the result is indexed despite the failed sweep")
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], "sweep refused")
+	require.NotContains(t, warnings[0], "not offered for reuse")
 }

@@ -202,7 +202,7 @@ func indexIfUnchanged(req RunRequest, result *Result, finished time.Time) error 
 	if state.Digest != result.Identity.Git.Digest || state.Dirty {
 		return errors.New("the run changed the working tree")
 	}
-	return req.reuseIndex().record(result, finished)
+	return req.reuseIndex().record(result, finished, req.Warn)
 }
 
 // Run-specific variables give runners stable cache keys.
