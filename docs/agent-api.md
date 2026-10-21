@@ -110,7 +110,8 @@ the partial `data`. The error message only names the failing step: step errors
 embed command output, which goes to stderr and is never written to JSON or
 `.anvil.local`.
 
-A step that runs again (`--refresh`, changed definition, inputs or outputs)
+A step that runs again (`--refresh`, changed definition, declared environment,
+inputs or outputs)
 first has its completion record removed, so a failed or interrupted rerun can
 never leave the earlier success in place. `env.read` (which sets template
 variables without `store_as`) always runs, like `store_as` producers. Step

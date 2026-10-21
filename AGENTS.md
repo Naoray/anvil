@@ -42,6 +42,9 @@ anvil remove feature-my-feature  # When done
 | Cross-process file locks | `internal/lockfile/` |
 | Worktree identity / prepare records | `internal/wtstate/` |
 | JSON envelope and error codes | `internal/agentapi/` |
+| Components → scaffold steps (stack capabilities) | `internal/capabilities/` |
+| Exported worktree environment | `internal/workenv/` |
+| Synthetic example repositories | `examples/` |
 | UI components | `internal/ui/` |
 | Shell completions | `internal/cli/completion.go` |
 | Entry point | `cmd/anvil/main.go` |

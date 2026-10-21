@@ -421,6 +421,47 @@ when lockfiles change. Toolchain version changes are not detected; use
 
 See [docs/agent-api.md](docs/agent-api.md) for the JSON contract and exit codes.
 
+### `anvil run [WORKTREE] -- COMMAND`
+
+Run a command in a worktree's configured environment without requiring a
+testing database:
+
+```bash
+anvil run feature-x -- cargo test
+anvil run feature-x --component eval -- python score.py   # component dir + its env (venv, node_modules/.bin)
+anvil run -- npm test                                     # current worktree and directory
+```
+
+Exports `ANVIL_*` identity variables (`ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE`, …),
+recorded database names as `ANVIL_DB_DATABASE`/`ANVIL_TEST_DB_DATABASE`, and the
+project `env`. It never sets `DB_DATABASE`; use `anvil exec` for the Laravel test
+database. Child exit status passes through. COMMAND is resolved on the exported
+`PATH`, so component-local tools win. Warns when preparation (including the
+selected component's) is incomplete; `--require-ready` refuses instead.
+
+### Components (cross-stack projects)
+
+Repositories with several stacks declare components; `anvil ensure` prepares
+each one with lockfile-backed defaults from its capabilities:
+
+```yaml
+components:
+  - name: desktop
+    path: apps/desktop
+    uses: [node, tauri]      # pnpm install --frozen-lockfile; cargo fetch in src-tauri
+  - name: service
+    path: service
+    uses: [node]             # npm ci
+  - name: helper
+    path: helpers/mac
+    uses: [swift]            # macOS only by default; skipped elsewhere
+```
+
+Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
+`swift`. See [docs/environments.md](docs/environments.md) for the full schema and
+[examples/](examples/) for synthetic Rust/Python, Node/Rust/Tauri/Swift and
+Laravel repositories.
+
 ### `anvil pull-config`
 
 Copy `anvil.yaml` from the default branch worktree to the project root. Useful for propagating team configuration changes from the main branch.

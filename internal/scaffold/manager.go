@@ -190,6 +190,33 @@ func (m *ScaffoldManager) RunScaffold(
 	return err
 }
 
+// Validate creates every step of the request without running anything, so
+// callers can refuse invalid configuration before their own effects.
+func (m *ScaffoldManager) Validate(request ScaffoldRequest) error {
+	stepConfigs := append(effectiveStepConfigs(request.Config, request.DefaultSteps), request.ExtraSteps...)
+	if _, err := m.stepsFromConfig(stepConfigs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	if request.WorktreePath != "" {
+		for _, stepConfig := range stepConfigs {
+			if err := steps.ValidatePaths(request.WorktreePath, stepConfig); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateSteps creates steps without running them, validating their
+// options and conditions. Unlike Validate it checks no paths, so it can
+// cover steps of components that do not apply on this machine.
+func (m *ScaffoldManager) ValidateSteps(configs []config.StepConfig) error {
+	if _, err := m.stepsFromConfig(configs); err != nil {
+		return fmt.Errorf("getting scaffold steps: %w", err)
+	}
+	return nil
+}
+
 // RunScaffoldWithOptions validates every step before any effect, then runs
 // them under the worktree's preparation lock, persisting each completion as
 // it happens so interrupted or failed runs resume safely.
@@ -274,7 +301,7 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	opts.WarmSource = request.Warm.Source
 	opts.CopyMode = request.Warm.CopyMode
 
-	plan, planDigest := buildPlan(stepConfigs)
+	plan, planDigest := buildPlan(stepConfigs, request.Env)
 	recorder := &prepareRecorder{
 		worktreePath:  worktreePath,
 		plan:          plan,

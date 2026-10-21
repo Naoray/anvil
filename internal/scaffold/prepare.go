@@ -63,8 +63,11 @@ type planEntry struct {
 }
 
 // definitionDigest identifies a step definition independent of its position.
-func definitionDigest(cfg config.StepConfig) string {
-	encoded, err := json.Marshal(cfg)
+func definitionDigest(cfg config.StepConfig, env map[string]string) string {
+	encoded, err := json.Marshal(struct {
+		Step config.StepConfig
+		Env  map[string]string
+	}{cfg, steps.CommandEnvironment(env, cfg.Env)})
 	if err != nil {
 		// StepConfig contains only JSON-encodable values (strings, slices, maps).
 		panic(fmt.Sprintf("encoding step definition: %v", err))
@@ -73,12 +76,12 @@ func definitionDigest(cfg config.StepConfig) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func buildPlan(configs []config.StepConfig) ([]planEntry, string) {
+func buildPlan(configs []config.StepConfig, env map[string]string) ([]planEntry, string) {
 	plan := make([]planEntry, len(configs))
 	occurrences := map[string]int{}
 	planHash := sha256.New()
 	for i, cfg := range configs {
-		definition := definitionDigest(cfg)
+		definition := definitionDigest(cfg, env)
 		occurrences[definition]++
 		plan[i] = planEntry{
 			key:        fmt.Sprintf("%s#%s#%d", cfg.Name, definition[:16], occurrences[definition]),
@@ -280,4 +283,43 @@ func buildReport(plan []planEntry, planDigest string, results []ExecutionResult,
 		}
 	}
 	return report
+}
+
+// StepsPrepared checks the current applicable steps against successful
+// preparation records without writing state or executing commands.
+func StepsPrepared(worktreePath string, configs []config.StepConfig, env map[string]string, state *wtstate.PrepareState) (bool, error) {
+	if state == nil {
+		return false, nil
+	}
+	plan, _ := buildPlan(configs, env)
+	ctx := &types.ScaffoldContext{WorktreePath: worktreePath}
+	for _, entry := range plan {
+		if err := steps.ValidatePaths(worktreePath, entry.cfg); err != nil {
+			return false, err
+		}
+		root := stepRoot(worktreePath, entry.cfg)
+		applicable, err := ctx.EvaluateConditionAt(root, entry.cfg.Condition)
+		if err != nil {
+			return false, err
+		}
+		if !applicable {
+			continue
+		}
+		record, ok := state.Steps[entry.key]
+		if !ok || record.Definition != entry.definition {
+			return false, nil
+		}
+		inputs, err := InputsDigest(root, entry.cfg.Inputs)
+		if err != nil {
+			return false, err
+		}
+		if inputs != record.Inputs {
+			return false, nil
+		}
+		present, _, err := OutputsPresent(root, entry.cfg.Outputs)
+		if err != nil || !present {
+			return false, err
+		}
+	}
+	return true, nil
 }

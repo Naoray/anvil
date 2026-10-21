@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/naoray/anvil/internal/config"
@@ -45,34 +47,69 @@ func (t execTarget) resolve(ctx *types.ScaffoldContext) (string, map[string]stri
 			return "", nil, fmt.Errorf("step directory %s is not a directory", t.dir)
 		}
 	}
-	if len(ctx.Env) == 0 && len(t.env) == 0 {
-		return dir, nil, nil
+	return dir, CommandEnvironment(ctx.Env, t.env), nil
+}
+
+// CommandEnvironment expands step values against an immutable snapshot of
+// inherited/worktree values plus the component identity. It is shared by
+// execution and preparation cache identities.
+func CommandEnvironment(worktreeEnv, stepEnv map[string]string) map[string]string {
+	return commandEnvironment(worktreeEnv, stepEnv, runtime.GOOS == "windows")
+}
+
+func commandEnvironment(worktreeEnv, stepEnv map[string]string, caseInsensitive bool) map[string]string {
+	if len(worktreeEnv) == 0 && len(stepEnv) == 0 {
+		return nil
 	}
-	baseEnv := make(map[string]string)
+	normalize := func(name string) string {
+		if caseInsensitive {
+			return strings.ToUpper(name)
+		}
+		return name
+	}
+	base := make(map[string]string)
 	for _, entry := range os.Environ() {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok {
-			baseEnv[key] = value
+			base[normalize(key)] = value
 		}
 	}
-	env := make(map[string]string, len(ctx.Env)+len(t.env))
-	for key, value := range ctx.Env {
+	env := make(map[string]string, len(worktreeEnv)+len(stepEnv))
+	spellings := make(map[string]string)
+	set := func(key, value string) {
+		name := normalize(key)
+		if previous, ok := spellings[name]; ok && previous != key {
+			delete(env, previous)
+		}
+		spellings[name] = key
 		env[key] = value
-		baseEnv[key] = value
 	}
-	for key, value := range t.env {
-		env[key] = ExpandEnv(value, baseEnv)
+	for _, key := range environmentNames(worktreeEnv) {
+		value := worktreeEnv[key]
+		base[normalize(key)] = value
+		set(key, value)
 	}
-	return dir, env, nil
+	for _, key := range []string{"ANVIL_COMPONENT", "ANVIL_COMPONENT_DIR"} {
+		if value, ok := stepEnv[key]; ok {
+			base[normalize(key)] = value
+		}
+	}
+	for _, key := range environmentNames(stepEnv) {
+		value := stepEnv[key]
+		if key == "ANVIL_COMPONENT" || key == "ANVIL_COMPONENT_DIR" {
+			set(key, value)
+		} else {
+			set(key, os.Expand(value, func(name string) string { return base[normalize(name)] }))
+		}
+	}
+	return env
 }
 
-// ExpandEnv expands ${VAR} and $VAR against primary, then the process
-// environment. Unknown variables expand to the empty string, as in a shell.
-func ExpandEnv(value string, primary map[string]string) string {
-	return os.Expand(value, func(name string) string {
-		if v, ok := primary[name]; ok {
-			return v
-		}
-		return os.Getenv(name)
-	})
+func environmentNames(values map[string]string) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

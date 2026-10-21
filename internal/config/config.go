@@ -124,6 +124,25 @@ type Config struct {
 	Cleanup       CleanupConfig         `mapstructure:"cleanup"`
 	Tools         map[string]ToolConfig `mapstructure:"tools"`
 	Sync          SyncConfig            `mapstructure:"sync"`
+
+	// Declarative environment sections are decoded with case-preserving YAML
+	// (see LoadProject), never through viper.
+	Env        map[string]string `mapstructure:"-"`
+	SecretEnv  []string          `mapstructure:"-"`
+	Components []Component       `mapstructure:"-"`
+}
+
+// environmentDocument holds the case-sensitive environment sections of anvil.yaml.
+type environmentDocument struct {
+	Env        map[string]string `yaml:"env"`
+	SecretEnv  []string          `yaml:"secret_env"`
+	Components []Component       `yaml:"components"`
+}
+
+func (d environmentDocument) apply(c *Config) {
+	c.Env = d.Env
+	c.SecretEnv = d.SecretEnv
+	c.Components = d.Components
 }
 
 // SyncConfig represents sync configuration for the sync command
@@ -341,6 +360,14 @@ func LoadProject(path string) (*Config, error) {
 		for i := range config.Scaffold.Steps {
 			config.Scaffold.Steps[i].Env = selectors.Scaffold.Steps[i].Env
 		}
+	}
+	var environment environmentDocument
+	if err := yaml.Unmarshal(content, &environment); err != nil {
+		return nil, fmt.Errorf("parsing environment configuration: %w", err)
+	}
+	environment.apply(&config)
+	if err := config.ValidateEnvironment(); err != nil {
+		return nil, fmt.Errorf("invalid environment configuration: %w", err)
 	}
 	return &config, nil
 }

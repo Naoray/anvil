@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/naoray/anvil/internal/agentapi"
+	"github.com/naoray/anvil/internal/capabilities"
 	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/lockfile"
@@ -59,9 +61,10 @@ type prepareSummary struct {
 }
 
 type ensureData struct {
-	Worktree worktreeSummary `json:"worktree"`
-	Created  bool            `json:"created"`
-	Prepare  prepareSummary  `json:"prepare"`
+	Worktree   worktreeSummary              `json:"worktree"`
+	Created    bool                         `json:"created"`
+	Prepare    prepareSummary               `json:"prepare"`
+	Components []capabilities.ComponentPlan `json:"components"`
 }
 
 func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
@@ -79,7 +82,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	}
 
 	summary, warnings := summarizeWorktree(*target)
-	data := ensureData{Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
+	data := ensureData{Components: []capabilities.ComponentPlan{}, Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	if mustGetBool(cmd, "skip-prepare") {
 		if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
@@ -97,14 +100,51 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		return agentResult{Data: data, Warnings: warnings}, nil
 	}
 
-	targetPC, err := pc.ForWorktree(target.Path)
+	selected, err := cmd.Flags().GetStringArray("component")
 	if err != nil {
 		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
+	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected})
+	if err != nil {
+		return agentResult{Data: data, Warnings: warnings}, err
+	}
+	data.Components = wenv.Components
+	// Every component's conditions are validated, including components
+	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
+	// configuration is refused before any effect.
+	validation, err := capabilities.ValidationSteps(wenv.Worktree.Path, wenv.PC.Config, runtime.GOOS)
+	if err == nil {
+		err = wenv.PC.ScaffoldManager().ValidateSteps(validation)
+	}
+	if err != nil {
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
+	if wenv.ComponentErr != nil {
+		summary, warnings := summarizeWorktree(*target)
+		data.Worktree = summary
+		return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{
+			Code:    agentapi.CodePrepareFailed,
+			Message: fmt.Sprintf("component requirements not met (nothing was changed): %v", wenv.ComponentErr),
+			Cause:   wenv.ComponentErr,
+		}
+	}
+	targetPC := wenv.PC
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
+	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
+	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: targetPC.Config, DefaultSteps: resolvedPreset.DefaultSteps(), ExtraSteps: extraSteps}
+	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+	}
+	// Identity is the first write; the exported environment includes it.
+	if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, err
+	}
 	// Match the naming used by the command that would otherwise have run:
 	// `anvil work` for new worktrees, `anvil scaffold` for existing ones.
 	repoName := filepath.Base(targetPC.ProjectPath)
@@ -121,6 +161,8 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		Config:        targetPC.Config,
 		Verbose:       verbose,
 		Quiet:         quiet,
+		ExtraSteps:    extraSteps,
+		Env:           wenv.Env.Map(),
 		SkipCompleted: !mustGetBool(cmd, "refresh"),
 	})
 
@@ -260,6 +302,7 @@ func init() {
 	ensureCmd.Flags().StringP("base", "b", "", "Base branch for a newly created worktree")
 	ensureCmd.Flags().Bool("no-track", false, "Skip remote tracking for a newly created branch")
 	ensureCmd.Flags().Bool("refresh", false, "Rerun every step, ignoring completion records")
+	ensureCmd.Flags().StringArray("component", nil, "Also prepare this opt-in component (repeatable)")
 	ensureCmd.Flags().Bool("skip-prepare", false, "Only create or resolve the worktree")
 	rootCmd.AddCommand(ensureCmd)
 }

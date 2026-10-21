@@ -1,0 +1,4 @@
+# Existing Laravel workflow: unchanged. The laravel preset still creates and
+# records application/testing databases, links the site through Yerd or Herd
+# and runs Composer/npm. `anvil ensure` reuses the same steps idempotently.
+preset: laravel

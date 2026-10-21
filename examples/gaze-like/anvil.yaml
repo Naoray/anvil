@@ -1,0 +1,13 @@
+# Gaze-like privacy engine: Rust detector plus a Python (uv) evaluation
+# harness. Synthetic fixture.
+env:
+  RUST_BACKTRACE: "1"
+
+components:
+  - name: detector
+    path: crates/detector
+    uses: [rust]               # cargo fetch --locked
+
+  - name: eval
+    path: eval
+    uses: [python]             # uv sync --frozen; .venv/bin on PATH for `anvil run --component eval`
