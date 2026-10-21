@@ -48,7 +48,7 @@ type RunRequest struct {
 // GatePath is the per-worktree lock that check runs hold shared for their
 // whole lifetime and worktree removal takes exclusively before cleanup.
 func GatePath(worktreePath string) string {
-	return config.WorktreeLockPath(worktreePath, "checks-gate.lock")
+	return config.WorktreeExternalLockPath(worktreePath, "checks-gate.lock")
 }
 
 // ErrAlreadyRunning reports a concurrent run of the same check in the same worktree.

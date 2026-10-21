@@ -220,3 +220,18 @@ func TestRetentionKeepsTheNewestRun(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, retainedRuns)
 }
+
+func TestGateLivesOutsideTheWorktreeAndItsGitDir(t *testing.T) {
+	// Removal holds the gate while git deletes the worktree's directories;
+	// Windows cannot delete a directory containing an open file.
+	f := newFixture(t)
+	gate := GatePath(f.worktree)
+	gitDir, err := config.WorktreeGitDir(f.worktree)
+	require.NoError(t, err)
+	for _, root := range []string{f.worktree, gitDir} {
+		rel, err := filepath.Rel(root, gate)
+		require.NoError(t, err)
+		require.True(t, rel == ".." || len(rel) > 2 && rel[:3] == ".."+string(filepath.Separator), "gate %s must not be inside %s", gate, root)
+	}
+	require.Equal(t, gate, GatePath(f.worktree), "stable for one worktree")
+}
