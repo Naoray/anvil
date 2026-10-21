@@ -6,14 +6,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+	"gopkg.in/yaml.v3"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/procs"
 )
 
@@ -162,4 +168,62 @@ func TestRestartOfSelfBackgroundingCommandIsAlreadyRunning(t *testing.T) {
 		err := unix.Kill(-first, 0)
 		return errors.Is(err, unix.ESRCH)
 	}, 5*time.Second, 20*time.Millisecond, "background group stopped")
+}
+
+// TestStopNeverSignalsUnrelatedGroupOfExitedLeader reproduces review finding
+// 4911: a record whose PID now names an unrelated process group with a dead
+// leader must never be signaled, because nothing proves that group is ours.
+func TestStopNeverSignalsUnrelatedGroupOfExitedLeader(t *testing.T) {
+	f := newAgentFixture(t, longProcessYAML, nil)
+	f.env = subprocessEnvFrom(append(f.env, "ANVIL_PORT_RANGE=43400-43499"))
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/a")
+	require.Equal(t, 0, code, stderr)
+
+	var mu sync.Mutex
+	var pids []int
+	killGroupsOnCleanup(t, &mu, &pids)
+
+	envelope, stderr, code := f.runJSON(f.repo, "start", "feature-a")
+	require.Equal(t, 0, code, stderr)
+	ours := int(field(t, envelope, "data", "processes", 0, "pid").(float64))
+	mu.Lock()
+	pids = append(pids, ours)
+	mu.Unlock()
+
+	// An unrelated session whose leader exits, leaving its group alive.
+	childFile := filepath.Join(t.TempDir(), "child.pid")
+	victim := exec.Command("sh", "-c", "sleep 60 & echo $! > "+childFile+"; exit 0")
+	victim.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	require.NoError(t, victim.Start())
+	victimGroup := victim.Process.Pid
+	mu.Lock()
+	pids = append(pids, victimGroup)
+	mu.Unlock()
+	require.NoError(t, victim.Wait())
+	content, err := os.ReadFile(childFile)
+	require.NoError(t, err)
+	var victimChild int
+	_, err = fmt.Sscan(string(content), &victimChild)
+	require.NoError(t, err)
+
+	// The record now points at the victim's group with a dead leader.
+	path := filepath.Join(f.worktreePath("feature-a"), config.LocalStateFile)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	record := doc["processes"].(map[string]any)["web"].(map[string]any)
+	record["pid"] = victimGroup
+	record["identity"] = ""
+	raw, err = yaml.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0o644))
+
+	envelope, stderr, code = f.runJSON(f.repo, "stop", "feature-a")
+	require.Equal(t, 0, code, stderr)
+	require.NotEqual(t, "terminated", field(t, envelope, "data", "processes", 0, "result"))
+	require.NotEqual(t, "killed", field(t, envelope, "data", "processes", 0, "result"))
+	time.Sleep(500 * time.Millisecond)
+	_, err = procs.StartIdentity(victimChild)
+	require.NoError(t, err, "unrelated group member must survive")
 }

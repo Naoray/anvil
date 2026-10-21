@@ -189,10 +189,10 @@ exited, so a command that backgrounds its work and returns (`server &`) is
 still `already_running` on the next start. The leader PID is recorded in
 `.anvil.local` together with the kernel start time (Linux `/proc/<pid>/stat`
 start ticks + boot ID; macOS `kern.proc.pid` start time). `anvil stop` signals
-the group only when the PID still has that start identity, or when the leader
-exited but its own process group survives (a PID is never recycled while it is
-a live process group ID). A recycled PID is reported as
-`not_signaled_pid_reused` and never signaled; nothing is ever killed because it
+the group only while the leader PID still has that start identity. A recycled
+PID is reported as `not_signaled_pid_reused`, and a surviving group whose
+leader is gone as `not_signaled_unverifiable` (its ID may now belong to an
+unrelated session); neither is ever signaled; nothing is ever killed because it
 listens on a recorded port. Managed processes are unsupported on Windows and
 other platforms without a verifiable identity (`unsupported_platform`).
 

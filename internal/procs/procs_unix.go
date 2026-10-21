@@ -93,8 +93,6 @@ func reap(cmd *exec.Cmd) {
 }
 
 // groupExists reports whether any process still has pgid as process group.
-// A PID is never recycled while it is in use as a process group ID, so a
-// surviving group of a dead leader still contains only its descendants.
 func groupExists(pgid int) bool {
 	err := unix.Kill(-pgid, 0)
 	return err == nil || errors.Is(err, unix.EPERM)
@@ -112,8 +110,10 @@ const (
 )
 
 // Stop terminates a recorded process group: SIGTERM, then SIGKILL after
-// timeout. It only signals when the leader still has its recorded identity,
-// or when the leader is gone but its own process group survives.
+// timeout. It signals only while the leader verifiably has its recorded
+// identity. The supervisor leads every group Anvil starts until the group is
+// empty, so a surviving group whose leader is gone cannot be proven ours: its
+// ID may have been reused by an unrelated session, and it is never signaled.
 func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	switch Check(pid, identity) {
 	case StateReused:
@@ -121,9 +121,10 @@ func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	case StateUnknown:
 		return StopUnverifiable, nil
 	case StateExited:
-		if !groupExists(pid) {
-			return StopAlreadyExited, nil
+		if groupExists(pid) {
+			return StopUnverifiable, nil
 		}
+		return StopAlreadyExited, nil
 	case StateRunning:
 	}
 	if err := unix.Kill(-pid, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
@@ -132,10 +133,10 @@ func Stop(pid int, identity string, timeout time.Duration) (StopResult, error) {
 	if waitGone(pid, identity, timeout) {
 		return StopTerminated, nil
 	}
-	switch Check(pid, identity) {
-	case StateReused, StateUnknown:
+	if Check(pid, identity) != StateRunning {
+		// The leader exited after SIGTERM; without it the group is no
+		// longer provably ours, so it is not escalated.
 		return StopTerminated, nil
-	case StateRunning, StateExited:
 	}
 	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
 		return "", fmt.Errorf("killing process group %d: %w", pid, err)

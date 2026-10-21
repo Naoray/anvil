@@ -66,9 +66,9 @@ var stopCmd = &cobra.Command{
 	Long: `Stop processes Anvil started for this worktree.
 
 A process group is signaled (SIGTERM, then SIGKILL after the stop timeout)
-only when its recorded PID still has the recorded start identity, or when the
-leader exited but its own process group survives. A PID that now belongs to
-another process is never signaled. Processes are never stopped because of a
+only while its recorded leader PID still has the recorded start identity. A
+PID that now belongs to another process, or a surviving group whose leader is
+gone, is never signaled. Processes are never stopped because of a
 port they listen on. Mutating.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
