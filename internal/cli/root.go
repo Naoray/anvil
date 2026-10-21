@@ -216,11 +216,12 @@ Run 'anvil <command> --help' for more information.`
 func Execute() error {
 	rootCmd.SilenceUsage = true
 	overrideCompletionSubcommands(rootCmd)
-	if err := rootCmd.Execute(); err != nil {
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil {
 		if ui.IsAbort(err) {
 			return nil
 		}
-		return err
+		return finishCommandError(cmd, err)
 	}
 	return nil
 }
