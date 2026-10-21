@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shared resources can declare an `identity` (`file` digest, `command` stdout, or a `directory` tree digest with a machine-wide stat cache), and checks declare the `resources:` they depend on. A changed declared resource makes the check stale with a reason naming it (`shared resource "models" changed`/`appeared`/`disappeared`); undeclared resources never affect a check. If a declared resource cannot be identified, the check fails before running or reusing anything (`check_failed` with `details.reason: "identity_unavailable"`).
+
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.
