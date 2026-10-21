@@ -144,7 +144,18 @@ jobs:
         run: |
           CURRENT="v$VERSION"
           BODY_PATH=$(mktemp "$RUNNER_TEMP/anvil-release-body.XXXXXX")
-          git cat-file tag "$CURRENT" | sed '1,/^$/d' > "$BODY_PATH"
+          # Signed tag objects end with the signature block; drop only that trailing block so the notes stay verbatim.
+          git cat-file tag "$CURRENT" | sed '1,/^$/d' | awk '
+            /^-----BEGIN (SSH|PGP) SIGNATURE-----$/ { printf "%s", held; held = $0 ORS; closed = 0; next }
+            held != "" {
+              held = held $0 ORS
+              if ($0 ~ /^-----END (SSH|PGP) SIGNATURE-----$/) { closed = 1 }
+              else if (closed) { printf "%s", held; held = ""; closed = 0 }
+              next
+            }
+            { print }
+            END { if (!closed) printf "%s", held }
+          ' > "$BODY_PATH"
           if [ -n "$PREVIOUS" ]; then
             printf '\n\n**Full changelog:** [%s..%s](https://github.com/%s/compare/%s..%s)\n' \
               "$PREVIOUS" "$CURRENT" "$REPOSITORY" "$PREVIOUS" "$CURRENT" >> "$BODY_PATH"

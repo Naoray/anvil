@@ -117,3 +117,38 @@ func TestReleaseWorkflowBodyPreservesHostileAnnotationExactly(t *testing.T) {
 	}
 	assert.NotEqual(t, bodyPaths[0], bodyPaths[1], "release body files must be collision-safe")
 }
+
+func TestReleaseWorkflowBodyOmitsTrailingTagSignature(t *testing.T) {
+	step := workflowRunStep(t, "release.yml", "Build release body")
+	repo := t.TempDir()
+	runGitCommand(t, repo, "init", "-b", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o644))
+	runGitCommand(t, repo, "add", "README.md")
+	runGitCommand(t, repo, "commit", "-m", "fixture")
+
+	// A block that only looks like a signature stays; the trailing one is the real signature.
+	notes := "v1.8.0\n\n### Fixed\n\n" +
+		"-----BEGIN SSH SIGNATURE-----\nquoted in notes\n-----END SSH SIGNATURE-----\n" +
+		"- kept after the quoted block\n"
+	signature := "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQ==\n-----END SSH SIGNATURE-----\n"
+	annotationFile := filepath.Join(repo, "annotation.md")
+	require.NoError(t, os.WriteFile(annotationFile, []byte(notes+signature), 0o644))
+	runGitCommand(t, repo, "tag", "--no-sign", "-a", "v1.8.0", "--cleanup=verbatim", "-F", annotationFile)
+
+	githubOutput := filepath.Join(t.TempDir(), "github-output")
+	runWorkflowScript(t, step, repo,
+		"VERSION=1.8.0",
+		"PREVIOUS=",
+		"REPOSITORY=naoray/anvil",
+		"RUNNER_TEMP="+t.TempDir(),
+		"GITHUB_OUTPUT="+githubOutput,
+	)
+
+	output, err := os.ReadFile(githubOutput)
+	require.NoError(t, err)
+	bodyPath, found := strings.CutPrefix(strings.TrimSuffix(string(output), "\n"), "BODY_PATH=")
+	require.True(t, found, "unexpected GITHUB_OUTPUT: %q", output)
+	body, err := os.ReadFile(bodyPath)
+	require.NoError(t, err)
+	assert.Equal(t, notes, string(body))
+}
