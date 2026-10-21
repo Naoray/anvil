@@ -22,6 +22,8 @@ import (
 // worktree instead of racing `git worktree add`.
 const worktreeCreateLockFile = "anvil-worktree-create.lock"
 
+var ensureAgentCommand = agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}
+
 var ensureCmd = &cobra.Command{
 	Use:   "ensure [WORKTREE]",
 	Short: "Create a worktree if needed and prepare it idempotently",
@@ -43,7 +45,7 @@ Mutating. Use --json for one versioned JSON document on stdout.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
 	ValidArgsFunction: completeWorktreeNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentCommand(cmd, agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}, func() (agentResult, error) {
+		return runAgentCommand(cmd, ensureAgentCommand, func() (agentResult, error) {
 			return runEnsure(cmd, args)
 		})
 	},
@@ -242,7 +244,7 @@ func printEnsureHuman(result agentResult) error {
 }
 
 func init() {
-	addJSONFlag(ensureCmd)
+	addJSONFlag(ensureCmd, ensureAgentCommand)
 	addDatabaseFlags(ensureCmd)
 	ensureCmd.Flags().StringP("base", "b", "", "Base branch for a newly created worktree")
 	ensureCmd.Flags().Bool("no-track", false, "Skip remote tracking for a newly created branch")

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -64,12 +66,66 @@ func runAgentCommand(cmd *cobra.Command, spec agentCommand, fn func() (agentResu
 }
 
 // addJSONFlag registers --json; JSON mode never prompts.
-func addJSONFlag(cmd *cobra.Command) {
+func addJSONFlag(cmd *cobra.Command, spec agentCommand) {
 	cmd.Flags().Bool("json", false, "Write one versioned JSON document to stdout (diagnostics go to stderr)")
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[agentMutatingAnnotation] = strconv.FormatBool(spec.Mutating)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	})
+}
+
+const agentMutatingAnnotation = "anvil.agent.mutating"
+
+// jsonRequested also sees flags after a parse error, without consuming child
+// arguments after -- or a value belonging to another known flag.
+func jsonRequested(cmd *cobra.Command, args []string) bool {
+	requested := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		if strings.HasPrefix(arg, "--") {
+			if name == "json" {
+				requested = true
+				if hasValue {
+					parsed, err := strconv.ParseBool(value)
+					requested = err == nil && parsed
+				}
+			}
+			if flag := cmd.Flags().Lookup(name); flag != nil && flag.NoOptDefVal == "" && !hasValue {
+				i++
+			}
+		} else if len(arg) == 2 && strings.HasPrefix(arg, "-") {
+			if flag := cmd.Flags().ShorthandLookup(arg[1:]); flag != nil && flag.NoOptDefVal == "" {
+				i++
+			}
+		}
+	}
+	return requested
+}
+
+// agentValidationError is the boundary for Cobra failures before RunE.
+func agentValidationError(cmd *cobra.Command, err error) error {
+	if cmd == nil {
+		return err
+	}
+	mutating, agentEnabled := cmd.Annotations[agentMutatingAnnotation]
+	var childErr *ChildExitError
+	if !agentEnabled || errors.As(err, &childErr) || !jsonRequested(cmd, os.Args[1:]) {
+		return err
+	}
+	if setErr := cmd.Flags().Set("json", "true"); setErr != nil {
+		return setErr
+	}
+	return runAgentCommand(cmd, agentCommand{Name: cmd.Name(), Mutating: mutating == "true"}, func() (agentResult, error) {
+		return agentResult{}, invalidArgs(err)
 	})
 }
 

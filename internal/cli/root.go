@@ -211,11 +211,11 @@ Run 'anvil <command> --help' for more information.`
 func Execute() error {
 	rootCmd.SilenceUsage = true
 	overrideCompletionSubcommands(rootCmd)
-	if err := rootCmd.Execute(); err != nil {
+	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		if ui.IsAbort(err) {
 			return nil
 		}
-		return err
+		return agentValidationError(cmd, err)
 	}
 	return nil
 }
