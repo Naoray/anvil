@@ -31,6 +31,7 @@ const (
 // alwaysRunSteps own their idempotency and safety policy (database ownership,
 // migration authorization, site links); a completion record never bypasses them.
 var alwaysRunSteps = map[string]bool{
+	config.StepEnvRead:   true,
 	config.StepDbCreate:  true,
 	config.StepDbDestroy: true,
 	"db.migrate":         true,

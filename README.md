@@ -408,7 +408,7 @@ Preparation runs the same steps as `anvil scaffold` (preset defaults plus
 `up_to_date` when its definition is unchanged, its declared `inputs` hash to the
 same digest and its declared `outputs` still exist. Steps without `inputs` run
 once per definition. Database steps (`db.create`, `db.migrate`, `db.destroy`),
-`herd`/`yerd`, `store_as` producers and `always: true` steps run every time under
+`herd`/`yerd`, `env.read`, `store_as` producers and `always: true` steps run every time under
 their own safety policies. A failed or interrupted run resumes at the first
 incomplete step. `anvil scaffold` and `anvil work` keep their run-everything
 behavior but also record completions, so a later `ensure` builds on them.
