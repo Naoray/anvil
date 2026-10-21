@@ -144,7 +144,8 @@ jobs:
         run: |
           CURRENT="v$VERSION"
           BODY_PATH=$(mktemp "$RUNNER_TEMP/anvil-release-body.XXXXXX")
-          git cat-file tag "$CURRENT" | sed '1,/^$/d' > "$BODY_PATH"
+          # contents:body excludes the tag's SSH/GPG signature block, which the raw tag object includes.
+          git for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/$CURRENT" > "$BODY_PATH"
           if [ -n "$PREVIOUS" ]; then
             printf '\n\n**Full changelog:** [%s..%s](https://github.com/%s/compare/%s..%s)\n' \
               "$PREVIOUS" "$CURRENT" "$REPOSITORY" "$PREVIOUS" "$CURRENT" >> "$BODY_PATH"
