@@ -18,24 +18,72 @@ import (
 )
 
 type ScaffoldContext struct {
-	DatabaseLockHeld        bool
-	BorrowAppDB             string
-	DatabaseActions         map[string]string
-	ResetDatabases          []string
-	SiteDriver              string
-	WorktreePath            string
-	Branch                  string
-	RepoName                string
-	SiteName                string
-	Preset                  string
-	Env                     map[string]string
-	Path                    string
-	RepoPath                string
-	DbSuffix                string
-	Vars                    map[string]string
+	DatabaseLockHeld bool
+	BorrowAppDB      string
+	DatabaseActions  map[string]string
+	ResetDatabases   []string
+	SiteDriver       string
+	WorktreePath     string
+	Branch           string
+	RepoName         string
+	SiteName         string
+	Preset           string
+	Env              map[string]string
+	Path             string
+	RepoPath         string
+	DbSuffix         string
+	Vars             map[string]string
+	// CleanupReport, when set, collects database cleanup targets and warnings.
+	CleanupReport           *CleanupReport
 	dbSuffixFromState       bool
 	dbSuffixFromLegacyState bool
 	mu                      sync.RWMutex
+}
+
+// CleanupReport collects what cleanup steps did or, in a dry run, would do,
+// for machine-readable output. Methods are safe on a nil report.
+type CleanupReport struct {
+	mu        sync.Mutex
+	databases []string
+	warnings  []string
+}
+
+// AddDatabases records databases dropped, or listed by a dry run.
+func (r *CleanupReport) AddDatabases(names ...string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.databases = append(r.databases, names...)
+}
+
+// Warn records a nonfatal cleanup diagnostic.
+func (r *CleanupReport) Warn(message string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.warnings = append(r.warnings, message)
+}
+
+func (r *CleanupReport) Databases() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.databases...)
+}
+
+func (r *CleanupReport) Warnings() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.warnings...)
 }
 
 type StepOptions struct {

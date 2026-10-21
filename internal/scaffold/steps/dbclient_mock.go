@@ -20,6 +20,8 @@ type MockDatabaseClient struct {
 	listCalls   []string
 
 	pingError   error
+	pingCalls   int
+	notRunning  bool
 	createError error
 	dropError   error
 	listError   error
@@ -78,7 +80,28 @@ func (m *MockDatabaseClient) configureEndpoint(engine string, options DatabaseOp
 func (m *MockDatabaseClient) Ping() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.pingCalls++
 	return m.pingError
+}
+
+func (m *MockDatabaseClient) Running() (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.notRunning, nil
+}
+
+// SetRunning sets what Running reports (default true).
+func (m *MockDatabaseClient) SetRunning(running bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.notRunning = !running
+}
+
+// GetPingCalls returns how often Ping (which may start a service) ran.
+func (m *MockDatabaseClient) GetPingCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pingCalls
 }
 
 func (m *MockDatabaseClient) Close() error {

@@ -68,6 +68,7 @@ Codes are stable and never reused for a different meaning.
 | `anvil start` / `anvil stop [WT] --json` | yes | Managed processes |
 | `anvil lease acquire\|renew\|release\|break [WT] --json` | yes | Advisory leases |
 | `anvil lease show [WT] --json` | no | Lease state |
+| `anvil remove WT --json` (`--force` or `--dry-run`) | yes | Remove a worktree with cleanup, or preview the plan |
 | `anvil run [WT] -- CMD` | no (state) | Exec in the worktree environment; child stdio and exit status are the child's own |
 
 Read-only commands never write `.anvil.local`, allocate ports or create
@@ -252,6 +253,42 @@ otherwise `ensure` refuses with `invalid_arguments` and changes nothing.
 `roles.review.components` limits the plan before requirements are evaluated:
 an excluded component's missing tools or directory never block a review.
 `data.lease`: see below; `token` is present only when this call issued it.
+
+## `anvil remove WORKTREE --json` (mutating)
+
+`WORKTREE` is required (exact folder, branch, path or ID). Because `--json`
+never prompts, removal requires `--force`; otherwise `invalid_arguments`
+(exit 2) before any effect. `--dry-run` needs neither confirmation nor
+`--force` and changes no worktree, branch, `.anvil.local`, runtime directory,
+port, process or database; it still takes the lifecycle, preparation and
+database coordination locks.
+
+```json
+"data": {
+  "worktree": { },
+  "dry_run": true,
+  "removed": false,
+  "stop_processes": [{"name": "web", "state": "running", "pid": 123, "command": "…", "log": "…"}],
+  "release_ports": [{"port": 20431, "name": "web", "worktree_id": "wt_…", "worktree_path": "…"}],
+  "remove_runtime_dir": "…",
+  "databases": {"action": "drop", "names": ["app_x", "app_x_test"], "targets": ["app_x", "app_x_test", "app_x_test_1"]},
+  "branch": {"name": "feature/x", "delete": false, "deleted": false}
+}
+```
+
+`databases.names` are the records in `.anvil.local`; `targets` are what
+`db.destroy` dropped or, in a dry run, would drop, including enumerated
+parallel-worker databases. A dry run never starts a database service: if it is
+not running, `targets` holds only the recorded names and a warning says
+`parallel-worker databases not enumerated: service not running`.
+`databases.action` is `drop` (a `db.destroy` cleanup step is configured; its
+condition is not evaluated for the plan), `preserve` (`--keep-db`) or
+`untouched`; a legacy worktree reports `suffix` instead of names. `branch.delete` reflects `--delete-branch`. Errors:
+`worktree_not_found` (3), `lease_held` (7), `cleanup_blocked` (7: checks or
+preparation running, a borrower, unreadable or malformed state, a locked
+worktree, a locked registered worktree that is absent). An unlocked registered
+sibling whose directory no longer exists is skipped with a warning suggesting
+`git worktree prune` or `git worktree repair`.
 
 ## Leases
 

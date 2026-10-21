@@ -3,8 +3,10 @@ package steps
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/naoray/anvil/internal/config"
 	anvilexec "github.com/naoray/anvil/internal/exec"
@@ -91,6 +93,19 @@ func (c *herdDatabaseClient) Ping() error {
 		return newManagedServiceError("starting Herd service %s: %w\n%s", c.service, err, output)
 	}
 	return nil
+}
+
+// Running probes the service's TCP listener; it never runs herd, so it
+// cannot start the service.
+func (c *herdDatabaseClient) Running() (bool, error) {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(c.options.Host, c.options.Port), time.Second)
+	if err != nil {
+		return false, nil
+	}
+	if err := conn.Close(); err != nil {
+		return true, fmt.Errorf("closing probe connection: %w", err)
+	}
+	return true, nil
 }
 
 func (c *herdDatabaseClient) CreateDatabase(name string) error {

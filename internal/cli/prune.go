@@ -39,7 +39,12 @@ func newPruneCommand(deps pruneCommandDependencies) *cobra.Command {
 		Long: `Fetches origin and removes merged worktrees for every linked project.
 
 Lists all worktrees across all anvil-linked projects, identifies merged ones
-against origin/<default-branch>, and provides an interactive review before removal.`,
+against origin/<default-branch>, and provides an interactive review before removal.
+
+--dry-run previews every merged worktree without prompting, without --force
+and without fetching: merge status is checked against the current
+remote-tracking refs, and nothing is removed (coordination lock files are
+still taken).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, deps)
 		},
@@ -108,6 +113,7 @@ func runPrune(cmd *cobra.Command, deps pruneCommandDependencies) error {
 
 type pruneProjectDependencies struct {
 	fetchOrigin     func(string) error
+	remoteRefExists func(gitDir, ref string) bool
 	listWorktrees   func(string) ([]git.Worktree, error)
 	isMerged        func(string, string, string) (bool, error)
 	selectWorktrees func([]git.Worktree) ([]git.Worktree, error)
@@ -117,9 +123,10 @@ type pruneProjectDependencies struct {
 
 func defaultPruneProjectDependencies() pruneProjectDependencies {
 	return pruneProjectDependencies{
-		fetchOrigin:   git.FetchOrigin,
-		listWorktrees: git.ListWorktrees,
-		isMerged:      git.IsMerged,
+		fetchOrigin:     git.FetchOrigin,
+		remoteRefExists: git.RemoteRefExists,
+		listWorktrees:   git.ListWorktrees,
+		isMerged:        git.IsMerged,
 		selectWorktrees: func(worktrees []git.Worktree) ([]git.Worktree, error) {
 			return ui.SelectWorktreesToPrune(worktrees)
 		},
@@ -155,7 +162,20 @@ func pruneProjectWithDependencies(
 	force, dryRun, verbose, quiet, keepDB, ignoreLease bool,
 	deps pruneProjectDependencies,
 ) error {
-	if err := deps.fetchOrigin(pc.GitDir); err != nil {
+	remoteTarget := "origin/" + pc.DefaultBranch
+	if dryRun {
+		// A preview never updates refs; it reports what the last fetch knew.
+		remoteRefExists := deps.remoteRefExists
+		if remoteRefExists == nil {
+			remoteRefExists = git.RemoteRefExists
+		}
+		if !remoteRefExists(pc.GitDir, remoteTarget) {
+			failure := fmt.Errorf("no %s ref; run git fetch (or prune without --dry-run) first", remoteTarget)
+			ui.PrintWarning(failure.Error())
+			return failure
+		}
+		ui.PrintInfo(fmt.Sprintf("[DRY RUN] Checking merge status against the current %s without fetching origin", remoteTarget))
+	} else if err := deps.fetchOrigin(pc.GitDir); err != nil {
 		failure := fmt.Errorf("fetching origin: %w", err)
 		ui.PrintWarning(failure.Error())
 		return failure
@@ -165,8 +185,6 @@ func pruneProjectWithDependencies(
 	if err != nil {
 		return fmt.Errorf("listing worktrees: %w", err)
 	}
-
-	remoteTarget := "origin/" + pc.DefaultBranch
 
 	var failures []error
 	var removable []git.Worktree
@@ -226,7 +244,7 @@ func pruneProjectWithDependencies(
 	ui.PrintInfo(fmt.Sprintf("%d merged worktree(s) found.", len(removable)))
 
 	var toRemove []git.Worktree
-	if force {
+	if force || dryRun {
 		toRemove = removable
 	} else {
 		selectWorktrees := deps.selectWorktrees
