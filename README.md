@@ -1270,7 +1270,7 @@ All steps support these configuration options:
 | `args` | array | Arguments passed to the step (e.g., `["--prefix", "app"]`) |
 | `store_as` | string | Store command output as template variable (trimmed, on success only) |
 | `dir` | string | Worktree-relative working directory for `command.run`, `bash.run` and binary steps; file conditions are evaluated relative to it |
-| `env` | map | Extra environment for command steps; `${VAR}` expands against Anvil's worktree environment, then the inherited environment |
+| `env` | map | Extra environment for command steps; `${VAR}` expands against Anvil's worktree environment, then the inherited environment (never against other values of the same step) |
 | `inputs` | array | Worktree-relative files, directories or globs that identify a completed step for `anvil ensure` |
 | `outputs` | array | Paths that must still exist for a recorded step to count as complete |
 | `always` | boolean | Rerun on every `anvil ensure` |

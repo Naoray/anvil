@@ -160,3 +160,15 @@ func TestValidateEnvironment(t *testing.T) {
 		require.ErrorContains(t, err, fragment)
 	}
 }
+
+func TestPlanRejectsComponentDirectoryEscapingThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	write(t, outside, "package.json")
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "web")))
+	cfg := &config.Config{Components: []config.Component{{Name: "web", Path: "web", OnMissing: config.OnMissingSkip}}}
+	plans, err := Plan(root, cfg, Options{GOOS: "linux", LookPath: lookPath()})
+	require.ErrorContains(t, err, "outside the worktree")
+	require.Equal(t, StatusSkipped, plans[0].Status)
+	require.Empty(t, plans[0].Steps)
+}

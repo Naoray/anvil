@@ -252,3 +252,112 @@ func TestInputsDigestCoversDirectoriesGlobsAndMissing(t *testing.T) {
 }
 
 func timeNow() time.Time { return time.Now() }
+
+// Review #24 blocker 3: a rerun must durably invalidate the earlier success.
+func TestFailedRerunInvalidatesPriorCompletion(t *testing.T) {
+	dir := prepareFixture(t)
+	step := config.StepConfig{
+		Name:    config.StepCommandRun,
+		Command: `if [ -f fail ]; then echo broken > out.txt; exit 1; fi; echo good > out.txt`,
+		Outputs: []string{"out.txt"},
+	}
+	report, err := ensureRun(t, dir, []config.StepConfig{step})
+	require.NoError(t, err)
+	require.Equal(t, []string{OutcomeRan}, results(report))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fail"), nil, 0o644))
+	cfg := &config.Config{Scaffold: config.ScaffoldConfig{Override: true, Steps: []config.StepConfig{step}}}
+	_, err = NewScaffoldManager().RunScaffoldWithOptions(ScaffoldRequest{WorktreePath: dir, Config: cfg, Quiet: true}) // --refresh
+	require.Error(t, err)
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "fail")))
+	report, err = ensureRun(t, dir, []config.StepConfig{step})
+	require.NoError(t, err)
+	require.Equal(t, []string{OutcomeRan}, results(report), "a failed rerun never leaves the old success in place")
+	content, err := os.ReadFile(filepath.Join(dir, "out.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "good\n", string(content))
+}
+
+func TestRerunForgetsRecordBeforeExecuting(t *testing.T) {
+	dir := prepareFixture(t)
+	steps := []config.StepConfig{countingStep("a", nil)}
+	_, err := ensureRun(t, dir, steps)
+	require.NoError(t, err)
+	state, err := wtstate.ReadPrepare(dir)
+	require.NoError(t, err)
+	plan, _ := buildPlan(steps)
+	// A refresh decides to run; if the process is then killed, no record survives.
+	recorder := &prepareRecorder{worktreePath: dir, plan: plan, records: state.Steps, now: timeNow, reasons: map[int]string{}}
+	skip, _, err := recorder.BeforeStep(0, nil)
+	require.NoError(t, err)
+	require.False(t, skip)
+	state, err = wtstate.ReadPrepare(dir)
+	require.NoError(t, err)
+	require.NotContains(t, state.Steps, plan[0].key)
+}
+
+// Review #24 blocker 5: env.read is an implicit context producer.
+func TestEnvReadProducerAlwaysRuns(t *testing.T) {
+	dir := prepareFixture(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("FIXTURE_VALUE=from-env\n"), 0o644))
+	steps := []config.StepConfig{
+		{Name: config.StepEnvRead, Key: "FIXTURE_VALUE"},
+		{Name: config.StepBashRun, Command: "echo '{{ .FIXTURE_VALUE }}' > consumed.txt", Always: true},
+	}
+	for i := 0; i < 2; i++ {
+		report, err := ensureRun(t, dir, steps)
+		require.NoError(t, err, "run %d", i)
+		require.Equal(t, OutcomeRan, report.Steps[0].Result)
+		content, err := os.ReadFile(filepath.Join(dir, "consumed.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "from-env\n", string(content))
+	}
+}
+
+// Review #24 blocker 7: expansion must not depend on map iteration order.
+func TestStepEnvExpansionIsDeterministic(t *testing.T) {
+	dir := prepareFixture(t)
+	t.Setenv("BASE", "parent")
+	step := config.StepConfig{
+		Name: config.StepCommandRun, Command: `printf '%s' "$VALUE" > value.txt`, Always: true,
+		Env: map[string]string{"BASE": "step", "VALUE": "${BASE}"},
+	}
+	for i := 0; i < 24; i++ {
+		_, err := ensureRun(t, dir, []config.StepConfig{step})
+		require.NoError(t, err)
+		content, err := os.ReadFile(filepath.Join(dir, "value.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "parent", string(content), "step values expand against the inherited snapshot only")
+	}
+}
+
+// Review #24 blocker 4: symlinks must not escape the worktree.
+func TestStepPathsRejectSymlinkEscapes(t *testing.T) {
+	outside := t.TempDir()
+	cases := map[string]config.StepConfig{
+		"dir":    {Name: config.StepCommandRun, Command: "touch outside-marker", Dir: "escape-dir"},
+		"input":  {Name: config.StepCommandRun, Command: "touch marker", Inputs: []string{"escape-dir/secret"}},
+		"output": {Name: config.StepCommandRun, Command: "touch marker", Outputs: []string{"escape-dir/secret"}},
+	}
+	for name, step := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := prepareFixture(t)
+			require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("s"), 0o644))
+			require.NoError(t, os.Symlink(outside, filepath.Join(dir, "escape-dir")))
+			_, err := ensureRun(t, dir, []config.StepConfig{step})
+			require.ErrorContains(t, err, "outside the worktree")
+			require.NoFileExists(t, filepath.Join(outside, "outside-marker"))
+			require.NoFileExists(t, filepath.Join(dir, "marker"))
+			require.NoFileExists(t, filepath.Join(dir, config.LocalStateFile), "refused before effects")
+		})
+	}
+
+	// Symlinks that stay inside the worktree are fine.
+	dir := prepareFixture(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "real", "sub"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "inside-link")))
+	_, err := ensureRun(t, dir, []config.StepConfig{{Name: config.StepCommandRun, Command: "touch ok", Dir: "inside-link/sub"}})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(dir, "real", "sub", "ok"))
+}

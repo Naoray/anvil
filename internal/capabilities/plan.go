@@ -114,6 +114,13 @@ func planComponent(worktreePath string, component config.Component, selected boo
 		}
 		return plan, fmt.Errorf("component %q: directory %s does not exist", component.Name, plan.Path)
 	}
+	// A component directory that escapes through a symlink is refused
+	// regardless of on_missing: commands would run outside the worktree.
+	if dir != "" {
+		if err := config.CheckContained(worktreePath, dir); err != nil {
+			return skipped(plan, err.Error()), fmt.Errorf("component %q: %w", component.Name, err)
+		}
+	}
 
 	for _, command := range plan.Requires {
 		if _, err := opts.LookPath(command); err != nil {
