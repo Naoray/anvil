@@ -81,12 +81,13 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		return agentResult{}, err
 	}
 
-	data := ensureData{Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
+	summary, warnings := summarizeWorktree(*target)
+	data := ensureData{Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	if mustGetBool(cmd, "skip-prepare") {
 		if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
-			return agentResult{}, agentapi.Wrap(agentapi.CodeInternal, err)
+			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
-		summary, warnings := summarizeWorktree(*target)
+		summary, warnings = summarizeWorktree(*target)
 		data.Worktree = summary
 		state, err := wtstate.ReadPrepare(target.Path)
 		if err == nil {
@@ -101,10 +102,10 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 
 	targetPC, err := pc.ForWorktree(target.Path)
 	if err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
 	if err := applyDatabaseFlags(cmd, targetPC); err != nil {
-		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
 	// Match the naming used by the command that would otherwise have run:
@@ -126,7 +127,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 		SkipCompleted: !mustGetBool(cmd, "refresh"),
 	})
 
-	summary, warnings := summarizeWorktree(*target)
+	summary, warnings = summarizeWorktree(*target)
 	data.Worktree = summary
 	if report != nil {
 		data.Prepare.PlanDigest = report.PlanDigest
