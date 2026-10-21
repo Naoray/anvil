@@ -138,6 +138,9 @@ func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.Id
 }
 
 func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	wenv, gate, err := checkContext(cmd, false)
 	if err != nil {
 		return agentResult{}, err
@@ -163,7 +166,10 @@ func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr
 		}
 		if entry.Latest == nil {
 			entry.Assessment = checks.Assess(nil, checks.Identity{})
-		} else if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check)); err != nil {
+		} else if identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check)); err != nil {
+			if ctx.Err() != nil {
+				return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: 130, Message: "check inspection interrupted", Cause: ctx.Err()}
+			}
 			warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
 			entry.Assessment = checks.Assessment{Reasons: []string{"identity unavailable: " + err.Error()}}
 		} else {

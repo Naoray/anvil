@@ -109,7 +109,10 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 		Platform:         Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	envMap := req.Env.Map()
-	identity.Toolchain = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env)
+	identity.Toolchain, err = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env)
+	if err != nil {
+		return Identity{}, err
+	}
 	var toolFields []string
 	for _, probe := range identity.Toolchain {
 		toolFields = append(toolFields, probe.Command, probe.Output, fmt.Sprint(probe.ExitCode))
@@ -163,15 +166,24 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 	return identity, nil
 }
 
-func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment) []ToolProbe {
+func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment) ([]ToolProbe, error) {
 	probes := make([]ToolProbe, 0, len(commands))
 	for _, command := range commands {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 		cmd := exec.CommandContext(probeCtx, "sh", "-c", command)
 		cmd.Dir = dir
 		cmd.Env = env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
+		configureGroup(cmd)
 		out, err := cmd.CombinedOutput()
+		killGroup(cmd)
+		probeErr := probeCtx.Err()
 		cancel()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if probeErr != nil {
+			return nil, fmt.Errorf("toolchain probe timed out: %w", probeErr)
+		}
 		probe := ToolProbe{Command: command, Output: firstLine(string(out))}
 		var exitErr *exec.ExitError
 		switch {
@@ -183,7 +195,7 @@ func probeToolchain(ctx context.Context, dir string, commands []string, env *wor
 		}
 		probes = append(probes, probe)
 	}
-	return probes
+	return probes, nil
 }
 
 func firstLine(text string) string {

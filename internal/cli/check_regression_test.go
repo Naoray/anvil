@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -275,4 +276,50 @@ func TestCheckCancellationWhileWaitingForResourceLocks(t *testing.T) {
 	earlier, err := lockfile.TryAcquire(filepath.Join(f.runtimeRoot(), "locks", "a.lock"))
 	require.NoError(t, err, "cancellation releases already acquired locks")
 	require.NoError(t, earlier.Release())
+}
+
+func TestToolchainProbeCancellationKillsGrandchildren(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix signals")
+	}
+	for _, list := range []bool{false, true} {
+		t.Run(fmt.Sprint("list=", list), func(t *testing.T) {
+			f := newAgentFixture(t, `checks:
+  probe:
+    toolchain: ['if test -e block.count; then sleep 30 & echo $! > probe.pid.count; wait; else echo tool-v1; fi']
+    commands: ['true']
+`, nil)
+			_, stderr, code := f.runJSON(f.repo, "check", "probe")
+			require.Zero(t, code, stderr)
+			require.NoError(t, os.WriteFile(filepath.Join(f.repo, "block.count"), nil, 0o600))
+			args := []string{"check", "probe", "--json"}
+			if list {
+				args = append(args, "--list")
+			}
+			running := exec.Command(f.bin, args...)
+			running.Dir, running.Env = f.repo, f.env
+			var output bytes.Buffer
+			running.Stdout, running.Stderr = &output, &output
+			require.NoError(t, running.Start())
+			pidFile := filepath.Join(f.repo, "probe.pid.count")
+			require.Eventually(t, func() bool { _, err := os.Stat(pidFile); return err == nil }, 10*time.Second, 10*time.Millisecond)
+			pid, err := os.ReadFile(pidFile)
+			require.NoError(t, err)
+			require.NoError(t, running.Process.Signal(os.Interrupt))
+			done := make(chan error, 1)
+			go func() { done <- running.Wait() }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				require.NoError(t, exec.Command("kill", "-KILL", strings.TrimSpace(string(pid))).Run())
+				<-done
+				t.Error("probe cancellation waited for a surviving grandchild")
+			}
+			if exec.Command("kill", "-0", strings.TrimSpace(string(pid))).Run() == nil {
+				require.NoError(t, exec.Command("kill", "-KILL", strings.TrimSpace(string(pid))).Run())
+				t.Error("probe left a grandchild running")
+			}
+			require.Equal(t, 130, running.ProcessState.ExitCode(), output.String())
+		})
+	}
 }
