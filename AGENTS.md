@@ -39,6 +39,9 @@ anvil remove feature-my-feature  # When done
 | Scaffold system | `internal/scaffold/` |
 | Presets | `internal/presets/` |
 | Utilities | `internal/utils/` |
+| Cross-process file locks | `internal/lockfile/` |
+| Worktree identity / prepare records | `internal/wtstate/` |
+| JSON envelope and error codes | `internal/agentapi/` |
 | UI components | `internal/ui/` |
 | Shell completions | `internal/cli/completion.go` |
 | Entry point | `cmd/anvil/main.go` |
@@ -50,7 +53,7 @@ anvil remove feature-my-feature  # When done
 |--------|----------|---------|------------|
 | Project | `<project-root>/anvil.yaml` | Project-specific settings, scaffold config, pre-flight checks | No (not in a repo) |
 | Repository | `<worktree>/anvil.yaml` | Team defaults | Yes (committed to git) |
-| Local State | `<worktree>/.anvil.local` | Runtime state (`db_suffix` and database ownership records) | No (gitignored) |
+| Local State | `<worktree>/.anvil.local` | Runtime state (`db_suffix`, database ownership, worktree identity, preparation records) | No (gitignored) |
 | Global | `~/.config/anvil/anvil.yaml` | User defaults | No (local machine) |
 
 ### Step Naming
@@ -89,6 +92,11 @@ Steps use simplified dot notation where the tool namespace maps to the binary:
 | 4 | Git operation failed |
 | 5 | Configuration error |
 | 6 | Scaffold step failed |
+| 7 | Resource unavailable (lock, lease or cleanup blocker held) |
+
+Agent commands (`ensure` and later `--json` commands) return these codes through
+`internal/agentapi`; see [docs/agent-api.md](docs/agent-api.md) for the stable
+error codes and JSON envelope.
 
 **`anvil exec` exception:** `anvil exec` passes the child process's exit code through verbatim; `127` means the command was not found and `126` means it was found but could not be executed. Anvil's own resolution failures exit `1`. See README "Test Database Isolation" for the `anvil exec` and `anvil remove --keep-db` command reference.
 
@@ -206,6 +214,13 @@ All foundational phases (1-5) are complete. The project is in active feature dev
 - Commands: link, unlink, work, list, info, open, sync, remove, prune, scaffold, exec, pull-config, repair, install, completion
 - Distribution: Homebrew, GitHub Releases, Go Install
 - Shell completions for worktree arguments (zsh, bash, fish, powershell)
+
+### Local State Writes
+
+All writers of `.anvil.local` go through `config.UpdateLocalState`, which takes
+a cross-process lock in the worktree's private Git directory and replaces the
+file atomically. Never write `.anvil.local` with `os.WriteFile`; never call
+`UpdateLocalState` from inside its callback.
 
 ### Code Quality Standards
 

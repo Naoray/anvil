@@ -12,6 +12,7 @@ Anvil manages git worktrees for agentic development. Use this skill when a repos
 ```bash
 anvil link <repo>          # Link a repository for worktree management
 anvil work <branch>        # Create or checkout a worktree
+anvil ensure <branch> --json  # Create if needed and prepare idempotently (resumes after failure)
 anvil list                 # List linked worktrees
 anvil info <branch>        # Print the path to a worktree
 anvil scaffold <branch>    # Run scaffold steps for a worktree

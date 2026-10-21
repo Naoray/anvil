@@ -21,6 +21,7 @@ var skipFirstRunCommands = map[string]bool{
 	"version":          true,
 	"help":             true,
 	"exec":             true,
+	"ensure":           true,
 }
 
 // shouldRunSetupWizard returns true when the setup wizard should be triggered.
@@ -191,6 +192,7 @@ Commands:
   remove       Remove a worktree
   prune        Remove merged worktrees
   scaffold     Run scaffold steps for a worktree
+  ensure       Create and idempotently prepare a worktree (--json)
   exec         Run a command with the worktree test database
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project
@@ -209,11 +211,11 @@ Run 'anvil <command> --help' for more information.`
 func Execute() error {
 	rootCmd.SilenceUsage = true
 	overrideCompletionSubcommands(rootCmd)
-	if err := rootCmd.Execute(); err != nil {
+	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		if ui.IsAbort(err) {
 			return nil
 		}
-		return err
+		return agentValidationError(cmd, err)
 	}
 	return nil
 }

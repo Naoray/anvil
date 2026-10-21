@@ -189,50 +189,27 @@ func ReadLocalState(worktreePath string) (*LocalState, error) {
 // are retained as auxiliary cleanup records. Unknown YAML fields are
 // preserved.
 func WriteLocalState(worktreePath string, data LocalState) error {
-	configPath := filepath.Join(worktreePath, LocalStateFile)
-
-	existing := make(map[string]any)
-	content, err := os.ReadFile(configPath)
-	switch {
-	case err == nil:
-		if err := yaml.Unmarshal(content, &existing); err != nil {
-			return fmt.Errorf("parsing existing local state: %w", err)
+	return UpdateLocalState(worktreePath, func(existing map[string]any) error {
+		if data.DbSuffix != "" {
+			existing["db_suffix"] = data.DbSuffix
 		}
-	case os.IsNotExist(err):
-	default:
-		return fmt.Errorf("reading existing local state: %w", err)
-	}
-	if existing == nil {
-		existing = make(map[string]any)
-	}
 
-	if data.DbSuffix != "" {
-		existing["db_suffix"] = data.DbSuffix
-	}
-
-	if data.BorrowedApplication != nil {
-		if err := ValidateBorrowedApplication(data.BorrowedApplication); err != nil {
-			return err
+		if data.BorrowedApplication != nil {
+			if err := ValidateBorrowedApplication(data.BorrowedApplication); err != nil {
+				return err
+			}
+			existing["borrowed_application"] = data.BorrowedApplication
 		}
-		existing["borrowed_application"] = data.BorrowedApplication
-	}
-	existingDatabases, hasExistingDatabases := existing["databases"]
-	if hasExistingDatabases || len(data.Databases) > 0 {
-		merged, err := mergeOwnedDatabases(existingDatabases, data.Databases)
-		if err != nil {
-			return err
+		existingDatabases, hasExistingDatabases := existing["databases"]
+		if hasExistingDatabases || len(data.Databases) > 0 {
+			merged, err := mergeOwnedDatabases(existingDatabases, data.Databases)
+			if err != nil {
+				return err
+			}
+			existing["databases"] = merged
 		}
-		existing["databases"] = merged
-	}
-
-	content, err = yaml.Marshal(existing)
-	if err != nil {
-		return fmt.Errorf("marshaling local state: %w", err)
-	}
-	if err := os.WriteFile(configPath, content, 0o644); err != nil {
-		return fmt.Errorf("writing local state: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 func mergeOwnedDatabases(existingRaw any, updates []OwnedDatabase) ([]any, error) {

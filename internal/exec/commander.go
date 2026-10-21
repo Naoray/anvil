@@ -130,3 +130,13 @@ func (e *CommandExecutor) RunBash(ctx context.Context, dir string, command strin
 func (e *CommandExecutor) RunShell(ctx context.Context, dir string, command string) ([]byte, error) {
 	return e.commander.Run(ctx, dir, "sh", "-c", command)
 }
+
+// RunShellWithEnv executes sh -c with additional environment values.
+func (e *CommandExecutor) RunShellWithEnv(ctx context.Context, dir string, environment map[string]string, command string) ([]byte, error) {
+	return e.RunBinaryWithEnv(ctx, dir, environment, "sh", []string{"-c", command})
+}
+
+// RunBashWithEnv executes bash -c with additional environment values.
+func (e *CommandExecutor) RunBashWithEnv(ctx context.Context, dir string, environment map[string]string, command string) ([]byte, error) {
+	return e.RunBinaryWithEnv(ctx, dir, environment, "bash", []string{"-c", command})
+}

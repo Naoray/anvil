@@ -208,6 +208,19 @@ type StepConfig struct {
 	SourceFile      string   `mapstructure:"source_file"`
 	Type            string   `mapstructure:"type"`
 	Role            string   `mapstructure:"role"`
+	// Dir runs command steps in a worktree-relative directory; conditions
+	// with file paths are evaluated relative to it as well.
+	Dir string `mapstructure:"dir"`
+	// Env adds environment values to command steps. ${VAR} references expand
+	// against Anvil's worktree environment, then the inherited environment.
+	Env map[string]string `mapstructure:"env"`
+	// Inputs are worktree-relative files, directories or globs whose content
+	// identifies a completed step; a changed digest makes ensure rerun it.
+	Inputs []string `mapstructure:"inputs"`
+	// Outputs must exist for a completed step to be considered intact.
+	Outputs []string `mapstructure:"outputs"`
+	// Always makes ensure rerun the step on every preparation.
+	Always bool `mapstructure:"always"`
 }
 
 // CleanupStep represents a cleanup step configuration
@@ -311,15 +324,24 @@ func LoadProject(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading database actions: %w", err)
 	}
+	// Environment variable names are case-sensitive as well.
 	var selectors struct {
 		Scaffold struct {
 			DatabaseActions map[string]string `yaml:"database_actions"`
+			Steps           []struct {
+				Env map[string]string `yaml:"env"`
+			} `yaml:"steps"`
 		} `yaml:"scaffold"`
 	}
 	if err := yaml.Unmarshal(content, &selectors); err != nil {
 		return nil, fmt.Errorf("parsing database actions: %w", err)
 	}
 	config.Scaffold.DatabaseActions = selectors.Scaffold.DatabaseActions
+	if len(selectors.Scaffold.Steps) == len(config.Scaffold.Steps) {
+		for i := range config.Scaffold.Steps {
+			config.Scaffold.Steps[i].Env = selectors.Scaffold.Steps[i].Env
+		}
+	}
 	return &config, nil
 }
 

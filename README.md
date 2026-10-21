@@ -383,6 +383,44 @@ files and Git indexes remain independent; Git refs and configuration are shared
 as with ordinary Git worktrees. Inspect the reported result rather than assuming
 a requested source was eligible.
 
+### `anvil ensure [WORKTREE]`
+
+Create a worktree if needed, then prepare it idempotently. Designed for coding
+agents and scripts: it never prompts and supports `--json`.
+
+```bash
+anvil ensure feature/auth            # create (like `anvil work`) or resolve, then prepare
+anvil ensure feature-auth --json     # one versioned JSON document on stdout
+anvil ensure                         # prepare the worktree containing the current directory
+anvil ensure feature/auth --refresh  # rerun every step, ignoring completion records
+anvil ensure feature/auth --skip-prepare
+```
+
+`WORKTREE` is matched **exactly** by folder name, branch, path or Anvil worktree
+ID (`wt_…`); partial matches are never used. When nothing matches, it is treated
+as a branch name and created exactly as `anvil work` would (`--base`, `--no-track`
+apply). Concurrent `ensure` calls for the same branch converge on one worktree.
+`--dry-run` is rejected before any worktree, identity or preparation changes.
+
+Preparation runs the same steps as `anvil scaffold` (preset defaults plus
+`scaffold.steps`) under a per-worktree lock and records each completed step in
+`.anvil.local` as soon as it succeeds. On the next `ensure`, a step is skipped as
+`up_to_date` when its definition is unchanged, its declared `inputs` hash to the
+same digest and its declared `outputs` still exist. Steps without `inputs` run
+once per definition. Database steps (`db.create`, `db.migrate`, `db.destroy`),
+`herd`/`yerd`, `env.read`, `store_as` producers and `always: true` steps run every time under
+their own safety policies. A failed or interrupted run resumes at the first
+incomplete step. `anvil scaffold` and `anvil work` keep their run-everything
+behavior but also record completions, so a later `ensure` builds on them.
+
+The Laravel/PHP presets declare `composer.json`/`composer.lock` → `vendor` and
+`package.json`/`package-lock.json` → `node_modules`, so `ensure` reinstalls only
+when lockfiles change. Toolchain version changes are not detected; use
+`--refresh`. Database flags (`--db-action`, `--reset-database`,
+`--borrow-app-db`) behave exactly as on `work` and `scaffold`.
+
+See [docs/agent-api.md](docs/agent-api.md) for the JSON contract and exit codes.
+
 ### `anvil pull-config`
 
 Copy `anvil.yaml` from the default branch worktree to the project root. Useful for propagating team configuration changes from the main branch.
@@ -1155,8 +1193,20 @@ All steps support these configuration options:
 | `condition` | object | Conditional execution rules |
 | `args` | array | Arguments passed to the step (e.g., `["--prefix", "app"]`) |
 | `store_as` | string | Store command output as template variable (trimmed, on success only) |
+| `dir` | string | Worktree-relative working directory for `command.run`, `bash.run` and binary steps; file conditions are evaluated relative to it |
+| `env` | map | Extra environment for command steps; `${VAR}` expands against Anvil's worktree environment, then the inherited environment (never against other values of the same step) |
+| `inputs` | array | Worktree-relative files, directories or globs that identify a completed step for `anvil ensure` |
+| `outputs` | array | Paths that must still exist for a recorded step to count as complete |
+| `always` | boolean | Rerun on every `anvil ensure` |
 
 Steps execute in the order they appear in the configuration file.
+
+Step directories, declared inputs/outputs and file conditions must remain inside
+the canonical worktree root, including through symlinks. Existing escaping links
+are rejected before preparation changes state or runs any step. Internal links
+are allowed. Step environment values all expand against the same worktree and
+inherited environment snapshot; another override in the same step does not
+change that snapshot.
 
 ### Conditions
 

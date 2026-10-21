@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `anvil ensure [WORKTREE]` creates a worktree when needed and prepares it idempotently: completed steps are recorded in `.anvil.local` and skipped while their definition, declared `inputs` and `outputs` are unchanged; failed or interrupted runs resume. Database, site-link and `store_as` steps always run under their existing policies. `--json` emits the versioned `anvil.agent/v1` envelope with stable error codes and exit statuses (docs/agent-api.md).
+- Stable worktree identity (`wt_…`) recorded with the canonical path; copied state is detected and never treated as the original's owner.
+- Step options `dir`, `env`, `inputs`, `outputs` and `always` for command and binary steps.
+
+### Changed
+
+- Every `.anvil.local` writer now uses one cross-process lock and atomic replacement, so concurrent Anvil commands cannot lose each other's updates. Symlinked `.anvil.local` files are refused for writes.
+- Laravel/PHP preset installs declare their manifest/lockfile inputs.
+
+### Fixed
+
+- `ensure` rejects `--dry-run` before mutations and emits one JSON error envelope for invalid arguments and flags. Failed preparation keeps child output on stderr.
+- Step reruns invalidate old completion records before execution, so failed or killed refreshes resume safely. `env.read` rebuilds context on every preparation.
+- Step paths and file conditions reject symlink escapes before preparation; environment overrides expand against one immutable worktree/inherited snapshot.
+
 ## [v1.12.0](https://github.com/naoray/anvil/compare/v1.11.0...v1.12.0) - 2026-10-19
 
 ### Added
