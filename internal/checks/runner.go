@@ -179,6 +179,9 @@ func runCommand(parent, ctx context.Context, req RunRequest, command config.Chec
 	for _, variable := range checkVariables(req.Check.Name, identity, runID, runDir) {
 		target.Env.Set(variable)
 	}
+	if req.slotGated() {
+		target.Env.Set(workenv.Variable{Name: SlotHolderEnv, Value: req.Check.Name, Source: "check"})
+	}
 	logPath := filepath.Join(runDir, fmt.Sprintf("command-%02d.log", index))
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {

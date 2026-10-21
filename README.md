@@ -618,7 +618,11 @@ Expensive checks (and checks declaring `slots: N`) share a machine-wide slot
 semaphore across all projects and worktrees, so parallel agents never run more
 heavy suites at once than the machine can take. Waiters queue in order
 (higher `--priority` first, then arrival); `--slot-wait 10m` bounds the wait
-(default `0` waits until interrupted, unlike `--lock-wait 0`). A killed run frees its slots automatically.
+(default `0` waits until interrupted, unlike `--lock-wait 0`). Slots are shared
+per runtime root (per user, or per `ANVIL_RUNTIME_ROOT`); processes configured
+with different capacities are capped at the largest, so keep it consistent.
+A slot-gated check started from inside another one is refused unless it
+passes `--slot-wait`, since it could wait forever for its parent's slot. A killed run frees its slots automatically.
 Configure it in `~/.config/anvil/anvil.yaml`:
 
 ```yaml
