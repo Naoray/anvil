@@ -272,26 +272,31 @@ func BreakLease(worktreePath, reason string, now time.Time) (*Lease, error) {
 // --clean), which hold it from their lease check until the worktree is gone.
 const LifecycleLockFile = "anvil-lifecycle.lock"
 
+// lifecycleLockPath lives outside the worktree's Git directory: removal
+// holds it while git deletes that directory, which Windows refuses while a
+// file inside it is open.
+func lifecycleLockPath(worktreePath string) string {
+	return config.WorktreeExternalLockPath(worktreePath, LifecycleLockFile)
+}
+
 // ErrWorktreeGone reports a worktree removed while a claim waited for it.
 var ErrWorktreeGone = errors.New("worktree no longer exists")
 
 // LockLifecycle takes the worktree's lifecycle lock, waiting for a holder.
 func LockLifecycle(worktreePath string) (*lockfile.Lock, error) {
-	return lockfile.Acquire(config.WorktreeLockPath(worktreePath, LifecycleLockFile))
+	return lockfile.Acquire(lifecycleLockPath(worktreePath))
 }
 
 // WithLiveWorktree runs fn under the lifecycle lock after verifying the
 // worktree still exists, so a claim can never land on a worktree that a
 // concurrent removal has already checked or deleted.
 func WithLiveWorktree(worktreePath string, fn func() error) (err error) {
-	lockPath := config.WorktreeLockPath(worktreePath, LifecycleLockFile)
-	lock, err := lockfile.Acquire(lockPath)
+	lock, err := lockfile.Acquire(lifecycleLockPath(worktreePath))
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, lock.Release()) }()
-	// Removal deletes the .git link, which also moves the lock path.
-	if _, statErr := os.Stat(filepath.Join(worktreePath, ".git")); statErr != nil || config.WorktreeLockPath(worktreePath, LifecycleLockFile) != lockPath {
+	if _, statErr := os.Stat(filepath.Join(worktreePath, ".git")); statErr != nil {
 		return fmt.Errorf("%s: %w", worktreePath, ErrWorktreeGone)
 	}
 	return fn()
