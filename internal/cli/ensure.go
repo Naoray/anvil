@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/capabilities"
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/lockfile"
@@ -24,6 +26,10 @@ import (
 // worktree instead of racing `git worktree add`.
 const worktreeCreateLockFile = "anvil-worktree-create.lock"
 
+// LeaseTokenEnv supplies a lease token without exposing it in process
+// arguments.
+const LeaseTokenEnv = "ANVIL_LEASE_TOKEN"
+
 var ensureAgentCommand = agentCommand{Name: "ensure", Mutating: true, Human: printEnsureHuman}
 
 var ensureCmd = &cobra.Command{
@@ -36,12 +42,24 @@ branch, path or Anvil worktree ID. When nothing matches, WORKTREE is treated
 as a branch name and a worktree is created exactly as 'anvil work' would.
 Without WORKTREE, the worktree containing the current directory is used.
 
+--review COMMIT creates (or reuses) an independent review worktree detached
+at that exact commit: it never touches branches, so implementation workers
+and their uncommitted changes are unaffected. WORKTREE names it; otherwise a
+unique review-<sha>-<suffix> name is generated, so several reviewers can
+inspect the same commit independently. Review worktrees prepare components
+only (no preset/scaffold steps such as databases or .env copies) unless
+--full-prepare or roles.review.scaffold is set. A review worktree is not a
+security boundary.
+
 Preparation runs the same scaffold steps as 'anvil scaffold', but skips steps
 whose recorded completion still matches their definition, declared inputs and
 outputs. Database, site-link and store_as steps always run under their own
 safety policies. Each completed step is recorded immediately, so a failed or
 interrupted run resumes where it stopped. Concurrent ensures of one worktree
 wait for each other.
+
+--lease-owner acquires (or, with the same token, renews) an advisory lease
+before preparation; the new token is returned once in the JSON output.
 
 Mutating. Use --json for one versioned JSON document on stdout.`,
 	Args:              func(cmd *cobra.Command, args []string) error { return invalidArgs(cobra.MaximumNArgs(1)(cmd, args)) },
@@ -63,8 +81,57 @@ type prepareSummary struct {
 type ensureData struct {
 	Worktree   worktreeSummary              `json:"worktree"`
 	Created    bool                         `json:"created"`
+	Metadata   wtstate.Metadata             `json:"metadata"`
+	Lease      *leaseView                   `json:"lease"`
 	Prepare    prepareSummary               `json:"prepare"`
 	Components []capabilities.ComponentPlan `json:"components"`
+}
+
+// ensureOptions are the parsed role, task and lease flags.
+type ensureOptions struct {
+	ReviewCommit string
+	Role         string
+	Task         wtstate.Task
+	LeaseOwner   string
+	LeaseToken   string
+	LeaseTTL     time.Duration
+	SessionID    string
+	Takeover     bool
+}
+
+func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, error) {
+	opts := ensureOptions{
+		Role:       mustGetString(cmd, "role"),
+		Task:       wtstate.Task{ID: mustGetString(cmd, "task-id"), URL: mustGetString(cmd, "task-url"), PR: mustGetString(cmd, "pr")},
+		LeaseOwner: mustGetString(cmd, "lease-owner"),
+		LeaseToken: os.Getenv(LeaseTokenEnv),
+		SessionID:  mustGetString(cmd, "session-id"),
+		Takeover:   mustGetBool(cmd, "takeover-stale"),
+	}
+	ttl, err := cmd.Flags().GetDuration("lease-ttl")
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	}
+	opts.LeaseTTL = ttl
+	if opts.Role != "" && !wtstate.ValidRole(opts.Role) {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--role must be implementation or review")
+	}
+	if review := mustGetString(cmd, "review"); review != "" {
+		if opts.Role == wtstate.RoleImplementation {
+			return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--review creates review worktrees; drop --role implementation")
+		}
+		sha, err := git.ResolveCommit(pc.ProjectPath, review)
+		if err != nil {
+			return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+		}
+		opts.ReviewCommit, opts.Role = sha, wtstate.RoleReview
+	} else if opts.Role == wtstate.RoleReview {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktrees are pinned to a commit: use --review COMMIT")
+	}
+	if opts.Takeover && opts.LeaseOwner == "" {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--takeover-stale requires --lease-owner")
+	}
+	return opts, nil
 }
 
 func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
@@ -76,7 +143,17 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{}, err
 	}
-	target, created, err := ensureWorktreeExists(cmd, pc, args)
+	opts, err := parseEnsureOptions(cmd, pc)
+	if err != nil {
+		return agentResult{}, err
+	}
+	var target *git.Worktree
+	var created bool
+	if opts.ReviewCommit != "" {
+		target, created, err = ensureReviewWorktree(pc, args, opts.ReviewCommit)
+	} else {
+		target, created, err = ensureWorktreeExists(cmd, pc, args)
+	}
 	if err != nil {
 		return agentResult{}, err
 	}
@@ -86,14 +163,17 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		return agentResult{}, err
 	}
 	defer func() { runErr = errors.Join(runErr, gate.Release()) }()
-
 	summary, warnings := summarizeWorktree(*target)
 	data := ensureData{Components: []capabilities.ComponentPlan{}, Worktree: summary, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
+	if opts, err = effectiveRole(target, opts, created); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, err
+	}
 	if mustGetBool(cmd, "skip-prepare") {
-		if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
-			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
+		if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
+			return agentResult{Data: data, Warnings: warnings}, err
 		}
-		summary, warnings = summarizeWorktree(*target)
+		summary, summaryWarnings := summarizeWorktree(*target)
+		warnings = append(warnings, summaryWarnings...)
 		data.Worktree = summary
 		state, err := wtstate.ReadPrepare(target.Path)
 		if err == nil {
@@ -110,10 +190,12 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
-	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected})
+	envOptions := worktreeEnvOptions{Selected: selected, Role: opts.Role}
+	wenv, err := loadWorktreeEnv(pc, *target, envOptions)
 	if err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
+	reviewMinimal := opts.Role == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
 	data.Components = wenv.Components
 	// Every component's conditions are validated, including components
 	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
@@ -149,21 +231,31 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	}
 	extraSteps := capabilities.Steps(wenv.Components)
 	resolvedPreset := targetPC.ResolvePreset("", target.Path)
-	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: targetPC.Config, DefaultSteps: resolvedPreset.DefaultSteps(), ExtraSteps: extraSteps}
+	prepareConfig, defaultSteps := targetPC.Config, resolvedPreset.DefaultSteps()
+	presetName := resolvedPreset.Name()
+	if reviewMinimal {
+		// Review worktrees run component preparation only: no databases,
+		// site links or .env copies from preset/scaffold steps.
+		minimal := *targetPC.Config
+		minimal.Scaffold = config.ScaffoldConfig{Override: true}
+		prepareConfig, defaultSteps, presetName = &minimal, nil, ""
+	}
+	request := scaffold.ScaffoldRequest{WorktreePath: target.Path, Config: prepareConfig, DefaultSteps: defaultSteps, ExtraSteps: extraSteps}
+
 	if err := targetPC.ScaffoldManager().Validate(request); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeConfigInvalid, err)
 	}
-	// Identity is the first write; the exported environment includes it.
-	if _, _, err := wtstate.EnsureIdentity(target.Path); err != nil {
-		return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
+	// Record identity, role/task metadata and the lease before preparation.
+	if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
+		return agentResult{Data: data, Warnings: warnings}, err
 	}
-	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	if err := provisionResources(wenv); err != nil {
 		return agentResult{Data: data}, err
 	}
-	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
+	if wenv, err = loadWorktreeEnv(pc, *target, envOptions); err != nil {
 		return agentResult{}, err
 	}
 	// Match the naming used by the command that would otherwise have run:
@@ -177,9 +269,9 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		Branch:        target.Branch,
 		RepoName:      repoName,
 		SiteName:      worktreeSiteName(target.Path, target.Branch, targetPC.DefaultBranch, targetPC.Config.SiteName),
-		Preset:        resolvedPreset.Name(),
-		DefaultSteps:  resolvedPreset.DefaultSteps(),
-		Config:        targetPC.Config,
+		Preset:        presetName,
+		DefaultSteps:  defaultSteps,
+		Config:        prepareConfig,
 		Verbose:       verbose,
 		Quiet:         quiet,
 		ExtraSteps:    extraSteps,
@@ -187,7 +279,8 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		SkipCompleted: !mustGetBool(cmd, "refresh"),
 	})
 
-	summary, warnings = summarizeWorktree(*target)
+	summary, summaryWarnings := summarizeWorktree(*target)
+	warnings = append(warnings, summaryWarnings...)
 	data.Worktree = summary
 	if report != nil {
 		data.Prepare.PlanDigest = report.PlanDigest
@@ -206,6 +299,91 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
 	return agentResult{Data: data, Warnings: warnings}, nil
+}
+
+// effectiveRole applies the recorded role and verifies review worktrees
+// before any write. A recorded review role is kept on plain re-ensure; an
+// existing worktree without role metadata is never adopted as a review; and
+// a review worktree must still be detached at its pinned commit (reviewer
+// changes are never reset to make it so).
+func effectiveRole(target *git.Worktree, opts ensureOptions, created bool) (ensureOptions, error) {
+	path := target.Path
+	metadata, err := wtstate.ReadMetadata(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if opts.Role != "" && metadata.Role != "" && metadata.Role != opts.Role {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s has role %q, not %q", path, metadata.Role, opts.Role)
+	}
+	if opts.ReviewCommit != "" && metadata.Role == "" && !created {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; review worktrees are created by 'anvil ensure --review' (choose another name)", path)
+	}
+	if metadata.Role != wtstate.RoleReview {
+		return opts, nil
+	}
+	opts.Role = wtstate.RoleReview
+	if opts.ReviewCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
+	}
+	if metadata.PinnedCommit == "" {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s has no recorded pin; refusing to prepare it", path)
+	}
+	detached, err := git.IsDetachedHEAD(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	head, err := git.HeadCommit(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	if head != metadata.PinnedCommit || !detached {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s must remain detached at pinned commit %s (HEAD is %s, detached=%t); refusing to prepare it (reviewer changes are kept)", path, metadata.PinnedCommit, head, detached)
+	}
+	opts.ReviewCommit = metadata.PinnedCommit
+	return opts, nil
+}
+
+// recordEnsureClaims assigns identity, records metadata and acquires the
+// requested lease.
+func recordEnsureClaims(target *git.Worktree, opts ensureOptions, data *ensureData, warnings *[]string) error {
+	identity, _, err := wtstate.EnsureIdentity(target.Path)
+	if err != nil {
+		return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	now := time.Now()
+	if opts.Role != "" || opts.ReviewCommit != "" || opts.Task != (wtstate.Task{}) {
+		metadata, err := wtstate.UpdateMetadata(target.Path, wtstate.MetadataUpdate{Role: opts.Role, PinnedCommit: opts.ReviewCommit, Task: opts.Task}, now)
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		}
+		data.Metadata = metadata
+	} else if data.Metadata, err = wtstate.ReadMetadata(target.Path); err != nil {
+		return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	if opts.LeaseOwner == "" {
+		lease, err := wtstate.ReadLease(target.Path)
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		data.Lease = newLeaseView(lease, now, "")
+		if lease.State(now) == wtstate.LeaseActive {
+			*warnings = append(*warnings, fmt.Sprintf("worktree is leased by %q (task %q); leases are advisory", lease.Owner, lease.TaskID))
+		}
+		return nil
+	}
+	lease, token, err := wtstate.AcquireLease(target.Path, wtstate.AcquireRequest{
+		WorktreeID: identity.ID, Token: opts.LeaseToken, Owner: opts.LeaseOwner, TaskID: opts.Task.ID,
+		SessionID: opts.SessionID, TTL: opts.LeaseTTL, TakeoverStale: opts.Takeover, Now: now,
+	})
+	if err != nil {
+		return leaseAPIError(err)
+	}
+	issued := ""
+	if token != opts.LeaseToken {
+		issued = token
+	}
+	data.Lease = newLeaseView(lease, now, issued)
+	return nil
 }
 
 // prepareFailure names the failed step without copying child output into JSON.
@@ -299,6 +477,83 @@ func ensureWorktreeExists(cmd *cobra.Command, pc *ProjectContext, args []string)
 	return nil, true, agentapi.Errorf(agentapi.CodeGitFailed, "created worktree %s is not registered", absPath)
 }
 
+// ensureReviewWorktree creates or reuses a detached worktree at commit.
+func ensureReviewWorktree(pc *ProjectContext, args []string, commit string) (target *git.Worktree, created bool, err error) {
+	name := ""
+	if len(args) > 0 {
+		name = args[0]
+		if wt, err := lookupWorktree(pc, name); err != nil || wt != nil {
+			return wt, false, err
+		}
+	}
+	err = withCreateLock(pc, func() error {
+		if name != "" {
+			if target, err = lookupWorktree(pc, name); err != nil || target != nil {
+				return err
+			}
+		} else {
+			suffix, err := wtstate.NewID()
+			if err != nil {
+				return agentapi.Wrap(agentapi.CodeInternal, err)
+			}
+			name = fmt.Sprintf("review-%s-%s", commit[:12], suffix[len(suffix)-4:])
+		}
+		absPath, err := filepath.Abs(pc.GetWorktreePath(name))
+		if err != nil {
+			return agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		if _, statErr := os.Stat(absPath); statErr == nil {
+			return agentapi.Errorf(agentapi.CodeInvalidArguments, "%s already exists and is not a registered worktree", absPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+			return agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		ui.PrintStep(fmt.Sprintf("Creating review worktree %s at %s", name, commit[:12]))
+		if err := git.CreateDetachedWorktree(pc.ProjectPath, absPath, commit); err != nil {
+			return agentapi.Wrap(agentapi.CodeGitFailed, err)
+		}
+		created = true
+		target, err = registeredAt(pc, absPath)
+		return err
+	})
+	return target, created, err
+}
+
+func lookupWorktree(pc *ProjectContext, query string) (*git.Worktree, error) {
+	worktrees, err := git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	return resolveExactWorktree(worktrees, query)
+}
+
+func registeredAt(pc *ProjectContext, absPath string) (*git.Worktree, error) {
+	worktrees, err := git.ListWorktrees(pc.GitDir)
+	if err != nil {
+		return nil, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	for _, wt := range worktrees {
+		if git.PathsEqual(wt.Path, absPath) {
+			copied := wt
+			return &copied, nil
+		}
+	}
+	return nil, agentapi.Errorf(agentapi.CodeGitFailed, "created worktree %s is not registered", absPath)
+}
+
+func withCreateLock(pc *ProjectContext, fn func() error) (err error) {
+	commonDir, err := dblifecycle.CommonDir(pc.ProjectPath)
+	if err != nil {
+		return agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	lock, err := lockfile.Acquire(filepath.Join(commonDir, worktreeCreateLockFile))
+	if err != nil {
+		return agentapi.Wrap(agentapi.CodeInternal, err)
+	}
+	defer func() { err = errors.Join(err, lock.Release()) }()
+	return fn()
+}
+
 func printEnsureHuman(result agentResult) error {
 	data, ok := result.Data.(ensureData)
 	if !ok {
@@ -325,5 +580,12 @@ func init() {
 	ensureCmd.Flags().Bool("refresh", false, "Rerun every step, ignoring completion records")
 	ensureCmd.Flags().StringArray("component", nil, "Also prepare this opt-in component (repeatable)")
 	ensureCmd.Flags().Bool("skip-prepare", false, "Only create or resolve the worktree")
+	ensureCmd.Flags().String("review", "", "Create or reuse a review worktree detached at this exact commit")
+	ensureCmd.Flags().Bool("full-prepare", false, "Run preset/scaffold steps in review worktrees too")
+	ensureCmd.Flags().String("role", "", "Record the worktree role: implementation or review")
+	ensureCmd.Flags().String("task-id", "", "External task identifier (metadata only)")
+	ensureCmd.Flags().String("task-url", "", "External task URL (metadata only)")
+	ensureCmd.Flags().String("pr", "", "Pull request number or URL (metadata only)")
+	addLeaseFlags(ensureCmd)
 	rootCmd.AddCommand(ensureCmd)
 }

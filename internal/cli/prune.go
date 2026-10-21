@@ -19,16 +19,14 @@ import (
 type pruneCommandDependencies struct {
 	loadGlobalConfig func() (*config.GlobalConfig, error)
 	openProject      func(string, string, *config.ProjectInfo, *config.GlobalConfig) (*ProjectContext, error)
-	pruneProject     func(*ProjectContext, bool, bool, bool, bool, bool) error
+	pruneProject     func(*ProjectContext, bool, bool, bool, bool, bool, bool) error
 }
 
 func defaultPruneCommandDependencies() pruneCommandDependencies {
 	return pruneCommandDependencies{
 		loadGlobalConfig: config.LoadOrCreateGlobalConfig,
 		openProject:      openProject,
-		pruneProject: func(pc *ProjectContext, force, dryRun, verbose, quiet, keepDB bool) error {
-			return pruneProject(pc, force, dryRun, verbose, quiet, keepDB)
-		},
+		pruneProject:     pruneProject,
 	}
 }
 
@@ -48,6 +46,7 @@ against origin/<default-branch>, and provides an interactive review before remov
 	}
 	command.Flags().BoolP("force", "f", false, "Skip interactive confirmation")
 	command.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
+	command.Flags().Bool("ignore-lease", false, "Remove even if another agent holds an active lease (explicit authorization)")
 	return command
 }
 
@@ -57,6 +56,7 @@ func runPrune(cmd *cobra.Command, deps pruneCommandDependencies) error {
 	verbose := mustGetBool(cmd, "verbose")
 	quiet := mustGetBool(cmd, "quiet")
 	keepDB := mustGetBool(cmd, "keep-db")
+	ignoreLease := mustGetBool(cmd, "ignore-lease")
 
 	globalCfg, err := deps.loadGlobalConfig()
 	if err != nil {
@@ -95,7 +95,7 @@ func runPrune(cmd *cobra.Command, deps pruneCommandDependencies) error {
 			fmt.Println()
 			continue
 		}
-		if err := deps.pruneProject(pc, force, dryRun, verbose, quiet, keepDB); err != nil {
+		if err := deps.pruneProject(pc, force, dryRun, verbose, quiet, keepDB, ignoreLease); err != nil {
 			failure := fmt.Errorf("project %q: %w", name, err)
 			ui.PrintWarning(failure.Error())
 			failures = append(failures, failure)
@@ -137,25 +137,22 @@ func defaultPruneProjectDependencies() pruneProjectDependencies {
 }
 
 // pruneProject fetches origin and removes merged worktrees for a single project.
-func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet bool, keepDB ...bool) error {
-	keepDatabases := false
-	if len(keepDB) > 0 {
-		keepDatabases = keepDB[0]
-	}
+func pruneProject(pc *ProjectContext, force, dryRun, verbose, quiet, keepDB, ignoreLease bool) error {
 	return pruneProjectWithDependencies(
 		pc,
 		force,
 		dryRun,
 		verbose,
 		quiet,
-		keepDatabases,
+		keepDB,
+		ignoreLease,
 		defaultPruneProjectDependencies(),
 	)
 }
 
 func pruneProjectWithDependencies(
 	pc *ProjectContext,
-	force, dryRun, verbose, quiet, keepDB bool,
+	force, dryRun, verbose, quiet, keepDB, ignoreLease bool,
 	deps pruneProjectDependencies,
 ) error {
 	if err := deps.fetchOrigin(pc.GitDir); err != nil {
@@ -302,7 +299,7 @@ func pruneProjectWithDependencies(
 		if err := runRemoveLifecycle(
 			pc,
 			wt,
-			removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
+			removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet, IgnoreLease: ignoreLease},
 			cleanupOpts,
 			cleanupMessages,
 			deps.removeLifecycle,

@@ -184,6 +184,9 @@ func (c *Config) ValidateEnvironment() error {
 	if err := c.validateChecks(); err != nil {
 		problems = append(problems, err)
 	}
+	if err := c.validateRoles(); err != nil {
+		problems = append(problems, err)
+	}
 	return errors.Join(problems...)
 }
 
@@ -314,4 +317,37 @@ func (c *Config) FindProcess(name string) (*ProcessConfig, bool) {
 		}
 	}
 	return nil, false
+}
+
+// RolesConfig declares per-role behavior.
+type RolesConfig struct {
+	Review ReviewRoleConfig `yaml:"review"`
+}
+
+// ReviewRoleConfig controls review worktrees. Review worktrees prepare
+// components only by default: preset/scaffold steps (databases, site links,
+// .env copies) run only when Scaffold is true.
+type ReviewRoleConfig struct {
+	Scaffold bool `yaml:"scaffold"`
+	// Components limits which components are prepared (default: all
+	// applicable, non-opt-in components).
+	Components []string `yaml:"components"`
+	// EnvUnset removes inherited variables (for example production
+	// credentials) from commands Anvil runs in review worktrees.
+	EnvUnset []string `yaml:"env_unset"`
+}
+
+func (c *Config) validateRoles() error {
+	var problems []error
+	for _, name := range c.Roles.Review.Components {
+		if _, ok := c.FindComponent(name); !ok {
+			problems = append(problems, fmt.Errorf("roles.review.components: unknown component %q", name))
+		}
+	}
+	for _, name := range c.Roles.Review.EnvUnset {
+		if !IsValidEnvName(name) {
+			problems = append(problems, fmt.Errorf("roles.review.env_unset: invalid variable name %q", name))
+		}
+	}
+	return errors.Join(problems...)
 }

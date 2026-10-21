@@ -127,7 +127,7 @@ func checkContext(cmd *cobra.Command, mutate bool) (wenv *worktreeEnv, held *loc
 }
 
 func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.IdentityRequest {
-	request := checks.IdentityRequest{WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env, SecretEnv: wenv.PC.Config.SecretEnv,
+	request := checks.IdentityRequest{WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env, Unset: wenv.Unset, SecretEnv: wenv.PC.Config.SecretEnv,
 		Resolve: func(command config.CheckCommand) (checks.CommandTarget, error) {
 			return resolveCheckCommand(wenv, command)
 		}}
@@ -287,6 +287,7 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		Output:       checkOutput(cmd),
 		LockWait:     lockWait,
 		AnvilVersion: Version,
+		Unset:        wenv.Unset,
 		SecretEnv:    wenv.PC.Config.SecretEnv,
 	})
 	var busy *checks.BusyError

@@ -55,6 +55,10 @@ It is cross-project, cross-language, and cross-environment compatible.`,
 		if cmd.Parent() != nil && cmd.Parent().Name() == "completion" {
 			return nil
 		}
+		// Agent-facing commands (everything with --json) never prompt.
+		if cmd.Flags().Lookup("json") != nil {
+			return nil
+		}
 
 		globalCfg, err := config.LoadOrCreateGlobalConfig()
 		if err != nil {
@@ -200,6 +204,9 @@ Commands:
   run          Run a command in a worktree's configured environment
   start/stop   Start or stop a worktree's managed dev processes
   check        Run named checks and record provenance (--list, --json)
+  context      Describe a worktree's environment for agents (--json)
+  status       Readiness, resources, lease and cleanup preview (--json)
+  lease        Acquire, renew, release or break advisory agent leases
   exec         Run a command with the worktree test database
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project

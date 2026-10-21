@@ -95,7 +95,7 @@ func TestPruneProject_RemovesMergedWorktree(t *testing.T) {
 	_, err := os.Stat(wtPath)
 	require.NoError(t, err, "worktree should exist before prune")
 
-	err = pruneProject(pc, true, false, false, false)
+	err = pruneProject(pc, true, false, false, false, false, false)
 	require.NoError(t, err)
 
 	_, err = os.Stat(wtPath)
@@ -116,7 +116,7 @@ func TestPruneProject_KeepsUnmergedWorktree(t *testing.T) {
 	runGitCmd(t, wtPath, "commit", "-m", "open work")
 	_ = repoDir
 
-	err := pruneProject(pc, true, false, false, false)
+	err := pruneProject(pc, true, false, false, false, false, false)
 	require.NoError(t, err)
 
 	_, err = os.Stat(wtPath)
@@ -129,7 +129,7 @@ func TestPruneProject_DryRunDoesNotRemove(t *testing.T) {
 
 	previousStdout := os.Stdout
 	output := captureStdout(t, func() {
-		err := pruneProject(pc, true, true /* dryRun */, false, false)
+		err := pruneProject(pc, true, true /* dryRun */, false, false, false, false)
 		require.NoError(t, err)
 	})
 	require.Same(t, previousStdout, os.Stdout)
@@ -201,7 +201,7 @@ func TestPruneProject_DoesNotRemoveAfterCleanupFailure(t *testing.T) {
 		},
 	}
 
-	err := pruneProjectWithDependencies(pc, true, false, false, false, false, deps)
+	err := pruneProjectWithDependencies(pc, true, false, false, false, false, false, deps)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database cleanup failed")
@@ -228,7 +228,7 @@ func TestRunPrune_SortsProjectsContinuesAfterFailuresAndJoinsErrors(t *testing.T
 			}
 			return &ProjectContext{ProjectName: name}, nil
 		},
-		pruneProject: func(pc *ProjectContext, _, _, _, _, _ bool) error {
+		pruneProject: func(pc *ProjectContext, _, _, _, _, _, _ bool) error {
 			visited = append(visited, pc.ProjectName)
 			if pc.ProjectName == "beta" {
 				return pruneErr
@@ -265,7 +265,7 @@ func TestRunPrune_ContinuesAfterFetchFailure(t *testing.T) {
 		openProject: func(_ string, name string, _ *config.ProjectInfo, _ *config.GlobalConfig) (*ProjectContext, error) {
 			return &ProjectContext{ProjectName: name}, nil
 		},
-		pruneProject: func(pc *ProjectContext, _, _, _, _, _ bool) error {
+		pruneProject: func(pc *ProjectContext, _, _, _, _, _, _ bool) error {
 			visited = append(visited, pc.ProjectName)
 			if pc.ProjectName == "alpha" {
 				return fmt.Errorf("fetching origin: %w", fetchErr)
@@ -313,7 +313,7 @@ func TestPruneProject_ReportsRemovedOnlyAfterSuccessfulRemoval(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps)
+		err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, false, deps)
 		require.ErrorIs(t, err, removeErr)
 	})
 
@@ -390,7 +390,7 @@ func TestPruneProject_ForceAndKeepDBOptionsAreShared(t *testing.T) {
 		GitDir:        "git-dir",
 		DefaultBranch: "main",
 		Config:        &config.Config{Preset: "remove-test"},
-	}, true, false, false, false, true, deps)
+	}, true, false, false, false, true, false, deps)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, removeCalls)
@@ -438,7 +438,7 @@ func TestPruneProject_DryRunRunsCleanupWithoutGitRemoval(t *testing.T) {
 		GitDir:        "git-dir",
 		DefaultBranch: "main",
 		Config:        &config.Config{Preset: "remove-test"},
-	}, true, true, false, true, false, deps)
+	}, true, true, false, true, false, false, deps)
 
 	require.NoError(t, err)
 	assert.Zero(t, removeCalls)
@@ -474,7 +474,7 @@ func TestPruneProject_FetchFailureStopsBeforeMutation(t *testing.T) {
 		},
 	}
 
-	err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps)
+	err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, false, deps)
 
 	require.ErrorIs(t, err, fetchErr)
 	assert.Zero(t, listCalls)
@@ -508,7 +508,7 @@ func TestPruneProject_SkipsBareDetachedAndLockedRecords(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps))
+	require.NoError(t, pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, false, deps))
 
 	assert.Zero(t, mergeCalls, "prune must not merge-check non-attached records")
 	assert.Zero(t, removeCalls, "prune must not remove non-attached or locked records")
@@ -532,7 +532,7 @@ func TestPruneProject_SkipsBranchlessRecord(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps))
+	require.NoError(t, pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, false, deps))
 	assert.Zero(t, mergeCalls, "branchless records must not reach merge probing")
 }
 
@@ -565,7 +565,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenSelectionEmpty(t *testing.T)
 		},
 	}
 
-	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, false, deps)
 
 	require.ErrorIs(t, err, mergeErr)
 	assert.Equal(t, 1, selectionCalls)
@@ -604,7 +604,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenConfirmationDeclined(t *test
 		},
 	}
 
-	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+	err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, false, deps)
 
 	require.ErrorIs(t, err, mergeErr)
 	assert.Equal(t, 1, confirmationCalls)
@@ -664,7 +664,7 @@ func TestPruneProject_PreservesPriorFailureWithSelectionOrConfirmationError(t *t
 				},
 			}
 
-			err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, deps)
+			err := pruneProjectWithDependencies(pcForPruneTest(), false, false, false, false, false, false, deps)
 
 			require.ErrorIs(t, err, mergeErr)
 			require.ErrorIs(t, err, tt.currentFailure)
@@ -699,7 +699,7 @@ func TestPruneProject_ReturnsMergeCheckFailureAfterContinuing(t *testing.T) {
 		},
 	}
 
-	err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, deps)
+	err := pruneProjectWithDependencies(pcForPruneTest(), true, false, false, false, false, false, deps)
 
 	require.ErrorIs(t, err, mergeErr)
 	assert.Equal(t, 1, removeCalls, "prune should continue after merge-check failure")

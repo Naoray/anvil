@@ -40,6 +40,10 @@ type Options struct {
 	// Selected names opt-in components to include. Naming a component also
 	// makes missing requirements fatal for it.
 	Selected []string
+	// Scope, when non-nil, limits the plan to these components (for example
+	// roles.review.components); the others are skipped before their
+	// requirements or directories are evaluated.
+	Scope    []string
 	GOOS     string
 	LookPath func(string) (string, error)
 }
@@ -61,6 +65,10 @@ func Plan(worktreePath string, cfg *config.Config, opts Options) ([]ComponentPla
 	var problems []error
 	plans := make([]ComponentPlan, 0, len(cfg.Components))
 	for _, component := range cfg.Components {
+		if opts.Scope != nil && !contains(opts.Scope, component.Name) {
+			plans = append(plans, outOfScope(worktreePath, component))
+			continue
+		}
 		plan, err := planComponent(worktreePath, component, selected[component.Name], opts)
 		if err != nil {
 			problems = append(problems, err)
@@ -181,6 +189,18 @@ func ValidationSteps(worktreePath string, cfg *config.Config, goos string) ([]co
 		steps = append(steps, compiled...)
 	}
 	return steps, errors.Join(problems...)
+}
+
+func outOfScope(worktreePath string, component config.Component) ComponentPlan {
+	plan := ComponentPlan{
+		Name: component.Name, Path: component.ComponentDir(), AbsPath: filepath.Join(worktreePath, component.ComponentDir()),
+		Uses: append([]string{}, component.Uses...), Requires: []string{}, OptIn: component.OptIn,
+		Platforms: append([]string(nil), component.Platforms...),
+	}
+	if plan.Path == "" {
+		plan.Path = "."
+	}
+	return skipped(plan, "outside role component scope")
 }
 
 func skipped(plan ComponentPlan, reason string) ComponentPlan {

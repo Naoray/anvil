@@ -220,8 +220,19 @@ All foundational phases (1-5) are complete. The project is in active feature dev
 - Core: worktree management, config hierarchy, scaffold system
 - Presets: Laravel, PHP, Laravel-Shared-DB
 - Commands: link, unlink, work, list, info, open, sync, remove, prune, scaffold, exec, pull-config, repair, install, completion
+- Agent environment commands: ensure, run, context, status, check, start, stop, lease (all `--json` except `run`; contract in docs/agent-api.md)
 - Distribution: Homebrew, GitHub Releases, Go Install
 - Shell completions for worktree arguments (zsh, bash, fish, powershell)
+
+### Declared vs Observed State
+
+`anvil.yaml` holds declarations only (scaffold, env, components, resources,
+processes, checks, roles). Observations live in exactly one place each:
+`.anvil.local` (database ownership, warm provenance, identity, preparation,
+metadata, lease, process records), `<runtime root>/ports.json` (port
+reservations), `<runtime root>/worktrees/<id>/` (directories, check results,
+logs) and `<runtime root>/locks/` (resource locks). New sections are decoded
+with case-preserving YAML in `config.LoadProject`, never through viper.
 
 ### Local State Writes
 

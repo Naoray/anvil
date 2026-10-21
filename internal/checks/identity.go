@@ -120,7 +120,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 		Platform:         Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	envMap := req.Env.Map()
-	identity.Toolchain, err = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env, req.Guards)
+	identity.Toolchain, err = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env, req.Unset, req.Guards)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -177,7 +177,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 	return identity, nil
 }
 
-func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment, guards []*lockfile.Lock) ([]ToolProbe, error) {
+func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment, unset []string, guards []*lockfile.Lock) ([]ToolProbe, error) {
 	probes := make([]ToolProbe, 0, len(commands))
 	for _, command := range commands {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -187,7 +187,7 @@ func probeToolchain(ctx context.Context, dir string, commands []string, env *wor
 			return nil, err
 		}
 		cmd.Dir = dir
-		cmd.Env = env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
+		cmd.Env = env.Environ(os.Environ(), unset, runtime.GOOS == "windows")
 		output := &boundedBuffer{limit: 64 << 10}
 		cmd.Stdout, cmd.Stderr = output, output
 		err = cmd.Run()

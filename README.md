@@ -482,6 +482,18 @@ anvil check --list --json                         # is the latest result still c
 anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
 ```
 
+Agent lifecycle — machine-readable, exact resolution, never prompts:
+
+```bash
+anvil ensure feature/x --json --lease-owner codex --task-id SOLO-7   # prepared + leased
+anvil ensure --review <sha> --json            # independent reviewer worktree pinned to a commit
+anvil context feature-x --json                # environment, components, resources, checks (read-only)
+anvil status feature-x --json                 # readiness, lease, processes, check currency, cleanup preview
+anvil lease release feature-x                 # ANVIL_LEASE_TOKEN; remove refuses active leases
+```
+
+See [docs/agent-api.md](docs/agent-api.md) for the versioned JSON contract.
+
 Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
 `swift`. See [docs/environments.md](docs/environments.md) for the full schema and
 [examples/](examples/) for synthetic Rust/Python, Node/Rust/Tauri/Swift and

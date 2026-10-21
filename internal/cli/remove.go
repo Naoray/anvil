@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -88,6 +89,9 @@ type removeLifecycleOptions struct {
 	DryRun  bool
 	Verbose bool
 	Quiet   bool
+	// IgnoreLease explicitly authorizes removing a worktree another agent
+	// holds an active lease on.
+	IgnoreLease bool
 }
 
 type removeLifecycleDependencies struct {
@@ -168,6 +172,9 @@ func runRemoveLifecycle(
 	}
 	if err := runtimePlan.blocked(); err != nil {
 		return agentapi.Wrap(agentapi.CodeCleanupBlocked, fmt.Errorf("refusing to remove %s: %w", worktree.Path, err))
+	}
+	if err := checkRemovalLease(worktree.Path, options.IgnoreLease, deps.printInfoMessage); err != nil {
+		return err
 	}
 	if options.DryRun {
 		for _, line := range runtimePlan.describe("[DRY RUN] Would ") {
@@ -282,6 +289,7 @@ Cleanup steps may include:
 	command.Flags().BoolP("force", "f", false, "Skip confirmation and cleanup prompts")
 	command.Flags().Bool("delete-branch", false, "Also delete the branch after removing worktree")
 	command.Flags().Bool("keep-db", false, "Keep owned databases and parallel-worker databases")
+	command.Flags().Bool("ignore-lease", false, "Remove even if another agent holds an active lease (explicit authorization)")
 	return command
 }
 
@@ -391,7 +399,7 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 	if err := runRemoveLifecycle(
 		pc,
 		*targetWorktree,
-		removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet},
+		removeLifecycleOptions{DryRun: dryRun, Verbose: verbose, Quiet: quiet, IgnoreLease: mustGetBool(cmd, "ignore-lease")},
 		cleanupOpts,
 		cleanupMessages,
 		deps.lifecycleDependencies(),
@@ -424,6 +432,31 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 		ui.PrintInfo("[DRY RUN] Worktree removal planned")
 	} else {
 		ui.PrintDone("Worktree removed")
+	}
+	return nil
+}
+
+// checkRemovalLease refuses to remove a worktree with an active lease unless
+// explicitly authorized; a stale lease only warns.
+func checkRemovalLease(path string, ignore bool, info func(string)) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	lease, err := wtstate.ReadLease(path)
+	if err != nil {
+		return fmt.Errorf("reading lease: %w", err)
+	}
+	now := time.Now()
+	switch lease.State(now) {
+	case wtstate.LeaseActive:
+		message := fmt.Sprintf("worktree is leased by %q (task %q) until %s", lease.Owner, lease.TaskID, lease.ExpiresAt().UTC().Format(time.RFC3339))
+		if !ignore {
+			return (&agentapi.Error{Code: agentapi.CodeLeaseHeld, Message: "refusing to remove " + path + ": " + message + "; release the lease or pass --ignore-lease"}).
+				WithDetails(map[string]any{"lease": newLeaseView(lease, now, "")})
+		}
+		info("WARNING: " + message + "; removing because --ignore-lease was given")
+	case wtstate.LeaseStale:
+		info(fmt.Sprintf("WARNING: stale lease by %q (task %q) expired at %s", lease.Owner, lease.TaskID, lease.ExpiresAt().UTC().Format(time.RFC3339)))
 	}
 	return nil
 }

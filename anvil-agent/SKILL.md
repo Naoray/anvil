@@ -1,6 +1,6 @@
 ---
 name: anvil-agent
-description: Use when working in repositories managed by Anvil, a git worktree manager for agentic development. Covers worktree commands and workflow, scaffold configuration, Yerd and Herd local site drivers, isolated application and test databases, read-only command execution with anvil exec, safe cleanup, and development conventions for AI coding agents including Codex and Claude Code.
+description: Use when working in repositories managed by Anvil, a git worktree and development environment manager for parallel coding agents. Covers the agent lifecycle (ensure, context, run, check, status, lease, remove) with its stable JSON API, review worktrees pinned to exact commits, per-worktree ports/directories/processes, reproducible checks, scaffold configuration, Yerd and Herd local site drivers, isolated application and test databases, anvil exec, safe cleanup, and development conventions for AI coding agents including Codex and Claude Code.
 ---
 
 # Anvil Agent
@@ -26,6 +26,82 @@ anvil remove <branch> --dry-run  # Preview database and worktree cleanup
 anvil remove <branch> --keep-db  # Remove the worktree but retain databases
 anvil prune                # Remove merged worktrees
 ```
+
+## Agent Lifecycle (machine-readable)
+
+Prefer these commands; each supports `--json` and writes exactly one
+`anvil.agent/v1` document to stdout (diagnostics and child output go to
+stderr). Never parse human output. Exit codes: 2 invalid arguments, 3 not
+found, 4 git, 5 configuration, 6 preparation incomplete, 7 lock/lease/cleanup
+blocked; failing checks and `run` pass the child's status through.
+
+```bash
+# 1. Get a prepared worktree (creates it if needed; idempotent; resumes after failure)
+anvil ensure feature/x --json --lease-owner codex --task-id SOLO-123
+export ANVIL_LEASE_TOKEN=<data.lease.token>   # returned once; never stored in plain text
+
+# 2. Learn the environment without knowing the stack (read-only)
+anvil context feature-x --json     # env vars (secrets redacted), components, ports, dirs, checks
+anvil status feature-x --json      # ready?, git state, processes, check currency, cleanup preview
+
+# 3. Work
+anvil run feature-x -- cargo test                    # worktree env, no database required
+anvil run feature-x --component web -- pnpm lint     # component dir + env
+anvil start feature-x --json / anvil stop feature-x  # managed dev processes
+
+# 4. Validate
+anvil check --list --json          # is the latest result still current, and why not?
+anvil check fast --json            # records commit, dirty-state digest, toolchain, artifacts
+
+# 5. Release
+anvil lease release feature-x --json
+anvil remove feature-x --force     # refuses while leased by someone else or a check is running
+```
+
+Rules for agents:
+
+- Resolve worktrees by exact folder, branch, path or `wt_…` ID. Agent commands
+  never partially match.
+- Treat a check as passing only when `assessment.passing_and_current` is true.
+  A pass on a dirty tree is not a pass for its HEAD; stale results list
+  `stale_reasons`.
+- Never run `expensive` checks unless asked; they need `--allow-expensive`.
+  `resource_busy` means another live process holds a lock — wait
+  (`--lock-wait`) instead of retrying in a loop.
+- `ready: false` or `ok: false` means preparation is incomplete; rerun
+  `anvil ensure` (completed steps are skipped).
+- Renew long-running leases (`anvil lease renew`). Never break or take over
+  another agent's lease, or pass `--ignore-lease`, unless the user asks.
+- `--json` output never contains secret values or lease tokens other than the
+  one just issued to you.
+
+## Reviewer Worktrees
+
+```bash
+anvil ensure --review <sha-or-branch> --json        # unique review-<sha>-<suffix>, detached
+anvil ensure pr-42-review --review <sha> --json     # named; reused only for the same commit
+```
+
+Review worktrees are pinned to the exact commit (`metadata.pinned_commit`),
+never inherit an implementation worker's uncommitted changes, never move
+branches, and prepare components only (no databases, site links or `.env`
+copies) unless `--full-prepare`. `roles.review.env_unset` strips listed
+credentials from commands Anvil runs there. Several reviewers can review the
+same commit independently. `anvil status` reports `pinned_commit_matches`.
+A review role is not a security boundary: running untrusted code needs
+separately authorized execution with restricted credentials.
+
+## Runtime Resources
+
+Each worktree owns directories outside the working tree (`ANVIL_STATE_DIR`,
+`ANVIL_TMP_DIR`, `ANVIL_CACHE_DIR`, `ANVIL_LOG_DIR`, `ANVIL_ARTIFACTS_DIR`), stable
+per-worktree ports (`ANVIL_PORT_<NAME>`, plus aliases) and may use declared
+shared read-only resources in place (`ANVIL_SHARED_<NAME>`). Port reservations
+are advisory: bind strictly and fail fast. Use `ANVIL_INSTANCE` to namespace
+app identifiers, sockets, keychain services and LaunchAgents. Cleanup stops
+only verified Anvil-started processes (PID plus start time), releases ports,
+deletes only the owned runtime directory and never touches shared resources.
+This is resource isolation, not a sandbox.
 
 ## Workflow
 
@@ -117,8 +193,9 @@ shell sandbox.
 
 ## Config Files
 
-- Repository config: `anvil.yaml`
-- Local worktree state: `.anvil.local` (generated and gitignored; contains database ownership/binding state and dependency provenance)
+- Repository config: `anvil.yaml` (declared: `scaffold`, `env`, `components`, `resources`, `processes`, `checks`, `roles`; see docs/environments.md)
+- Local worktree state: `.anvil.local` (generated and gitignored; observed: database ownership/binding state, dependency provenance, worktree identity, preparation records, role/task metadata, lease, managed processes)
+- Runtime directory: `$ANVIL_RUNTIME_ROOT` or `~/.local/state/anvil` (per-worktree dirs, check results and logs, port registry, resource locks)
 - Global config: `~/.config/anvil/anvil.yaml`
 
 Do not rewrite `.anvil.local` casually. Anvil preserves unknown fields and uses its ownership records to decide which databases cleanup may drop.

@@ -130,6 +130,13 @@ func EnsureIdentity(worktreePath string) (Identity, IdentityStatus, error) {
 	if err != nil {
 		return Identity{}, "", err
 	}
+	// Resolve a possible source before taking the destination's write lock.
+	// State readers share that lock; looking up another worktree inside the
+	// callback could deadlock two copied worktrees repairing concurrently.
+	observed, observedStatus, err := ReadIdentity(canonical)
+	if err != nil {
+		return Identity{}, "", err
+	}
 	var result Identity
 	var status IdentityStatus
 	err = config.UpdateLocalState(canonical, func(doc map[string]any) error {
@@ -137,7 +144,16 @@ func EnsureIdentity(worktreePath string) (Identity, IdentityStatus, error) {
 		if err != nil {
 			return err
 		}
-		status = classify(identity, canonical)
+		switch {
+		case identity == nil:
+			status = IdentityMissing
+		case identity.Path == canonical:
+			status = IdentityOK
+		case observed != nil && identity.ID == observed.ID && identity.Path == observed.Path:
+			status = observedStatus
+		default:
+			return fmt.Errorf("worktree identity changed while resolving its source; run ensure again")
+		}
 		switch status {
 		case IdentityOK:
 			result = *identity
