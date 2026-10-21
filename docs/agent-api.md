@@ -393,8 +393,8 @@ listed in `foreign_namespace_own` and block ("runs in another mount
 namespace") unless named by `--allow-uninspectable`; other users' are counted
 in `skipped_other_users`; kernel threads are ignored. Containers sharing a
 worktree should hold a lease. Activity sources also include `preparation`
-(the preparation record's start/finish) and `local_state` (`.anvil.local`
-mtime). Agents should use `prune candidates`/`prune apply` rather than legacy
+(the preparation record's start/finish); rewriting `.anvil.local` (adopting,
+lease bookkeeping) is not activity. Agents should use `prune candidates`/`prune apply` rather than legacy
 `anvil prune --force`, which only checks merge state and leases. Nothing is fetched unless `--fetch`. Worktrees without an `ok` identity
 are blocked until `anvil adopt`.
 

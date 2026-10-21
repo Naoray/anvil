@@ -604,3 +604,18 @@ func TestPruneCandidatesPreparationIsRecentActivity(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	requireBlocked(t, candidateEntries(t, envelope["data"])["feature-prepared"], "recent activity: preparation")
 }
+
+// Adopting is bookkeeping, not work: recording identity in .anvil.local right
+// before listing candidates (the documented first step) leaves an idle
+// worktree prunable.
+func TestPruneCandidatesAdoptionIsNotActivity(t *testing.T) {
+	f := newPruneFixture(t)
+	f.addGitWorktree("feature/idle", "feature-idle")
+	backdate(t, f)
+	_, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	envelope, stderr, code := f.runJSON(f.repo, pruneArgs(t, "prune", "candidates", "--recent", "10m")...)
+	require.Equal(t, 0, code, stderr)
+	idle := candidateEntries(t, envelope["data"])["feature-idle"]
+	require.Equal(t, true, idle["candidate"], "%v", idle["blockers"])
+}

@@ -104,10 +104,9 @@ type activitySources struct {
 	LeaseRenewed *time.Time `json:"lease_renewed,omitempty"`
 	CheckResult  *time.Time `json:"check_result,omitempty"`
 	IgnoredFiles *time.Time `json:"ignored_files,omitempty"`
-	// Preparation is the latest preparation start or finish; LocalState
-	// the .anvil.local modification time (identity, lease, preparation).
+	// Preparation is the latest preparation start or finish. The raw
+	// .anvil.local mtime is not activity: adopting or leasing rewrites it.
 	Preparation *time.Time `json:"preparation,omitempty"`
-	LocalState  *time.Time `json:"local_state,omitempty"`
 }
 
 type activityEvidence struct {
@@ -504,11 +503,6 @@ func activitySourcesOf(path, worktreeID string) (activitySources, []string, erro
 			sources.Preparation = newest(sources.Preparation, *prepare.FinishedAt)
 		}
 	}
-	if info, err := os.Lstat(filepath.Join(path, config.LocalStateFile)); err == nil {
-		sources.LocalState = newest(nil, info.ModTime())
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return sources, nil, fmt.Errorf("reading %s: %w", config.LocalStateFile, err)
-	}
 
 	if worktreeID == "" {
 		return sources, running, nil
@@ -558,7 +552,7 @@ func classifyActivity(sources activitySources, now time.Time, threshold time.Dur
 	for _, source := range []struct {
 		name string
 		at   *time.Time
-	}{{"head_reflog", sources.HeadReflog}, {"files", sources.Files}, {"lease_renewed", sources.LeaseRenewed}, {"check_result", sources.CheckResult}, {"ignored_files", sources.IgnoredFiles}, {"preparation", sources.Preparation}, {"local_state", sources.LocalState}} {
+	}{{"head_reflog", sources.HeadReflog}, {"files", sources.Files}, {"lease_renewed", sources.LeaseRenewed}, {"check_result", sources.CheckResult}, {"ignored_files", sources.IgnoredFiles}, {"preparation", sources.Preparation}} {
 		if source.at != nil && (evidence.LatestAt == nil || source.at.After(*evidence.LatestAt)) {
 			evidence.LatestAt, evidence.LatestSource = source.at, source.name
 		}
