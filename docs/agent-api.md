@@ -151,3 +151,7 @@ contribute a placeholder, so changing only a secret does not invalidate reuse.
 Declared inputs and artifacts must remain inside the worktree or runtime
 root. Symlinks below those roots (including ancestor directories and links
 inside input directories) are rejected with a diagnostic; they cannot be reused.
+
+Dirty submodules and nested repositories are rejected when their recursive
+state cannot be identified from the parent checkout. Clean them before running
+or reusing checks; two unidentifiable dirty states never share a passing result.

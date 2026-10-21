@@ -97,8 +97,8 @@ func pathDigest(path string) (string, error) {
 		}
 		return "link:" + target, nil
 	case info.IsDir():
-		// Nested repositories/submodules appear as directories.
-		return "dir", nil
+		// The parent porcelain status cannot identify recursive dirty contents.
+		return "", fmt.Errorf("cannot identify dirty submodule or nested repository at %s; clean it before running or reusing checks", path)
 	case !info.Mode().IsRegular():
 		return "special", nil
 	}

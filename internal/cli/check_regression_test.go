@@ -71,3 +71,28 @@ func TestCheckRejectsSymlinkInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckRejectsDirtyNestedRepositoryIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix checks")
+	}
+	f := newAgentFixture(t, "checks:\n  sub:\n    reusable: true\n    commands: ['true']\n", nil)
+	sub := filepath.Join(f.repo, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o700))
+	gitRun(t, sub, "init", "-b", "main")
+	gitRun(t, sub, "config", "user.email", "test@example.com")
+	gitRun(t, sub, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "src"), []byte("clean"), 0o600))
+	gitRun(t, sub, "add", ".")
+	gitRun(t, sub, "commit", "-m", "nested")
+	gitRun(t, f.repo, "add", "sub")
+	gitRun(t, f.repo, "commit", "-m", "gitlink")
+	_, stderr, code := f.runJSON(f.repo, "check", "sub")
+	require.Zero(t, code, stderr)
+	for _, content := range []string{"dirty A", "dirty B"} {
+		require.NoError(t, os.WriteFile(filepath.Join(sub, "src"), []byte(content), 0o600))
+		envelope, stderr, code := f.runJSON(f.repo, "check", "sub", "--reuse")
+		require.NotZero(t, code, stderr)
+		require.Contains(t, field(t, envelope, "error", "message"), "dirty submodule or nested repository")
+	}
+}
