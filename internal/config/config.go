@@ -135,6 +135,7 @@ type Config struct {
 	Checks     Checks            `mapstructure:"-"`
 	Roles      RolesConfig       `mapstructure:"-"`
 	Prune      PruneConfig       `mapstructure:"-"`
+	Warm       WarmConfig        `mapstructure:"-"`
 }
 
 // environmentDocument holds the case-sensitive environment sections of anvil.yaml.
@@ -406,6 +407,14 @@ func LoadProject(path string) (*Config, error) {
 	}
 	if err := config.Prune.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	warm, err := decodeWarm(content)
+	if err != nil {
+		return nil, fmt.Errorf("parsing warm configuration: %w", err)
+	}
+	config.Warm = warm
+	if err := config.ValidateWarm(); err != nil {
+		return nil, fmt.Errorf("invalid warm configuration: %w", err)
 	}
 	return &config, nil
 }

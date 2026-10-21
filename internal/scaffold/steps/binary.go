@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -104,7 +105,8 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 
 	var install *warm.Install
 	if s.target.dir == "" {
-		install = warm.Prepare(ctx.WorktreePath, s.name, s.binary, allArgs)
+		policy := warm.Policy{TrustInstallScripts: opts.WarmNodeModules.TrustInstallScripts, Rebuild: opts.WarmNodeModules.Rebuild}
+		install = warm.PrepareWithPolicy(ctx.WorktreePath, s.name, s.binary, allArgs, policy)
 	}
 	if install != nil && s.storeAs == "" && opts.WarmSource != "" {
 		mode := opts.CopyMode
@@ -114,6 +116,26 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 		result, err := install.Reuse(opts.WarmSource, mode)
 		if err != nil {
 			return fmt.Errorf("warming %s: %w", install.Tree(), err)
+		}
+		if result != warm.Cold && install.Rebuild() != "" {
+			// The rebuild mutates the warm tree: it must still be detached
+			// from the source and certifiable. Otherwise no tree or
+			// provenance is left behind, so a retry installs cold, and the
+			// warm hit is never reported.
+			err := s.rebuildWarm(ctx, install, opts)
+			if err == nil {
+				err = install.RecordWarm()
+			}
+			if err != nil {
+				if discardErr := install.Discard(); discardErr != nil {
+					err = errors.Join(err, fmt.Errorf("removing failed warm %s: %w", install.Tree(), discardErr))
+				}
+				return fmt.Errorf("warming %s: %w", install.Tree(), err)
+			}
+			if !opts.Quiet {
+				fmt.Printf("  %s: %s\n", install.Tree(), result)
+			}
+			return nil
 		}
 		if !opts.Quiet {
 			fmt.Printf("  %s: %s\n", install.Tree(), result)
@@ -171,6 +193,30 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 	}
 
 	return nil
+}
+
+// rebuildWarm runs the declared post-warm command in the destination with the
+// step's environment, then refuses a tree still referencing the source.
+func (s *BinaryStep) rebuildWarm(ctx *types.ScaffoldContext, install *warm.Install, opts types.StepOptions) error {
+	command := install.Rebuild()
+	if command == "" {
+		return nil
+	}
+	if opts.Verbose {
+		fmt.Printf("  Running: %s\n", command)
+	}
+	dir, env, err := s.target.resolve(ctx)
+	if err != nil {
+		return err
+	}
+	output, err := s.executor.RunShellWithEnv(context.Background(), dir, env, command)
+	if err != nil {
+		return fmt.Errorf("post-warm rebuild %q failed: %w\n%s", command, err, output)
+	}
+	if opts.Verbose && len(output) > 0 {
+		fmt.Print(string(output))
+	}
+	return install.CheckDetached()
 }
 
 func (s *BinaryStep) replaceTemplate(args []string, ctx *types.ScaffoldContext) []string {

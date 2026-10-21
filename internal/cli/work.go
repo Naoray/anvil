@@ -22,7 +22,12 @@ Arguments:
   PATH    Optional custom path (defaults to sanitised branch name)
 
 If no branch is provided, interactive mode allows selection from
-available branches or entering a new branch name.`,
+available branches or entering a new branch name.
+
+--warm-from reuses verified vendor/node_modules from another worktree.
+node_modules with install scripts or native addons stay cold unless
+anvil.yaml declares warm.node_modules.trust_install_scripts (and optionally
+a rebuild command run in the new worktree); see the README.`,
 	Args: cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		warmFrom := mustGetString(cmd, "warm-from")

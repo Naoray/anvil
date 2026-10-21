@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
+	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/scaffold/words"
 	"github.com/naoray/anvil/internal/utils"
 )
@@ -87,12 +88,13 @@ func (r *CleanupReport) Warnings() []string {
 }
 
 type StepOptions struct {
-	WarmSource string
-	CopyMode   string
-	Args       []string
-	DryRun     bool
-	Verbose    bool
-	Quiet      bool
+	WarmSource      string
+	CopyMode        string
+	WarmNodeModules config.WarmNodeModulesConfig
+	Args            []string
+	DryRun          bool
+	Verbose         bool
+	Quiet           bool
 }
 
 type ScaffoldStep interface {

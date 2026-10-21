@@ -26,16 +26,32 @@ type Install struct {
 	root, tree, toolchain, inputs string
 	args                          []string
 	probe                         func(string) (string, error)
+	policy                        Policy
+	// warmedFrom is the source worktree of a successful Reuse.
+	warmedFrom string
 }
 
+// stamp is the dependency provenance kept in .anvil.local. Trust fields are
+// set only for opt-in node_modules installs and never contain secrets.
 type stamp struct {
-	Inputs string `yaml:"inputs"`
-	Tree   string `yaml:"tree"`
+	Inputs                string           `yaml:"inputs"`
+	Tree                  string           `yaml:"tree"`
+	TrustInstallScripts   bool             `yaml:"trust_install_scripts,omitempty"`
+	TrustedScripts        []ScriptIdentity `yaml:"trusted_scripts,omitempty"`
+	InstallScriptPackages []string         `yaml:"install_script_packages,omitempty"`
+	Rebuild               string           `yaml:"rebuild,omitempty"`
+	Source                string           `yaml:"source,omitempty"`
 }
 
 // Prepare recognizes only exact, lockfile-backed installation commands. Other
 // commands still execute normally but cannot certify a reusable dependency tree.
 func Prepare(root, name, binary string, args []string) *Install {
+	return PrepareWithPolicy(root, name, binary, args, Policy{})
+}
+
+// PrepareWithPolicy is Prepare with the project's declared warm policy. The
+// policy only applies to node_modules; the zero Policy is the default.
+func PrepareWithPolicy(root, name, binary string, args []string, policy Policy) *Install {
 	if len(args) != 1 {
 		return nil
 	}
@@ -55,11 +71,14 @@ func Prepare(root, name, binary string, args []string) *Install {
 		return nil
 	}
 	probe := func(path string) (string, error) { return toolchainFingerprint(path, probes) }
+	if tree != "node_modules" {
+		policy = Policy{}
+	}
 	toolchain, err := probe(root)
 	if err != nil {
 		return nil
 	}
-	i, err := prepare(root, tree, toolchain, args)
+	i, err := prepareWithPolicy(root, tree, toolchain, args, policy)
 	if err != nil || i == nil {
 		return nil
 	}
@@ -216,10 +235,17 @@ func toolchainFingerprint(root string, probes []string) (string, error) {
 }
 
 func prepare(root, tree, toolchain string, args []string) (*Install, error) {
+	return prepareWithPolicy(root, tree, toolchain, args, Policy{})
+}
+
+func prepareWithPolicy(root, tree, toolchain string, args []string, policy Policy) (*Install, error) {
 	if tree != "vendor" && tree != "node_modules" {
 		return nil, fmt.Errorf("unsupported dependency tree %q", tree)
 	}
-	i := &Install{root: root, tree: tree, toolchain: toolchain, args: append([]string(nil), args...)}
+	if tree != "node_modules" && policy != (Policy{}) {
+		return nil, fmt.Errorf("warm policy applies only to node_modules")
+	}
+	i := &Install{root: root, tree: tree, toolchain: toolchain, args: append([]string(nil), args...), policy: policy}
 	digest, err := i.fingerprint()
 	if err != nil {
 		return nil, nil
@@ -264,6 +290,11 @@ func (i *Install) fingerprint() (string, error) {
 	}
 	h := sha256.New()
 	hashText(h, "%s %s %v\n", toolchain, i.tree, i.args)
+	if i.policy.TrustInstallScripts {
+		// Only opt-in installs hash the policy, so default fingerprints (and
+		// existing provenance) are unchanged; toggling it invalidates.
+		hashText(h, "trust-install-scripts\x00%q\n", i.policy.Rebuild)
+	}
 	for n, name := range files {
 		path := filepath.Join(i.root, name)
 		info, err := os.Lstat(path)
@@ -282,8 +313,19 @@ func (i *Install) fingerprint() (string, error) {
 			return "", err
 		}
 		if n < 2 {
-			if err := portableManifest(i.tree, data, n == 1); err != nil {
+			if err := portableManifest(i.tree, data, n == 1, i.policy.TrustInstallScripts); err != nil {
 				return "", err
+			}
+		}
+		if n == 0 && i.policy.TrustInstallScripts && i.policy.Rebuild == "" {
+			// Warm hits never run root lifecycle scripts, whose effects
+			// (e.g. codegen outside node_modules) only a rebuild reproduces.
+			scripts, err := manifestScripts(data, false)
+			if err != nil {
+				return "", err
+			}
+			if len(scripts) > 0 {
+				return "", fmt.Errorf("root lifecycle scripts require a warm rebuild command")
 			}
 		}
 		hashText(h, "%s\x00%o\x00%d\x00", name, info.Mode().Perm(), len(data))
@@ -292,7 +334,11 @@ func (i *Install) fingerprint() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func portableManifest(tree string, data []byte, lock bool) error {
+// portableManifest rejects inputs whose installs are not attested. trusted
+// (node_modules opt-in only) admits install scripts, whose identities are
+// then verified separately by scriptIdentities.
+func portableManifest(tree string, data []byte, lock, trusted bool) error {
+	trusted = trusted && tree == "node_modules"
 	if tree == "node_modules" && lock {
 		var metadata struct {
 			Version  int `json:"lockfileVersion"`
@@ -324,10 +370,10 @@ func portableManifest(tree string, data []byte, lock bool) error {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, v := range x {
-				if k == "workspaces" || k == "hasInstallScript" && v == true || k == "link" && v == true || k == "type" && (v == "path" || tree == "vendor" && v == "composer-plugin") {
+				if k == "workspaces" || k == "hasInstallScript" && v == true && !trusted || k == "link" && v == true || k == "type" && (v == "path" || tree == "vendor" && v == "composer-plugin") {
 					return fmt.Errorf("nonportable dependency input: %s", k)
 				}
-				if k == "scripts" {
+				if k == "scripts" && !trusted {
 					if m, ok := v.(map[string]any); ok {
 						for script := range m {
 							if tree == "vendor" || script == "preinstall" || script == "install" || script == "postinstall" || script == "prepare" || script == "prepublish" || script == "preprepare" || script == "postprepare" {
@@ -373,21 +419,64 @@ func hashOptional(h hash.Hash, path string) bool {
 // Record is called only after a successful install. Changed inputs and unsafe
 // trees invalidate previous provenance instead of certifying uncertain output.
 func (i *Install) Record() error {
+	_, err := i.record()
+	return err
+}
+
+// RecordWarm records a warm tree after a post-warm rebuild and fails when
+// the rebuilt tree can no longer be certified (its provenance is cleared).
+func (i *Install) RecordWarm() error {
+	record, err := i.record()
+	if err != nil {
+		return err
+	}
+	if record.Inputs == "" {
+		return fmt.Errorf("rebuilt %s can no longer be verified as a portable dependency tree", i.tree)
+	}
+	return nil
+}
+
+func (i *Install) record() (stamp, error) {
 	current, err := i.fingerprint()
 	record := stamp{}
 	if err == nil && current == i.inputs {
-		tree, e := treeDigest(filepath.Join(i.root, i.tree))
+		tree, e := treeDigest(filepath.Join(i.root, i.tree), i.digestOptions())
 		if e == nil {
 			after, e := i.fingerprint()
 			if e == nil && after == i.inputs {
-				stable, e := treeDigest(filepath.Join(i.root, i.tree))
+				stable, e := treeDigest(filepath.Join(i.root, i.tree), i.digestOptions())
 				if e == nil && stable == tree {
-					record = stamp{Inputs: i.inputs, Tree: tree}
+					record = i.trustStamp(stamp{Inputs: i.inputs, Tree: tree})
 				}
 			}
 		}
 	}
-	return writeStamp(i.root, i.tree, record)
+	return record, writeStamp(i.root, i.tree, record)
+}
+
+// trustStamp adds the trusted-script provenance of opt-in installs. Script
+// identities that cannot be verified clear the record instead.
+func (i *Install) trustStamp(record stamp) stamp {
+	if !i.policy.TrustInstallScripts {
+		return record
+	}
+	scripts, packages, err := scriptIdentities(i.root, filepath.Join(i.root, i.tree))
+	if err != nil {
+		return stamp{}
+	}
+	record.TrustInstallScripts = true
+	record.TrustedScripts = scripts
+	record.InstallScriptPackages = packages
+	record.Rebuild = i.policy.Rebuild
+	record.Source = i.warmedFrom
+	return record
+}
+
+func (i *Install) digestOptions() digestOptions {
+	return digestOptions{
+		nativeAddons:   i.policy.TrustInstallScripts,
+		workspacePaths: i.policy.TrustInstallScripts && i.policy.Rebuild != "",
+	}
 }
 
 // Reuse stages a verified candidate before publishing it. A cold result makes
@@ -420,9 +509,12 @@ func (i *Install) reuse(source, mode string, copyOne fileCopier) (result string,
 	if e != nil || inputs != i.inputs {
 		return Cold, nil
 	}
+	if expected.TrustInstallScripts != i.policy.TrustInstallScripts || expected.Rebuild != i.policy.Rebuild {
+		return Cold, nil
+	}
 	src := filepath.Join(source, i.tree)
-	digest, e := treeDigest(src)
-	if e != nil || digest != expected.Tree {
+	digest, e := treeDigest(src, i.digestOptions())
+	if e != nil || digest != expected.Tree || !i.trustedScriptsMatch(expected, source, src) {
 		return Cold, nil
 	}
 	stage, e := os.MkdirTemp(i.root, ".anvil-warm-")
@@ -444,10 +536,14 @@ func (i *Install) reuse(source, mode string, copyOne fileCopier) (result string,
 	}
 	// Verify both ends again: user-run installers need not honor any Anvil lock.
 	for _, root := range []string{src, candidate} {
-		digest, e = treeDigest(root)
+		digest, e = treeDigest(root, i.digestOptions())
 		if e != nil || digest != expected.Tree {
 			return Cold, nil
 		}
+	}
+	// The candidate is checked against the target's manifest and lockfile.
+	if !i.trustedScriptsMatch(expected, source, src) || !i.trustedScriptsMatch(expected, i.root, candidate) {
+		return Cold, nil
 	}
 	for _, install := range []*Install{i, &srcInstall} {
 		inputs, e = install.fingerprint()
@@ -458,11 +554,21 @@ func (i *Install) reuse(source, mode string, copyOne fileCopier) (result string,
 	if e = publish(candidate, dest); e != nil {
 		return Cold, fmt.Errorf("publishing warm dependencies: %w", e)
 	}
+	i.warmedFrom = source
 
 	return result, nil
 }
 
-func treeDigest(root string) (string, error) {
+// digestOptions relaxes treeDigest for trusted node_modules installs only.
+type digestOptions struct {
+	// nativeAddons admits compiled .node files.
+	nativeAddons bool
+	// workspacePaths admits files embedding the worktree path; set only
+	// when a rebuild regenerates them in the destination (see CheckDetached).
+	workspacePaths bool
+}
+
+func treeDigest(root string, opts digestOptions) (string, error) {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return "", err
@@ -514,7 +620,7 @@ func treeDigest(root string) (string, error) {
 			hashText(h, "%s\n", link)
 			return nil
 		case info.Mode().IsRegular():
-			if strings.HasSuffix(path, ".node") {
+			if strings.HasSuffix(path, ".node") && !opts.nativeAddons {
 				return fmt.Errorf("native addon needs cold install")
 			}
 			f, err := os.Open(path)
@@ -522,7 +628,12 @@ func treeDigest(root string) (string, error) {
 				return err
 			}
 			hashText(h, "%d\x00", info.Size())
-			_, readErr := hashPortableFile(h, f, filepath.Dir(root))
+			var readErr error
+			if opts.workspacePaths {
+				_, readErr = io.Copy(h, f)
+			} else {
+				_, readErr = hashPortableFile(h, f, filepath.Dir(root))
+			}
 			return errors.Join(readErr, f.Close())
 		default:
 			return fmt.Errorf("special dependency file: %s", rel)
