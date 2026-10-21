@@ -117,7 +117,7 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 		if err != nil {
 			return fmt.Errorf("warming %s: %w", install.Tree(), err)
 		}
-		if result != warm.Cold && install.Rebuild() != "" {
+		if !warm.IsCold(result) && install.Rebuild() != "" {
 			// The rebuild mutates the warm tree: it must still be detached
 			// from the source and certifiable. Otherwise no tree or
 			// provenance is left behind, so a retry installs cold, and the
@@ -140,7 +140,7 @@ func (s *BinaryStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) err
 		if !opts.Quiet {
 			fmt.Printf("  %s: %s\n", install.Tree(), result)
 		}
-		if result != warm.Cold {
+		if !warm.IsCold(result) {
 			if install.Tree() == "vendor" {
 				args := []string{"dump-autoload", "--no-interaction", "--no-plugins", "--no-scripts"}
 				if opts.Verbose {

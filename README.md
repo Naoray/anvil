@@ -436,7 +436,10 @@ only on failure or with `--verbose`. Afterwards no file in the destination
 absolute or leave the destination tree, and the rebuilt tree must still pass
 the same verification as a recorded install. If the rebuild fails or any check
 fails, `anvil work` fails, the warmed `node_modules` is removed and
-no provenance is recorded, so a retry installs cold. Without `rebuild`, such
+no provenance is recorded, so a retry installs cold. If Anvil is killed before
+it can clean up, a retry with `--warm-from` reports
+`node_modules: cold (existing unverified tree)` for the unstamped leftover and
+runs the normal installer, which replaces it. Without `rebuild`, such
 trees stay cold.
 
 Trusted provenance in `.anvil.local` (`dependency_installs.node_modules`) adds

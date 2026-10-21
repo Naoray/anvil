@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `anvil --version` prints the same line as `anvil version`; `anvil version --json` returns `{version, commit, build_date, go_version, os, arch}` in an `anvil.agent/v1` envelope. Neither prompts nor runs first-run setup.
 - Agent payloads share one worktree shape: `worktree.managed` (Anvil holds a valid identity: `identity_status` `ok` or `moved`) in every worktree summary; `context` reports `ready` and `prepare`; `status --all` entries report `ready`, `worktree.managed` and the same `lease` and `prepare` objects as `status`; `ensure` reports top-level `ready`.
 - `anvil check --reuse` can reuse a clean passing result from another worktree of the same repository at the same content identity. Results record their producer and reused results identify that producer. `--reuse-trust`, `--reuse-exclude-role` and role settings control which producers are accepted.
+- Opt-in trusted warm reuse of `node_modules` with npm install scripts and native addons: `warm.node_modules.trust_install_scripts` in `anvil.yaml`, with an optional `warm.node_modules.rebuild` command run in the new worktree after a warm hit. Reuse requires matching lockfile, Node/npm versions, platform, and root and dependency script identities; trusted provenance is recorded in `.anvil.local`. A failed rebuild removes the warmed tree. An unstamped leftover `node_modules` now goes cold instead of failing `--warm-from`.
 
 ### Changed
 
@@ -34,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release notes no longer include the tag's SSH signature block.
 - Removing a worktree is no longer blocked by a sibling worktree whose directory was deleted; it is skipped with a warning suggesting `git worktree prune`. Locked siblings that are absent (for example on unmounted removable media) still block database cleanup.
 - Dry runs of `remove`, `prune` and `unlink --clean` never prompt or require `--force`, and never start database services. `prune --dry-run` no longer fetches origin.
+- Concurrent preparations of one worktree serialize the runtime owner record, fixing intermittent "Access is denied" failures on Windows.
+- Warm dependency verification detects every spelling of the worktree path (as given and symlink-resolved, macOS `/private` aliases, escaped spaces, Windows short/long, slash and MSYS spellings), so trees embedding a symlinked or short-name worktree path are no longer certified as portable; trusted rebuilt trees may not keep symlinks leaving `node_modules`.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21
 

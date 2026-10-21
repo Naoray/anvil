@@ -247,3 +247,30 @@ func TestTrustedNativeWarmUncertifiableRebuildFails(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedNativeWarmRetryAfterKilledRebuildInstallsCold(t *testing.T) {
+	fakeNativeToolchain(t)
+	source, target := t.TempDir(), t.TempDir()
+	for _, root := range []string{source, target} {
+		writeNativeProject(t, root)
+	}
+	step := NewBinaryStep("node.npm", "npm", []string{"ci"}, "")
+	require.NoError(t, step.Run(&types.ScaffoldContext{WorktreePath: source}, types.StepOptions{Quiet: true, WarmNodeModules: trustedRebuild}))
+	// A kill -9 during the rebuild leaves a partial, unstamped tree.
+	partial := filepath.Join(target, "node_modules", "native-dep", "build")
+	require.NoError(t, os.MkdirAll(partial, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(partial, "config.gypi"), []byte(source), 0644))
+	output, err := captureStepStdout(t, func() error {
+		return step.Run(&types.ScaffoldContext{WorktreePath: target}, types.StepOptions{WarmSource: source, CopyMode: "copy", WarmNodeModules: trustedRebuild})
+	})
+	require.NoError(t, err)
+	require.Contains(t, output, "node_modules: cold (existing unverified tree)")
+	require.NotContains(t, output, "copied")
+	require.Equal(t, "ci\n", readCalls(t, target), "the normal installer replaces the unverified tree")
+	gypi, err := os.ReadFile(filepath.Join(partial, "config.gypi"))
+	require.NoError(t, err)
+	require.Equal(t, target, strings.TrimSpace(string(gypi)))
+	record := readDependencyStamp(t, target)
+	require.NotEmpty(t, record["tree"])
+	require.Nil(t, record["source"], "a cold install records no warm source")
+}

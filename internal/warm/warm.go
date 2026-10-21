@@ -22,6 +22,14 @@ import (
 
 const Cold = "cold"
 
+// ColdUnverified reports an existing node_modules without warm provenance for
+// this worktree (e.g. left by an interrupted warm rebuild). It is never reused
+// or certified; the normal installer replaces it.
+const ColdUnverified = "cold (existing unverified tree)"
+
+// IsCold reports whether a Reuse result requires the normal installer.
+func IsCold(result string) bool { return result == Cold || result == ColdUnverified }
+
 type Install struct {
 	root, tree, toolchain, inputs string
 	args                          []string
@@ -491,6 +499,11 @@ func (i *Install) reuse(source, mode string, copyOne fileCopier) (result string,
 	}
 	dest := filepath.Join(i.root, i.tree)
 	if _, e := os.Lstat(dest); e == nil {
+		if i.tree == "node_modules" {
+			if own, e := readStamp(i.root, i.tree); e == nil && own.Inputs == "" {
+				return ColdUnverified, nil
+			}
+		}
 		return Cold, fmt.Errorf("warm destination already exists: %s", dest)
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return Cold, e
