@@ -32,10 +32,18 @@ func TestNodePackageManagerDetection(t *testing.T) {
 	for want, files := range cases {
 		dir := t.TempDir()
 		write(t, dir, files...)
+		if want == "yarn install --immutable" {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, ".yarnrc.yml"), []byte("{}"), 0o644))
+		}
 		c := Contribute("node", dir, "linux")
+		require.NoError(t, c.Err)
 		require.Len(t, c.Prepare, 1, want)
 		require.Equal(t, want, c.Prepare[0].Run)
-		require.Equal(t, []string{"node_modules"}, c.Prepare[0].Outputs)
+		outputs := []string{"node_modules"}
+		if want == "yarn install --immutable" {
+			outputs = []string{".pnp.cjs"}
+		}
+		require.Equal(t, outputs, c.Prepare[0].Outputs)
 		require.Contains(t, c.Prepare[0].Inputs, "package.json")
 	}
 	require.Empty(t, Contribute("node", t.TempDir(), "linux").Prepare, "no manifest, no default command")

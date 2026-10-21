@@ -11,6 +11,8 @@ import (
 
 // Contribution is what one capability adds to a component.
 type Contribution struct {
+	// Err reports invalid capability configuration.
+	Err      error
 	Requires []string
 	Prepare  []Command
 	// Env values may reference ${ANVIL_COMPONENT_DIR}.
@@ -78,8 +80,11 @@ func node(dir string) Contribution {
 		install("bun", "bun install --frozen-lockfile", "bun.lockb")
 	case exists(dir, "yarn.lock") && exists(dir, ".yarnrc.yml"):
 		install("yarn", "yarn install --immutable", "yarn.lock")
+		c.Prepare[0].Inputs = append(c.Prepare[0].Inputs, ".yarnrc.yml", ".yarnrc")
+		c.Prepare[0].Outputs, c.Err = yarnOutputs(dir)
 	case exists(dir, "yarn.lock"):
 		install("yarn", "yarn install --frozen-lockfile", "yarn.lock")
+		c.Prepare[0].Inputs = append(c.Prepare[0].Inputs, ".yarnrc.yml", ".yarnrc")
 	case exists(dir, "package-lock.json"):
 		install("npm", "npm ci", "package-lock.json")
 	case exists(dir, "package.json"):

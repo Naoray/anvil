@@ -95,7 +95,11 @@ func planComponent(worktreePath string, component config.Component, selected boo
 
 	contributions := make([]Contribution, 0, len(component.Uses))
 	for _, capability := range component.Uses {
-		contributions = append(contributions, Contribute(capability, absDir, opts.GOOS))
+		contribution := Contribute(capability, absDir, opts.GOOS)
+		if contribution.Err != nil {
+			return plan, &InvalidPlanError{Err: fmt.Errorf("component %q: %w", component.Name, contribution.Err)}
+		}
+		contributions = append(contributions, contribution)
 	}
 	if len(plan.Platforms) == 0 {
 		for _, contribution := range contributions {
