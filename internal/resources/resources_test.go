@@ -250,3 +250,35 @@ func TestLiveOwnerFollowsMovedWorktree(t *testing.T) {
 	git("worktree", "remove", "--force", moved)
 	require.False(t, LiveOwner(reserved[0]), "removed worktree is stale")
 }
+
+// Parallel preparations of one worktree (for example concurrent `anvil
+// ensure`) serialize the owner read/replace instead of racing renames.
+func TestProvisionDirectoriesConcurrentCallsConverge(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{}
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			_, _, err := ProvisionDirectories(root, idA, path, cfg)
+			errs <- err
+		}([]string{"/a", "/moved"}[i%2])
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	dir, err := WorktreeDir(root, idA)
+	require.NoError(t, err)
+	owner, err := ReadOwner(dir)
+	require.NoError(t, err)
+	require.Equal(t, idA, owner.WorktreeID)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		require.False(t, strings.HasPrefix(entry.Name(), ".anvil-"), "no temporary owner files remain: %s", entry.Name())
+	}
+}
