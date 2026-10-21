@@ -63,6 +63,15 @@ func leaseAPIError(err error) error {
 	return classified
 }
 
+// lifecycleError classifies a claim refused because the worktree was removed
+// while it waited.
+func lifecycleError(err error) error {
+	if errors.Is(err, wtstate.ErrWorktreeGone) {
+		return agentapi.Errorf(agentapi.CodeWorktreeNotFound, "%v", err)
+	}
+	return err
+}
+
 func addLeaseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("lease-owner", "", "Acquire an advisory lease for this owner (agent name)")
 	cmd.Flags().Duration("lease-ttl", wtstate.DefaultLeaseTTL, "Lease duration before it becomes stale without renewal")
@@ -117,12 +126,30 @@ func leaseSubcommand(use, short, long string, mutating bool, fn func(cmd *cobra.
 		ValidArgsFunction: completeWorktreeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentCommand(cmd, agentCommand{Name: "lease " + use, Mutating: mutating, Human: printLeaseHuman}, func() (agentResult, error) {
-				summary, path, id, err := leaseTarget(args, mutating)
+				if !mutating {
+					summary, path, id, err := leaseTarget(args, false)
+					if err != nil {
+						return agentResult{}, err
+					}
+					view, err := fn(cmd, path, id)
+					return agentResult{Data: leaseData{Worktree: summary, Lease: view}}, err
+				}
+				// Claims are serialized with removal, which holds the
+				// lifecycle lock from its lease check until deletion.
+				summary, path, _, err := leaseTarget(args, false)
 				if err != nil {
 					return agentResult{}, err
 				}
-				view, err := fn(cmd, path, id)
-				return agentResult{Data: leaseData{Worktree: summary, Lease: view}}, err
+				var view *leaseView
+				err = wtstate.WithLiveWorktree(path, func() error {
+					identity, _, err := wtstate.EnsureIdentity(path)
+					if err != nil {
+						return agentapi.Wrap(agentapi.CodeInternal, err)
+					}
+					view, err = fn(cmd, path, identity.ID)
+					return err
+				})
+				return agentResult{Data: leaseData{Worktree: summary, Lease: view}}, lifecycleError(err)
 			})
 		},
 	}

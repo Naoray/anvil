@@ -155,14 +155,14 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, err
 	}
-	if err := checkRoleCompatible(target.Path, opts); err != nil {
+	if opts, err = effectiveRole(target, opts, created); err != nil {
 		return agentResult{}, err
 	}
 
 	data := ensureData{Components: []capabilities.ComponentPlan{}, Created: created, Prepare: prepareSummary{Status: wtstate.PrepareNone, Steps: []scaffold.StepOutcome{}}}
 	var warnings []string
 	if mustGetBool(cmd, "skip-prepare") {
-		if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
+		if err := lifecycleError(wtstate.WithLiveWorktree(target.Path, func() error { return recordEnsureClaims(target, opts, &data, &warnings) })); err != nil {
 			return agentResult{Data: data, Warnings: warnings}, err
 		}
 		summary, summaryWarnings := summarizeWorktree(*target)
@@ -183,12 +183,12 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
-	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected})
+	wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected, Role: opts.Role})
 	if err != nil {
 		return agentResult{}, err
 	}
 	reviewMinimal := opts.Role == wtstate.RoleReview && !mustGetBool(cmd, "full-prepare") && !wenv.PC.Config.Roles.Review.Scaffold
-	components := reviewComponents(wenv, opts.Role)
+	components := wenv.Components
 	data.Components = wenv.Components
 	// Every component's conditions are validated, including components
 	// skipped here (opt-in, other platforms, on_missing: skip), so invalid
@@ -227,7 +227,7 @@ func runEnsure(cmd *cobra.Command, args []string) (agentResult, error) {
 
 	// First writes: identity, then role/task metadata and the lease, so an
 	// agent's claim exists before preparation starts.
-	if err := recordEnsureClaims(target, opts, &data, &warnings); err != nil {
+	if err := lifecycleError(wtstate.WithLiveWorktree(target.Path, func() error { return recordEnsureClaims(target, opts, &data, &warnings) })); err != nil {
 		return agentResult{Data: data, Warnings: warnings}, err
 	}
 	if wenv, err = loadWorktreeEnv(pc, *target, worktreeEnvOptions{Selected: selected}); err != nil {
@@ -302,46 +302,47 @@ func environmentPreconditions(wenv *worktreeEnv) error {
 	return nil
 }
 
-// reviewComponents applies roles.review.components to the plan.
-func reviewComponents(wenv *worktreeEnv, role string) []capabilities.ComponentPlan {
-	allowed := wenv.PC.Config.Roles.Review.Components
-	if role != wtstate.RoleReview || len(allowed) == 0 {
-		return wenv.Components
-	}
-	keep := map[string]bool{}
-	for _, name := range allowed {
-		keep[name] = true
-	}
-	var out []capabilities.ComponentPlan
-	for _, plan := range wenv.Components {
-		if keep[plan.Name] {
-			out = append(out, plan)
-		}
-	}
-	return out
-}
-
-// checkRoleCompatible refuses before any write when flags contradict the
-// recorded role or pin.
-func checkRoleCompatible(path string, opts ensureOptions) error {
+// effectiveRole applies the recorded role and verifies review worktrees
+// before any write. A recorded review role is kept on plain re-ensure; an
+// existing worktree without role metadata is never adopted as a review; and
+// a review worktree must still be detached at its pinned commit (reviewer
+// changes are never reset to make it so).
+func effectiveRole(target *git.Worktree, opts ensureOptions, created bool) (ensureOptions, error) {
+	path := target.Path
 	metadata, err := wtstate.ReadMetadata(path)
 	if err != nil {
-		return agentapi.Wrap(agentapi.CodeInternal, err)
+		return opts, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
 	if opts.Role != "" && metadata.Role != "" && metadata.Role != opts.Role {
-		return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s has role %q, not %q", path, metadata.Role, opts.Role)
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s has role %q, not %q", path, metadata.Role, opts.Role)
 	}
-	if opts.ReviewCommit != "" && metadata.PinnedCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
-		return agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
+	if opts.ReviewCommit != "" && metadata.Role == "" && !created {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree; review worktrees are created by 'anvil ensure --review' (choose another name)", path)
 	}
-	if opts.ReviewCommit != "" && metadata.Role == "" {
-		// An existing worktree named for a review must be one Anvil created.
-		head, err := git.HeadCommit(path)
-		if err != nil || head != opts.ReviewCommit {
-			return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree %s exists and is not a review worktree of %s", path, opts.ReviewCommit)
-		}
+	if metadata.Role != wtstate.RoleReview {
+		return opts, nil
 	}
-	return nil
+	opts.Role = wtstate.RoleReview
+	if opts.ReviewCommit != "" && metadata.PinnedCommit != opts.ReviewCommit {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s, not %s", path, metadata.PinnedCommit, opts.ReviewCommit)
+	}
+	head, err := git.HeadCommit(path)
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeGitFailed, err)
+	}
+	if head != metadata.PinnedCommit || !target.Detached {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktree %s is pinned to %s but has %s checked out%s; refusing to prepare a different commit (reviewer changes are kept)",
+			path, shortCommit(metadata.PinnedCommit), shortCommit(head), map[bool]string{true: "", false: " on a branch"}[target.Detached])
+	}
+	opts.ReviewCommit = metadata.PinnedCommit
+	return opts, nil
+}
+
+func shortCommit(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // recordEnsureClaims assigns identity, records metadata and acquires the

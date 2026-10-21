@@ -328,6 +328,9 @@ type statusAllEntry struct {
 	Dirty    *bool           `json:"dirty,omitempty"`
 }
 
+// statusUnknown marks a per-worktree value that could not be read.
+const statusUnknown = "unknown"
+
 func runStatusAll() (agentResult, error) {
 	pc, err := openAgentProject()
 	if err != nil {
@@ -347,18 +350,34 @@ func runStatusAll() (agentResult, error) {
 		summary, summaryWarnings := summarizeWorktree(wt)
 		warnings = append(warnings, summaryWarnings...)
 		entry := statusAllEntry{Worktree: summary, Lease: wtstate.LeaseNone, Prepare: wtstate.PrepareNone}
-		if metadata, err := wtstate.ReadMetadata(wt.Path); err == nil {
+		// A failed observation is reported as unknown with a warning, never
+		// as the absence of a role, lease or preparation.
+		unreadable := func(what string, err error) {
+			warnings = append(warnings, fmt.Sprintf("%s: %s unavailable: %v", wt.Path, what, err))
+		}
+		if metadata, err := wtstate.ReadMetadata(wt.Path); err != nil {
+			unreadable("role and task metadata", err)
+			entry.Role = statusUnknown
+		} else {
 			entry.Role, entry.Task = metadata.Role, metadata.Task
 		}
-		if lease, err := wtstate.ReadLease(wt.Path); err == nil {
+		if lease, err := wtstate.ReadLease(wt.Path); err != nil {
+			unreadable("lease", err)
+			entry.Lease = statusUnknown
+		} else {
 			entry.Lease = lease.State(now)
 		}
-		if prepare, err := wtstate.ReadPrepare(wt.Path); err == nil {
-			if status, err := wtstate.EffectivePrepareStatus(wt.Path, prepare); err == nil {
-				entry.Prepare = status
-			}
+		prepare, err := wtstate.ReadPrepare(wt.Path)
+		if err == nil {
+			entry.Prepare, err = wtstate.EffectivePrepareStatus(wt.Path, prepare)
 		}
-		if state, err := git.ReadWorkingState(wt.Path); err == nil {
+		if err != nil {
+			unreadable("preparation state", err)
+			entry.Prepare = statusUnknown
+		}
+		if state, err := git.ReadWorkingState(wt.Path); err != nil {
+			unreadable("working state", err)
+		} else {
 			dirty := state.Dirty
 			entry.Dirty = &dirty
 		}

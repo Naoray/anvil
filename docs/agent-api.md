@@ -193,6 +193,15 @@ anvil ensure feature/x --lease-owner codex --lease-ttl 2h --session-id S [--take
 
 `data.metadata`: `{role, pinned_commit, task: {id, url, pr}, created_at}`.
 Recorded roles and pins are never changed implicitly (`invalid_arguments`).
+A review worktree keeps its role on every later `ensure` (by name, path, ID or
+from inside it, with or without `--review`), so its minimal preparation and
+`roles.review.components` scope always apply. `--review` never adopts an
+existing worktree without role metadata (a branch worktree, the main worktree
+or one made by `work`/`scaffold`): choose another name. Reusing a review
+worktree requires its checkout to still be detached at the pinned commit;
+otherwise `ensure` refuses with `invalid_arguments` and changes nothing.
+`roles.review.components` limits the plan before requirements are evaluated:
+an excluded component's missing tools or directory never block a review.
 `data.lease`: see below; `token` is present only when this call issued it.
 
 ## Leases
@@ -215,7 +224,11 @@ the token's SHA-256 is stored. `lease_held` (active, other owner),
 no lease) carry the conflicting lease in `error.details.lease`. A task ID never
 authorizes renew/release. `anvil remove` (and `prune`/`unlink --clean`)
 refuse an active lease with `lease_held` unless `--ignore-lease`; a stale lease
-only warns.
+only warns. Removal holds the worktree's lifecycle lock from that check until
+the worktree is gone, and every claim (`ensure` metadata and lease, `lease
+acquire|renew|release|break`) takes the same lock and verifies the worktree
+still exists, so a lease cannot be acquired after removal's check
+(`worktree_not_found` once it is removed).
 
 ## `anvil status --json`
 
@@ -236,7 +249,9 @@ only warns.
 ```
 
 `ready` requires complete preparation, satisfied component requirements and
-present required shared resources. Process `state` is `running`, `exited`,
+present required shared resources. With `--all`, a value that cannot be read
+for a worktree (`role`, `lease`, `prepare`) is reported as `unknown` with a
+warning, never as absent. Process `state` is `running`, `exited`,
 `reused` (PID recycled — never signaled), `unknown` or `foreign`.
 
 ## Integrations

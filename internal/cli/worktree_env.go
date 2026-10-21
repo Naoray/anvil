@@ -53,6 +53,9 @@ type worktreeEnvOptions struct {
 	Selected []string
 	// Resources are extra exported variables (directories, ports).
 	Resources []workenv.Variable
+	// Role overrides the recorded role (ensure applies the requested one
+	// before recording it).
+	Role string
 }
 
 // loadWorktreeEnv derives configuration, components and environment for wt
@@ -80,8 +83,16 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	if result.Lease, err = wtstate.ReadLease(wt.Path); err != nil {
 		return nil, agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	if result.Metadata.Role == wtstate.RoleReview {
+	role := opts.Role
+	if role == "" {
+		role = result.Metadata.Role
+	}
+	var scope []string
+	if role == wtstate.RoleReview {
 		result.Unset = append([]string(nil), target.Config.Roles.Review.EnvUnset...)
+		if components := target.Config.Roles.Review.Components; len(components) > 0 {
+			scope = append([]string{}, components...)
+		}
 	}
 
 	selected := append([]string(nil), opts.Selected...)
@@ -90,6 +101,7 @@ func loadWorktreeEnv(pc *ProjectContext, wt git.Worktree, opts worktreeEnvOption
 	}
 	result.Components, result.ComponentErr = capabilities.Plan(result.Worktree.Path, target.Config, capabilities.Options{
 		Selected: selected,
+		Scope:    scope,
 		GOOS:     runtime.GOOS,
 		LookPath: exec.LookPath,
 	})

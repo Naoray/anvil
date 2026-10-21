@@ -164,6 +164,13 @@ func runRemoveLifecycle(
 	if err := runtimePlan.blocked(); err != nil {
 		return agentapi.Wrap(agentapi.CodeCleanupBlocked, fmt.Errorf("refusing to remove %s: %w", worktree.Path, err))
 	}
+	// Held from the lease check until the worktree is gone, so no lease can
+	// be acquired or renewed after the check (lease commands take it too).
+	lifecycle, err := wtstate.LockLifecycle(worktree.Path)
+	if err != nil {
+		return fmt.Errorf("locking worktree lifecycle: %w", err)
+	}
+	defer func() { runErr = errors.Join(runErr, lifecycle.Release()) }()
 	if err := checkRemovalLease(worktree.Path, options.IgnoreLease, deps.printInfoMessage); err != nil {
 		return err
 	}

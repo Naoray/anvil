@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/lockfile"
 )
 
 const leaseKey = "lease"
@@ -262,4 +265,34 @@ func BreakLease(worktreePath, reason string, now time.Time) (*Lease, error) {
 		return storeLease(doc, &Lease{Previous: &LeaseHistory{Owner: current.Owner, TaskID: current.TaskID, ExpiresAt: current.ExpiresAt(), EndedAt: now.UTC(), How: "broken", Reason: reason}})
 	})
 	return broken, err
+}
+
+// LifecycleLockFile serializes claims on a worktree (identity, metadata,
+// leases) with destructive lifecycle operations (remove, prune, unlink
+// --clean), which hold it from their lease check until the worktree is gone.
+const LifecycleLockFile = "anvil-lifecycle.lock"
+
+// ErrWorktreeGone reports a worktree removed while a claim waited for it.
+var ErrWorktreeGone = errors.New("worktree no longer exists")
+
+// LockLifecycle takes the worktree's lifecycle lock, waiting for a holder.
+func LockLifecycle(worktreePath string) (*lockfile.Lock, error) {
+	return lockfile.Acquire(config.WorktreeLockPath(worktreePath, LifecycleLockFile))
+}
+
+// WithLiveWorktree runs fn under the lifecycle lock after verifying the
+// worktree still exists, so a claim can never land on a worktree that a
+// concurrent removal has already checked or deleted.
+func WithLiveWorktree(worktreePath string, fn func() error) (err error) {
+	lockPath := config.WorktreeLockPath(worktreePath, LifecycleLockFile)
+	lock, err := lockfile.Acquire(lockPath)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, lock.Release()) }()
+	// Removal deletes the .git link, which also moves the lock path.
+	if _, statErr := os.Stat(filepath.Join(worktreePath, ".git")); statErr != nil || config.WorktreeLockPath(worktreePath, LifecycleLockFile) != lockPath {
+		return fmt.Errorf("%s: %w", worktreePath, ErrWorktreeGone)
+	}
+	return fn()
 }
