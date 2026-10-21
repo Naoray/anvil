@@ -51,8 +51,14 @@ Exports DB_DATABASE and ANVIL_TEST_DB_DATABASE set to the worktree's testing
 database (and ANVIL_DB_DATABASE set to the application database when known),
 then executes COMMAND. The child's exit code is passed through.
 
+anvil work and anvil scaffold provision the application and testing
+databases and migrate the testing database, so project test commands should
+run through anvil exec, e.g. 'anvil exec php artisan test'. A bare
+'php artisan test' uses phpunit.xml/.env instead of the isolated database.
+
 anvil exec is strictly read-only: it never creates or modifies databases or
-.anvil.local.`,
+.anvil.local, and never contacts the database server. If the recorded testing
+database is missing or its schema is stale, rerun 'anvil scaffold'.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		err := cobra.MinimumNArgs(1)(cmd, args)
 		if err != nil {
