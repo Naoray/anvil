@@ -106,19 +106,16 @@ func CheckCleanupWithWarnings(path string, warn func(string)) error {
 		sibling := registered.Path
 		siblingPath, err := Canonical(sibling)
 		if err != nil {
-			missing, missingErr := pathMissing(sibling)
+			missing, missingErr := PathMissing(sibling)
 			if missingErr != nil || !missing {
 				return fmt.Errorf("cannot inspect sibling %q: %w", sibling, errors.Join(err, missingErr))
 			}
-			if registered.Locked {
-				reason := ""
-				if registered.LockReason != "" {
-					reason = " (" + registered.LockReason + ")"
-				}
-				return fmt.Errorf("registered worktree %s is locked%s but absent; reconnect it, or unlock and prune it", sibling, reason)
+			warning, err := SkipAbsentWorktree(sibling, registered.Locked, registered.LockReason)
+			if err != nil {
+				return err
 			}
 			if warn != nil {
-				warn(fmt.Sprintf("registered worktree %s no longer exists; skipping it (run 'git worktree prune' to unregister it, or 'git worktree repair' if it was moved)", sibling))
+				warn(warning)
 			}
 			continue
 		}
@@ -151,11 +148,25 @@ func CheckCleanupWithWarnings(path string, warn func(string)) error {
 	return nil
 }
 
-// pathMissing reports whether path provably does not exist: Lstat reports
+// SkipAbsentWorktree decides a registered worktree whose path provably no
+// longer exists: an unlocked one is skipped with the returned warning, while
+// a locked one is expected back (Git never prunes it) and fails closed.
+func SkipAbsentWorktree(path string, locked bool, lockReason string) (string, error) {
+	if locked {
+		reason := ""
+		if lockReason != "" {
+			reason = " (" + lockReason + ")"
+		}
+		return "", fmt.Errorf("registered worktree %s is locked%s but absent; reconnect it, or unlock and prune it", path, reason)
+	}
+	return fmt.Sprintf("registered worktree %s no longer exists; skipping it (run 'git worktree prune' to unregister it, or 'git worktree repair' if it was moved)", path), nil
+}
+
+// PathMissing reports whether path provably does not exist: Lstat reports
 // ErrNotExist and its nearest existing ancestor is a resolvable directory.
 // A dangling symlink at path or at an ancestor (for example an unmounted
 // volume) is not proof of absence, nor is any other Lstat error.
-func pathMissing(path string) (bool, error) {
+func PathMissing(path string) (bool, error) {
 	path = filepath.Clean(path)
 	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
 		return false, err

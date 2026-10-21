@@ -233,6 +233,11 @@ func pruneProjectWithDependencies(
 		}
 	}
 
+	removable, err = skipMissingRemovalTargets(removable, ui.PrintWarning)
+	if err != nil {
+		return errors.Join(append(failures, err)...)
+	}
+
 	if len(removable) == 0 {
 		if err := errors.Join(failures...); err != nil {
 			return err

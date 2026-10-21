@@ -120,7 +120,7 @@ func TestCheckCleanupFailsClosedForDanglingSymlinkSibling(t *testing.T) {
 	require.ErrorContains(t, CheckCleanupWithWarnings(owner, func(string) {}), "cannot inspect sibling")
 }
 
-// pathMissing proves absence only when the nearest existing ancestor is a
+// PathMissing proves absence only when the nearest existing ancestor is a
 // real directory; Git canonicalizes registered paths, so this is unit-tested.
 func TestPathMissingDistinguishesAbsenceFromUnresolvablePaths(t *testing.T) {
 	base := t.TempDir()
@@ -141,7 +141,7 @@ func TestPathMissingDistinguishesAbsenceFromUnresolvablePaths(t *testing.T) {
 		"below regular file":          {path: filepath.Join(file, "wt"), wantErr: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			missing, err := pathMissing(tc.path)
+			missing, err := PathMissing(tc.path)
 			require.Equal(t, tc.missing, missing)
 			if tc.wantErr {
 				require.Error(t, err)

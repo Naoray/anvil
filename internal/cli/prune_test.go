@@ -288,8 +288,8 @@ func TestRunPrune_ContinuesAfterFetchFailure(t *testing.T) {
 }
 
 func TestPruneProject_ReportsRemovedOnlyAfterSuccessfulRemoval(t *testing.T) {
-	failedPath := "/worktrees/feature-failed"
-	successPath := "/worktrees/feature-success"
+	failedPath := t.TempDir()
+	successPath := t.TempDir()
 	removeErr := errors.New("git removal failed")
 	deps := pruneProjectDependencies{
 		fetchOrigin: func(string) error { return nil },
@@ -545,7 +545,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenSelectionEmpty(t *testing.T)
 		listWorktrees: func(string) ([]git.Worktree, error) {
 			return []git.Worktree{
 				{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
-				{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+				{Path: t.TempDir(), Branch: "feature-selected"},
 			}, nil
 		},
 		isMerged: func(_ string, branch string, _ string) (bool, error) {
@@ -580,7 +580,7 @@ func TestPruneProject_PreservesMergeCheckFailureWhenConfirmationDeclined(t *test
 		listWorktrees: func(string) ([]git.Worktree, error) {
 			return []git.Worktree{
 				{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
-				{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+				{Path: t.TempDir(), Branch: "feature-selected"},
 			}, nil
 		},
 		isMerged: func(_ string, branch string, _ string) (bool, error) {
@@ -647,7 +647,7 @@ func TestPruneProject_PreservesPriorFailureWithSelectionOrConfirmationError(t *t
 				listWorktrees: func(string) ([]git.Worktree, error) {
 					return []git.Worktree{
 						{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
-						{Path: "/worktrees/feature-selected", Branch: "feature-selected"},
+						{Path: t.TempDir(), Branch: "feature-selected"},
 					}, nil
 				},
 				isMerged: func(_ string, branch string, _ string) (bool, error) {
@@ -681,7 +681,7 @@ func TestPruneProject_ReturnsMergeCheckFailureAfterContinuing(t *testing.T) {
 		listWorktrees: func(string) ([]git.Worktree, error) {
 			return []git.Worktree{
 				{Path: "/worktrees/feature-check-failed", Branch: "feature-check-failed"},
-				{Path: "/worktrees/feature-check-success", Branch: "feature-check-success"},
+				{Path: t.TempDir(), Branch: "feature-check-success"},
 			}, nil
 		},
 		isMerged: func(_ string, branch string, _ string) (bool, error) {

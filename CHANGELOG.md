@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Release notes no longer include the tag's SSH signature block.
+- `anvil unlink --clean` and `anvil prune` skip a registered worktree whose directory was deleted, with a warning suggesting `git worktree prune`, instead of failing with `lstat …: no such file or directory`. A locked worktree that is absent still fails closed.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21
 

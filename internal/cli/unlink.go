@@ -116,6 +116,10 @@ Examples:
 								selected = append(selected, wt)
 							}
 						}
+						selected, err = skipMissingRemovalTargets(selected, ui.PrintWarning)
+						if err != nil {
+							return err
+						}
 						if err := orderDatabaseRemovals(selected); err != nil {
 							return err
 						}
