@@ -3,8 +3,6 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"github.com/naoray/anvil/internal/lockfile"
-	"github.com/naoray/anvil/internal/wtstate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/naoray/anvil/internal/lockfile"
+	"github.com/naoray/anvil/internal/wtstate"
 
 	"github.com/stretchr/testify/require"
 )
@@ -322,4 +323,43 @@ func TestToolchainProbeCancellationKillsGrandchildren(t *testing.T) {
 			require.Equal(t, 130, running.ProcessState.ExitCode(), output.String())
 		})
 	}
+}
+
+func TestKilledAnvilCannotReleaseLiveCommandResource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix signals")
+	}
+	f := newAgentFixture(t, `checks:
+  orphan:
+    locks: [gpu]
+    commands: ['trap "" TERM; echo $$ > orphan.pid.count; exec sleep 30']
+  competitor:
+    locks: [gpu]
+    commands: ['if kill -0 "$(cat orphan.pid.count)" 2>/dev/null; then exit 91; fi']
+`, nil)
+	_, stderr, code := f.runJSON(f.repo, "ensure", "feature/orphan")
+	require.Zero(t, code, stderr)
+	wt := f.worktreePath("feature-orphan")
+	running := exec.Command(f.bin, "check", "orphan", "--json")
+	running.Dir, running.Env = wt, f.env
+	require.NoError(t, running.Start())
+	pidFile := filepath.Join(wt, "orphan.pid.count")
+	require.Eventually(t, func() bool { _, err := os.Stat(pidFile); return err == nil }, 10*time.Second, 10*time.Millisecond)
+	pid, err := os.ReadFile(pidFile)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if exec.Command("kill", "-0", strings.TrimSpace(string(pid))).Run() == nil {
+			require.NoError(t, exec.Command("kill", "-KILL", strings.TrimSpace(string(pid))).Run())
+		}
+	})
+	require.NoError(t, running.Process.Kill())
+	require.Error(t, running.Wait())
+	envelope, stderr, code := f.runJSON(wt, "check", "competitor")
+	require.Equal(t, 7, code, "a live survivor must retain exclusion: %s %v", stderr, envelope["error"])
+	_, stderr, code = f.run(f.repo, "remove", "feature-orphan", "--force")
+	require.Equal(t, 7, code, stderr)
+	require.DirExists(t, wt)
+	require.Eventually(t, func() bool { return exec.Command("kill", "-0", strings.TrimSpace(string(pid))).Run() != nil }, 10*time.Second, 10*time.Millisecond, "supervisor death must terminate the complete command group")
+	_, stderr, code = f.runJSON(wt, "check", "competitor", "--lock-wait", "5s")
+	require.Zero(t, code, stderr)
 }

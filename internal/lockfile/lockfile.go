@@ -29,6 +29,10 @@ type Lock struct {
 // Path returns the lock file path.
 func (l *Lock) Path() string { return l.path }
 
+// File exposes the acquired handle only for exec inheritance. Callers must not
+// close or unlock it; Release remains the owner's responsibility.
+func (l *Lock) File() *os.File { return l.file }
+
 // Acquire blocks until the exclusive lock at path is held.
 func Acquire(path string) (*Lock, error) {
 	file, err := open(path)

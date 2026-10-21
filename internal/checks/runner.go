@@ -87,7 +87,8 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	defer func() { err = errors.Join(err, locks.release()) }()
 
-	identityReq := IdentityRequest{WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
+	guards := append([]*lockfile.Lock{gate, active}, locks...)
+	identityReq := IdentityRequest{Guards: guards, WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check, Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv}
 	targets, err := resolveTargets(identityReq)
 	if err != nil {
 		return nil, err
@@ -121,6 +122,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, runLock.Release()) }()
+	guards = append(guards, runLock)
 
 	result = &Result{
 		Schema: ResultSchema, RunID: runID, Check: req.Check.Name, Status: StatusRunning,
@@ -140,7 +142,7 @@ func Run(ctx context.Context, req RunRequest) (result *Result, err error) {
 	}
 	result.Status = StatusPassed
 	for i, command := range req.Check.Commands {
-		commandResult, status, runErr := runCommand(ctx, checkCtx, req, command, targets[i], identity, runID, runDir, i)
+		commandResult, status, runErr := runCommand(ctx, checkCtx, req, command, targets[i], guards, identity, runID, runDir, i)
 		result.Commands = append(result.Commands, commandResult)
 		if runErr != nil {
 			result.Status, result.Error, result.ExitCode = StatusError, runErr.Error(), 1
@@ -186,7 +188,7 @@ func checkVariables(check string, identity Identity, runID, runDir string) []wor
 	return vars
 }
 
-func runCommand(parent, ctx context.Context, req RunRequest, command config.CheckCommand, target CommandTarget, identity Identity, runID, runDir string, index int) (CommandResult, string, error) {
+func runCommand(parent, ctx context.Context, req RunRequest, command config.CheckCommand, target CommandTarget, guards []*lockfile.Lock, identity Identity, runID, runDir string, index int) (CommandResult, string, error) {
 	for _, variable := range checkVariables(req.Check.Name, identity, runID, runDir) {
 		target.Env.Set(variable)
 	}
@@ -207,7 +209,10 @@ func runCommand(parent, ctx context.Context, req RunRequest, command config.Chec
 		commandCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(commandCtx, "sh", "-c", command.Run)
+	cmd, finish, err := supervisedCommand(commandCtx, command.Run, guards)
+	if err != nil {
+		return result, StatusError, errors.Join(err, logFile.Close())
+	}
 	cmd.Dir = target.Dir
 	cmd.Env = target.Env.Environ(nil, nil, false)
 	var output io.Writer = logFile
@@ -216,13 +221,12 @@ func runCommand(parent, ctx context.Context, req RunRequest, command config.Chec
 	}
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.Stdin = nil
-	configureGroup(cmd)
 
 	start := time.Now()
 	runErr := cmd.Run()
-	killGroup(cmd)
+	finishErr := finish()
 	result.DurationMS = time.Since(start).Milliseconds()
-	if err := logFile.Close(); err != nil && runErr == nil {
+	if err := errors.Join(logFile.Close(), finishErr); err != nil {
 		return result, StatusError, err
 	}
 

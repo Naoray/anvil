@@ -25,6 +25,8 @@ import (
 
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
+	"github.com/naoray/anvil/internal/lifecycle"
+	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/utils"
 	"github.com/naoray/anvil/internal/workenv"
 )
@@ -67,6 +69,7 @@ type IdentityRequest struct {
 	Targets      []CommandTarget
 	Unset        []string
 	SecretEnv    []string
+	Guards       []*lockfile.Lock
 }
 
 const probeTimeout = 15 * time.Second
@@ -98,18 +101,25 @@ func DefinitionDigest(check config.CheckConfig) string {
 // ComputeIdentity reads the working state, probes toolchains and hashes
 // environment values and declared inputs. It runs only the declared
 // toolchain probe commands and writes nothing.
-func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error) {
+func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identity, err error) {
+	gate, err := lifecycle.AcquireShared(req.WorktreePath)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer func() { err = errors.Join(err, gate.Release()) }()
+	req.Guards = append(append([]*lockfile.Lock{}, req.Guards...), gate)
+
 	state, err := git.ReadWorkingState(req.WorktreePath)
 	if err != nil {
 		return Identity{}, err
 	}
-	identity := Identity{
+	identity = Identity{
 		Git:              state,
 		DefinitionDigest: DefinitionDigest(req.Check),
 		Platform:         Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	envMap := req.Env.Map()
-	identity.Toolchain, err = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env)
+	identity.Toolchain, err = probeToolchain(ctx, req.WorktreePath, req.Check.Toolchain, req.Env, req.Guards)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -166,16 +176,22 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (Identity, error)
 	return identity, nil
 }
 
-func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment) ([]ToolProbe, error) {
+func probeToolchain(ctx context.Context, dir string, commands []string, env *workenv.Environment, guards []*lockfile.Lock) ([]ToolProbe, error) {
 	probes := make([]ToolProbe, 0, len(commands))
 	for _, command := range commands {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-		cmd := exec.CommandContext(probeCtx, "sh", "-c", command)
+		cmd, finish, err := supervisedCommand(probeCtx, command, guards)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 		cmd.Dir = dir
 		cmd.Env = env.Environ(os.Environ(), nil, runtime.GOOS == "windows")
-		configureGroup(cmd)
 		out, err := cmd.CombinedOutput()
-		killGroup(cmd)
+		if closeErr := finish(); closeErr != nil {
+			cancel()
+			return nil, closeErr
+		}
 		probeErr := probeCtx.Err()
 		cancel()
 		if ctx.Err() != nil {

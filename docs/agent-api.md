@@ -174,3 +174,11 @@ Lock order is lifecycle gate → preparation lock → repository database lock �
 check active lock → resource locks sorted by name → run lock → `.anvil.local`
 state lock. Never upgrade a shared gate; acquire multiple worktree gates in
 canonical path order. Lease mutations must use the same shared gate.
+
+On Unix, checks and toolchain probes run beneath a separate supervisor which
+inherits the lifecycle, active, resource and run locks. Parent death closes a
+heartbeat, terminates the process group, and retains exclusion until the group
+is gone. Commands must keep descendants in that group rather than daemonizing.
+A group whose termination cannot be established keeps the locks (fail closed).
+Windows check execution and toolchain probes are refused until job-object
+supervision provides the same complete-lifetime guarantee.
