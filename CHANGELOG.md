@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `db.create` fails closed: a configured MySQL/MariaDB/PostgreSQL engine whose connection or ping fails now fails the step (naming the engine, role and corrective action) instead of reporting the worktree ready without its database. Explicit `type:` accepts the same aliases as `DB_CONNECTION` case-insensitively; an unsupported `type` is rejected before any scaffold step runs.
 - Release notes no longer include the tag's SSH signature block.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21

@@ -122,12 +122,13 @@ components:
 	require.Equal(t, 0, code, stderr)
 	require.Equal(t, []string{"up_to_date"}, stepResults(t, envelope))
 
-	require.NoError(t, os.WriteFile(filepath.Join(wt, "anvil.yaml"), []byte(strings.Replace(yaml, "MODE: one", "MODE: two", 1)), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "anvil.yaml"), []byte(strings.Replace(yaml, "MODE: one", "MODE: zz-declared-two-zz", 1)), 0o644))
 	envelope, stderr, code = f.runJSON(f.repo, "ensure", "feature-x")
 	require.Equal(t, 0, code, stderr)
 	require.Equal(t, []string{"ran"}, stepResults(t, envelope))
-	require.Equal(t, "two", readFile(t, filepath.Join(wt, "app", "prepared.txt")))
-	require.NotContains(t, readFile(t, filepath.Join(wt, ".anvil.local")), "two", "only a digest of the environment is stored")
+	require.Equal(t, "zz-declared-two-zz", readFile(t, filepath.Join(wt, "app", "prepared.txt")))
+	// A distinctive value: generated names (db_suffix words) can contain short words like "two".
+	require.NotContains(t, readFile(t, filepath.Join(wt, ".anvil.local")), "zz-declared-two-zz", "only a digest of the environment is stored")
 }
 
 func TestComponentEnvCanReferenceComponentVariables(t *testing.T) {

@@ -19,28 +19,12 @@ import (
 // This is shared between DbCreateStep and DbDestroyStep.
 func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.DatabaseEngine, error) {
 	if dbType != "" {
-		switch dbType {
-		case string(config.DBEngineMySQL), string(config.DBEnginePgSQL), string(config.DBEngineSQLite):
-			return config.DatabaseEngine(dbType), nil
-		case string(config.DBEngineMariaDB):
-			return config.DBEngineMySQL, nil
-		default:
-			return "", fmt.Errorf("unsupported database type: %s", dbType)
-		}
+		return config.ParseDatabaseType(dbType)
 	}
 
 	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
-	if conn := env["DB_CONNECTION"]; conn != "" {
-		switch conn {
-		case "mysql":
-			return config.DBEngineMySQL, nil
-		case "mariadb":
-			return config.DBEngineMySQL, nil
-		case "pgsql", "postgres", "postgresql":
-			return config.DBEnginePgSQL, nil
-		case "sqlite":
-			return config.DBEngineSQLite, nil
-		}
+	if engine, ok := config.DatabaseConnectionEngine(env["DB_CONNECTION"]); ok {
+		return engine, nil
 	}
 
 	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
@@ -118,7 +102,7 @@ func (args databaseStepArgs) connectionOptions(ctx *types.ScaffoldContext, dbTyp
 	if connection == "" {
 		connection = utils.ReadEnvFile(ctx.WorktreePath, ".env")["DB_CONNECTION"]
 	}
-	if connection == string(config.DBEngineMariaDB) {
+	if config.IsMariaDBType(connection) {
 		options.Service = string(config.DBEngineMariaDB)
 	}
 	return options
@@ -179,6 +163,11 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) (
 		}
 	}
 	if err != nil {
+		// An explicit but unsupported type is a configuration error; only a
+		// project without any engine declaration skips database creation.
+		if s.dbType != "" {
+			return err
+		}
 		if opts.Verbose {
 			fmt.Printf("  %v\n", err)
 		}
@@ -287,6 +276,19 @@ func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext, databaseA
 
 const maxDbCreateRetries = 5
 
+// databaseUnavailableError reports that a configured server engine could not
+// be reached. The step fails so scaffolding never reports a worktree ready
+// without the database it declared; the hint stays on the first line because
+// preparation records keep only that line.
+func databaseUnavailableError(engine config.DatabaseEngine, role string, err error) error {
+	const hint = "start the database service or check its connection settings"
+	var managedServiceErr *managedServiceError
+	if errors.As(err, &managedServiceErr) {
+		return fmt.Errorf("preparing managed database service for %s database (%s role; %s): %w", engine, role, hint, err)
+	}
+	return fmt.Errorf("connecting to %s database (%s role; %s): %w", engine, role, hint, err)
+}
+
 type databaseCollisionDecision uint8
 
 const (
@@ -311,14 +313,7 @@ func (s *DbCreateStep) createWithRetry(
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
-		var managedServiceErr *managedServiceError
-		if errors.As(err, &managedServiceErr) {
-			return fmt.Errorf("preparing managed database service: %w", err)
-		}
-		if opts.Verbose {
-			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
-		}
-		return nil
+		return databaseUnavailableError(engine, config.DbRoleApplication, err)
 	}
 
 	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
@@ -418,12 +413,12 @@ func (s *DbCreateStep) createTestDatabase(
 	databaseArgs databaseStepArgs,
 	opts types.StepOptions,
 ) (runErr error) {
+	// Scaffolding assigns a suffix before any step runs, so a missing one is
+	// an inconsistent state rather than an opt-out: skipping would report the
+	// worktree ready without its testing database.
 	suffix := ctx.GetDbSuffix()
 	if suffix == "" {
-		if opts.Verbose {
-			fmt.Printf("  No database suffix found, skipping testing database creation.\n")
-		}
-		return nil
+		return fmt.Errorf("cannot create %s testing database: no database suffix is assigned to this worktree", engine)
 	}
 
 	dbName := words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), suffix)
@@ -434,14 +429,7 @@ func (s *DbCreateStep) createTestDatabase(
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
-		var managedServiceErr *managedServiceError
-		if errors.As(err, &managedServiceErr) {
-			return fmt.Errorf("preparing managed database service: %w", err)
-		}
-		if opts.Verbose {
-			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
-		}
-		return nil
+		return databaseUnavailableError(engine, config.DbRoleTesting, err)
 	}
 	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
 	if err != nil {
