@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `anvil remove --json` emits one `anvil.agent/v1` document describing the removal plan or result (processes, ports, runtime directory, databases, branch). It never prompts: the worktree argument is required and removal needs `--force` unless `--dry-run` is given.
+
 ### Changed
 
 - Laravel scaffolding now leaves the worktree's own testing database schema-ready: `db.migrate` runs a non-destructive `artisan migrate` (no seed) on the owned, isolated `role: testing` database on every scaffold/ensure, through a per-command database environment without editing `.env`. Unrecorded, auxiliary, borrowed, shared, legacy and mismatched databases are never targeted. Testing databases are no longer existence-only by default; `database_actions: {testing: skip}` restores that.
@@ -17,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `db.create` fails closed: a configured MySQL/MariaDB/PostgreSQL engine whose connection or ping fails now fails the step (naming the engine, role and corrective action) instead of reporting the worktree ready without its database. Explicit `type:` accepts the same aliases as `DB_CONNECTION` case-insensitively; an unsupported `type` is rejected before any scaffold step runs.
 - Release notes no longer include the tag's SSH signature block.
+- Removing a worktree is no longer blocked by a sibling worktree whose directory was deleted; it is skipped with a warning suggesting `git worktree prune`. Locked siblings that are absent (for example on unmounted removable media) still block database cleanup.
+- Dry runs of `remove`, `prune` and `unlink --clean` never prompt or require `--force`, and never start database services. `prune --dry-run` no longer fetches origin.
 
 ## [v1.13.0](https://github.com/naoray/anvil/compare/v1.12.0...v1.13.0) - 2026-10-21
 

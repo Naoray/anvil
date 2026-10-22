@@ -772,22 +772,19 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 	client, err := s.clientFactory(string(selection.engine), connection)
 	if err != nil {
 		if opts.DryRun {
-			return errors.Join(
-				printDryRunTargets(s.output, selection.exact),
-				writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err),
-			)
+			return s.reportDryRun(ctx, selection.exact, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("creating database cleanup client: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
-	if err := client.Ping(); err != nil {
-		if opts.DryRun {
-			return errors.Join(
-				printDryRunTargets(s.output, selection.exact),
-				writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err),
-			)
+	if opts.DryRun {
+		// A preview never starts a service (Ping may); it enumerates only a
+		// service that is already running.
+		if warning := dryRunServiceWarning(client, "parallel-worker databases"); warning != "" {
+			return s.reportDryRun(ctx, selection.exact, warning)
 		}
+	} else if err := client.Ping(); err != nil {
 		return fmt.Errorf("connecting to %s for database cleanup: %w", selection.engine, err)
 	}
 
@@ -806,7 +803,9 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 		candidates, listErr := client.ListDatabases(pattern)
 		if listErr != nil {
 			if opts.DryRun {
-				if outputErr := writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", listErr); outputErr != nil {
+				warning := fmt.Sprintf("cannot enumerate parallel-worker databases: %v", listErr)
+				ctx.CleanupReport.Warn(warning)
+				if outputErr := writeDatabaseCleanupOutput(s.output, "%s\n", warning); outputErr != nil {
 					runtimeErrors = append(runtimeErrors, outputErr)
 				}
 			} else {
@@ -829,9 +828,9 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 	}
 
 	if opts.DryRun {
-		return errors.Join(append(runtimeErrors, printDryRunTargets(s.output, targets))...)
+		return errors.Join(append(runtimeErrors, s.reportDryRun(ctx, targets, ""))...)
 	}
-	runtimeErrors = append(runtimeErrors, dropDatabaseTargets(client, targets, opts, s.output)...)
+	runtimeErrors = append(runtimeErrors, dropDatabaseTargets(ctx, client, targets, opts, s.output)...)
 	return errors.Join(runtimeErrors...)
 }
 
@@ -848,16 +847,17 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 	)
 	if err != nil {
 		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+			return s.reportDryRun(ctx, nil, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("creating legacy database cleanup client: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
-	if err := client.Ping(); err != nil {
-		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+	if opts.DryRun {
+		if warning := dryRunServiceWarning(client, "legacy databases"); warning != "" {
+			return s.reportDryRun(ctx, nil, warning)
 		}
+	} else if err := client.Ping(); err != nil {
 		return fmt.Errorf("connecting to %s for legacy database cleanup: %w", engine, err)
 	}
 
@@ -865,7 +865,7 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 	candidates, err := client.ListDatabases(pattern)
 	if err != nil {
 		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+			return s.reportDryRun(ctx, nil, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("listing legacy databases for suffix %q: %w", suffix, err)
 	}
@@ -876,18 +876,44 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 		}
 	}
 	if opts.DryRun {
-		return printDryRunTargets(s.output, targets)
+		return s.reportDryRun(ctx, targets, "")
 	}
-	return errors.Join(dropDatabaseTargets(client, targets, opts, s.output)...)
+	return errors.Join(dropDatabaseTargets(ctx, client, targets, opts, s.output)...)
 }
 
-func dropDatabaseTargets(client DatabaseClient, targets []string, opts types.StepOptions, output io.Writer) []error {
+// dryRunServiceWarning probes without starting the service and explains why
+// enumeration is skipped; empty means the service is running.
+func dryRunServiceWarning(client DatabaseClient, what string) string {
+	running, err := client.Running()
+	if err != nil {
+		return fmt.Sprintf("%s not enumerated: cannot check service: %v", what, err)
+	}
+	if !running {
+		return what + " not enumerated: service not running"
+	}
+	return ""
+}
+
+// reportDryRun prints and reports the exact dry-run targets plus an optional
+// warning.
+func (s *DbDestroyStep) reportDryRun(ctx *types.ScaffoldContext, targets []string, warning string) error {
+	ctx.CleanupReport.AddDatabases(targets...)
+	err := printDryRunTargets(s.output, targets)
+	if warning != "" {
+		ctx.CleanupReport.Warn(warning)
+		err = errors.Join(err, writeDatabaseCleanupOutput(s.output, "%s\n", warning))
+	}
+	return err
+}
+
+func dropDatabaseTargets(ctx *types.ScaffoldContext, client DatabaseClient, targets []string, opts types.StepOptions, output io.Writer) []error {
 	var dropErrors []error
 	for _, database := range targets {
 		if err := client.DropDatabase(database); err != nil {
 			dropErrors = append(dropErrors, fmt.Errorf("dropping database %q: %w", database, err))
 			continue
 		}
+		ctx.CleanupReport.AddDatabases(database)
 		if opts.Verbose {
 			if err := writeDatabaseCleanupOutput(output, "  Dropped database: %s\n", database); err != nil {
 				dropErrors = append(dropErrors, err)

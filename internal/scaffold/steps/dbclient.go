@@ -13,7 +13,11 @@ type DatabaseClient interface {
 	CreateDatabase(name string) error
 	DropDatabase(name string) error
 	ListDatabases(pattern string) ([]string, error)
+	// Ping makes the service available, starting a managed service if needed.
 	Ping() error
+	// Running reports whether the service is up without starting it; dry
+	// runs use it instead of Ping.
+	Running() (bool, error)
 	Close() error
 }
 

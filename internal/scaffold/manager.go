@@ -30,6 +30,8 @@ type CleanupOptions struct {
 	Quiet               bool
 	DatabaseLockHeld    bool
 	SkipDatabaseCleanup bool
+	// Report, when set, collects database targets and warnings.
+	Report *types.CleanupReport
 }
 
 // StepRegistry defines the interface for step creation.
@@ -413,17 +415,21 @@ func (m *ScaffoldManager) RunCleanupWithOptions(
 	cleanupOpts CleanupOptions,
 ) (runErr error) {
 	ctx := m.newScaffoldContext(worktreePath, branch, repoName, siteName, preset)
+	ctx.CleanupReport = cleanupOpts.Report
 
 	if !cleanupOpts.SkipDatabaseCleanup {
+		// A caller holding the lock already checked and reported warnings.
+		var warn func(string)
 		if !cleanupOpts.DatabaseLockHeld {
 			release, err := dblifecycle.Lock(worktreePath)
 			if err != nil {
 				return err
 			}
 			defer func() { runErr = errors.Join(runErr, release()) }()
+			warn = ui.PrintWarning
 		}
 		ctx.DatabaseLockHeld = true
-		if err := dblifecycle.CheckCleanup(worktreePath); err != nil {
+		if err := dblifecycle.CheckCleanupWithWarnings(worktreePath, warn); err != nil {
 			return err
 		}
 	}
