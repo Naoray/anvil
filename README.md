@@ -768,9 +768,13 @@ behavior only if they also list `db.migrate` after it.
 
 ### `anvil exec`
 
-Runs a command with the worktree's test database exported. Strictly
-read-only: it never creates or modifies databases or `.anvil.local`, and it
-never contacts the database server.
+Runs a command with the worktree's test database exported. Anvil reads
+`.anvil.local` to resolve the database name; it does not create or modify
+databases or contact the database server. The command it launches may contact
+or modify a database, depending on what it runs.
+
+With the Laravel preset, `anvil work` and `anvil scaffold` provision the
+application and testing databases and migrate the testing database.
 
 Supported project test commands run through `anvil exec` (for example
 `anvil exec php artisan test`). A bare `php artisan test` does not use the
@@ -805,7 +809,7 @@ What `anvil exec` does when state is incomplete:
 |-----------|----------|--------------------|
 | No `.anvil.local` in the directory or any parent | exits `1` before running the command | `anvil scaffold` in the worktree (or `anvil work <branch>`) |
 | `.anvil.local` without a `role: testing` record | exits `1` with the pre-1.8 guidance | `anvil work <branch>` for a new worktree, or a scaffold override containing only `db.create` with `role: testing` |
-| Recorded testing database missing on the server, or its schema is behind | runs the command with the recorded name; the test runner then reports the connection or schema error | `anvil scaffold` recreates a missing owned testing database and migrates it, without touching the application database |
+| Recorded testing database missing on the server, or its schema is behind | runs the command with the recorded name; the test runner then reports the connection or schema error | For Laravel, `anvil scaffold` recreates a missing owned testing database and migrates it, without touching the application database; custom scaffolds need `db.create` and `db.migrate` steps |
 | Testing schema incompatible with the branch (rewritten migrations) | as above | `anvil scaffold --db-action testing=fresh` |
 | Last scaffold failed (`anvil status` not ready) | runs the command with the recorded name | fix the reported failure and rerun `anvil scaffold` |
 
