@@ -112,6 +112,9 @@ func TestOpenFileSnapshotIgnoresSiblingPrefix(t *testing.T) {
 }
 
 func TestOpenFileSnapshotMatchesMapsPathsWithEscapedSpaces(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("procfs maps paths are Linux-only")
+	}
 	root := filepath.Join(fixtureRoot(t), "repo with spaces")
 	file := filepath.Join(root, "asset bundle.bin")
 	escaped := strings.ReplaceAll(file, " ", `\040`)
@@ -123,6 +126,14 @@ func TestOpenFileSnapshotMatchesMapsPathsWithEscapedSpaces(t *testing.T) {
 	got := snapshot.Holders(root)
 	if len(got) != 1 || got[0].PID != 7 || got[0].Path != file {
 		t.Fatalf("holders = %+v, want pid 7 mapped to %q", got, file)
+	}
+}
+
+func TestUnescapeProcMapsPath(t *testing.T) {
+	got := unescapeProcMapsPath(`/tmp/repo\040with\040spaces\134file`)
+	want := `/tmp/repo with spaces\file`
+	if got != want {
+		t.Fatalf("unescapeProcMapsPath() = %q, want %q", got, want)
 	}
 }
 
