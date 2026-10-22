@@ -216,6 +216,7 @@ type statusData struct {
 	Ports     []resources.PortState `json:"ports"`
 	Checks    []statusCheck         `json:"checks"`
 	Cleanup   cleanupPreview        `json:"cleanup"`
+	Slots     *worktreeSlots        `json:"slots"`
 }
 
 // readPrepareView reads the preparation record with the reader-facing
@@ -319,6 +320,7 @@ func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 	}
 
 	data.Cleanup = previewCleanup(wenv, now, &warnings)
+	data.Slots = describeWorktreeSlots(wenv, &warnings)
 	return agentResult{Data: data, Warnings: warnings}, nil
 }
 

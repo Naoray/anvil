@@ -205,6 +205,7 @@ Commands:
   run          Run a command in a worktree's configured environment
   start/stop   Start or stop a worktree's managed dev processes
   check        Run named checks and record provenance (--list, --json)
+  slots        Machine-wide slots and queue for expensive checks (--json)
   context      Describe a worktree's environment for agents (--json)
   status       Readiness, resources, lease and cleanup preview (--json)
   lease        Acquire, renew, release or break advisory agent leases

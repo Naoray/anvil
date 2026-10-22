@@ -19,6 +19,7 @@ import (
 	"github.com/naoray/anvil/internal/config"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/lockfile"
+	"github.com/naoray/anvil/internal/slots"
 	"github.com/naoray/anvil/internal/ui"
 	"github.com/naoray/anvil/internal/utils"
 	"github.com/naoray/anvil/internal/wtstate"
@@ -42,6 +43,14 @@ Expensive checks require naming them and --allow-expensive. Checks holding
 'locks' take exclusive machine-wide resource locks; a lock held by another
 live process fails fast unless --lock-wait is given. Locks are released only
 by their holder or when it exits, never because time passed.
+
+Expensive checks (and checks declaring 'slots: N') also share a
+machine-wide slot semaphore across every project and worktree (see
+'anvil slots'). They queue strictly in order, higher --priority first, then
+arrival; --slot-wait bounds the wait and fails with resource_busy. Unlike
+--lock-wait, --slot-wait 0 (the default) waits until interrupted. While queued, progress lines go to stderr. A --reuse hit
+executes nothing and never queues. A slot-gated check started from a command
+of a check that holds a slot is refused unless --slot-wait bounds its wait.
 
 Child output streams to stdout (stderr with --json). With --json the
 envelope carries the results; the exit status is the first failing
@@ -68,6 +77,7 @@ type checkSummary struct {
 	Latest      *checks.Result       `json:"latest"`
 	Assessment  checks.Assessment    `json:"assessment"`
 	LockHolders []*checks.LockHolder `json:"lock_holders"`
+	Slots       *checkSlotInfo       `json:"slots"`
 }
 
 type checkListData struct {
@@ -178,6 +188,22 @@ func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr
 		return agentResult{Data: data}, err
 	}
 	memo := checks.NewResourceMemo()
+	var slotStatus *slots.Status
+	for _, check := range selected {
+		if checks.SlotWeight(check) == 0 || slotStatus != nil {
+			continue
+		}
+		manager, err := slotManager(wenv.PC.GlobalConfig)
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			break
+		}
+		status, err := manager.Snapshot()
+		if err != nil {
+			warnings = append(warnings, "check slots: "+err.Error())
+		}
+		slotStatus = &status
+	}
 	for _, check := range selected {
 		entry := checkSummary{Name: check.Name, Description: check.Description, Expensive: check.Expensive, Reusable: check.Reusable,
 			Locks: append([]string{}, check.Locks...), Commands: []string{}, LockHolders: []*checks.LockHolder{}}
@@ -210,6 +236,9 @@ func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr
 					entry.LockHolders = append(entry.LockHolders, holder)
 				}
 			}
+		}
+		if slotStatus != nil {
+			entry.Slots = newCheckSlotInfo(check, *slotStatus)
 		}
 		data.Checks = append(data.Checks, entry)
 	}
@@ -262,6 +291,11 @@ func runChecks(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
+	var slotWarnings []string
+	slot, err := checkSlotOptions(cmd, wenv, selected, func(warning string) { slotWarnings = append(slotWarnings, warning) })
+	if err != nil {
+		return agentResult{}, err
+	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -270,7 +304,11 @@ func runChecks(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	data := checkRunData{Worktree: summary, Results: []checkRunEntry{}}
 	var failure error
 	for _, check := range selected {
-		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, lockWait)
+		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, lockWait, slot)
+		for _, slotWarning := range slotWarnings {
+			warnings = append(warnings, fmt.Sprintf("check %s: %s", check.Name, slotWarning))
+		}
+		slotWarnings = nil
 		if warning != "" {
 			warnings = append(warnings, warning)
 		}
@@ -297,9 +335,12 @@ func checkFailure(result *checks.Result) error {
 		Details: map[string]any{"check": result.Check, "status": result.Status, "run_id": result.RunID}}
 }
 
-func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
+func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration, slot checks.SlotOptions) (checkRunEntry, string, error) {
 	warning := ""
 	var cacheWarnings []string
+	if slot.Manager != nil && !mustGetBool(cmd, "quiet") {
+		slot.Progress = slotProgress(check.Name)
+	}
 	result, err := checks.Run(ctx, checks.RunRequest{
 		Check:       check,
 		Reuse:       mustGetBool(cmd, "reuse"),
@@ -318,6 +359,7 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		SecretEnv:    wenv.PC.Config.SecretEnv,
 		Resources:    checkSharedResources(wenv),
 		Warn:         func(message string) { cacheWarnings = append(cacheWarnings, message) },
+		Slot:         slot,
 	})
 	if len(cacheWarnings) > 0 {
 		warning = strings.Join(append(nonEmpty(warning), cacheWarnings...), "; ")
@@ -336,6 +378,8 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 	case errors.As(err, &resourceErr):
 		return checkRunEntry{}, warning, (&agentapi.Error{Code: agentapi.CodeCheckFailed, Message: fmt.Sprintf("check %s not run: identity unavailable: %v", check.Name, resourceErr), Cause: err}).
 			WithDetails(map[string]any{"check": check.Name, "reason": "identity_unavailable", "resource": resourceErr.Resource})
+	case slotRunError(err) != nil:
+		return checkRunEntry{}, warning, slotRunError(err)
 	case errors.Is(err, checks.ErrAlreadyRunning):
 		return checkRunEntry{}, warning, agentapi.Errorf(agentapi.CodeResourceBusy, "check %s: %v", check.Name, err)
 	case err != nil && result == nil:
@@ -446,6 +490,8 @@ func init() {
 	checkCmd.Flags().Bool("allow-expensive", false, "Allow running checks marked expensive")
 	checkCmd.Flags().Bool("reuse", false, "Return a current passing result of a reusable check instead of rerunning")
 	checkCmd.Flags().Duration("lock-wait", 0, "Wait this long for busy resource locks (default: fail immediately)")
+	checkCmd.Flags().Int("priority", 0, "Machine-wide slot queue priority for expensive checks (higher first; FIFO within a priority)")
+	checkCmd.Flags().Duration("slot-wait", 0, "Wait at most this long for a machine-wide check slot (0, the default, waits until interrupted — unlike --lock-wait 0, which fails immediately)")
 	if err := checkCmd.RegisterFlagCompletionFunc("worktree", completeWorktreeNames); err != nil {
 		panic(err)
 	}

@@ -610,6 +610,26 @@ Named checks with trustworthy provenance:
 anvil check fast --json                           # commit, dirty-state digest, toolchain, artifacts
 anvil check --list --json                         # is the latest result still current? why not?
 anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
+anvil check e2e --allow-expensive --priority 5    # queue for a machine-wide slot, ahead of priority 0
+anvil slots --json                                # slot capacity, load, holders and queue (read-only)
+```
+
+Expensive checks (and checks declaring `slots: N`) share a machine-wide slot
+semaphore across all projects and worktrees, so parallel agents never run more
+heavy suites at once than the machine can take. Waiters queue in order
+(higher `--priority` first, then arrival); `--slot-wait 10m` bounds the wait
+(default `0` waits until interrupted, unlike `--lock-wait 0`). Slots are shared
+per runtime root (per user, or per `ANVIL_RUNTIME_ROOT`); processes configured
+with different capacities are capped at the largest, so keep it consistent.
+A slot-gated check started from inside another one is refused unless it
+passes `--slot-wait`, since it could wait forever for its parent's slot. A killed run frees its slots automatically.
+Configure it in `~/.config/anvil/anvil.yaml`:
+
+```yaml
+checks:
+  slots: 2        # concurrent slot weight (default: max(2, CPUs/4); env ANVIL_CHECK_SLOTS)
+  max_load: 6.0   # also wait while the 1-minute load average exceeds this (optional)
+  load_wait: 2m   # ...for at most this long, then proceed with a warning
 ```
 
 A check that declares `resources: [models]` records that shared resource's
