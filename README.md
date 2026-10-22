@@ -593,7 +593,7 @@ Per-worktree runtime resources and managed processes:
 resources:
   ports: [{name: web, env: VITE_PORT}]     # stable, collision-free ANVIL_PORT_WEB
   directories: [index-out]                 # plus ANVIL_STATE_DIR/TMP/CACHE/LOG/ARTIFACTS
-  shared: [{name: models, path: ~/.cache/models, required: true}]
+  shared: [{name: models, path: ~/.cache/models, required: true, identity: {file: SHA256SUMS}}]
 processes:
   - {name: web, component: desktop, command: 'pnpm dev --port "$VITE_PORT" --strictPort'}
 ```
@@ -611,6 +611,11 @@ anvil check fast --json                           # commit, dirty-state digest, 
 anvil check --list --json                         # is the latest result still current? why not?
 anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
 ```
+
+A check that declares `resources: [models]` records that shared resource's
+`identity` (a manifest `file`, a `command`'s stdout, or a cached `directory`
+digest); when it changes, the result is stale with
+`shared resource "models" changed`. Undeclared resources never affect it.
 
 Agent lifecycle — machine-readable, exact resolution, never prompts:
 

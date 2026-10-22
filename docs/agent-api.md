@@ -76,7 +76,9 @@ Codes are stable and never reused for a different meaning.
 
 Read-only commands never write `.anvil.local`, allocate ports or create
 directories. `check --list` and `status` run only the declared toolchain probe
-commands to decide currency. Mutating commands are not transactional across
+and shared-resource identity commands to decide currency; they read the
+directory identity cache when present but never create or write it (only
+`anvil check` execution does). Mutating commands are not transactional across
 all resources, but each state change is atomic and validated before effects.
 
 `run` has no JSON mode by design: it replaces itself with the child (execve on
@@ -172,7 +174,9 @@ Run:
         "git": {"head": "<sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
         "definition_digest": "…", "toolchain": [{"command": "cargo --version", "output": "cargo 1.82.0", "exit_code": 0}],
         "toolchain_digest": "…", "environment_names": ["ANVIL_WORKTREE_ID", "…"], "environment_digest": "…",
-        "inputs": [], "inputs_digest": "…", "platform": {"os": "darwin", "arch": "arm64"},
+        "inputs": [], "inputs_digest": "…",
+        "resources": [{"name": "models", "path": "/…/models", "state": "present", "method": "file", "source": "SHA256SUMS", "digest": "…"}],
+        "resources_digest": "…", "platform": {"os": "darwin", "arch": "arm64"},
         "identity_digest": "…"
       },
       "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
@@ -191,6 +195,30 @@ nothing runs: `check_failed`, exit 130 and no result. A check cannot start
 while its worktree is being removed
 (`cleanup_blocked`). Child output never appears in stdout with
 `--json`; it streams to stderr and is kept in the logs.
+
+`identity.resources[]` lists only the shared resources the check declares
+(sorted by name; `[]` and an empty `resources_digest` when none, which keeps
+the identity digest of earlier versions). `state` is `present` or `absent`
+(missing optional resource, empty `digest`). If a declared resource cannot be
+identified (missing required resource, failing or timed-out identity command,
+unreadable file or tree), `anvil check` runs nothing and returns
+`check_failed` (exit 1) with `details.reason: "identity_unavailable"`,
+`details.{check,resource}` and a message containing
+`identity unavailable: shared resource "<name>": …`. Without
+`details.reason`, `check_failed` means a check ran and did not pass (or was
+interrupted). With several checks, the first identity error aborts the
+remaining checks; results of checks that already finished are in `data`. `--list` and `status`
+report `stale_reasons: ["identity unavailable: …"]`. Changed resources add one
+stale reason each: `shared resource "<name>" changed`, `… appeared` or
+`… disappeared`. Resource identities are machine-wide: identity commands run
+in the resource directory with the inherited process environment only (minus
+the review role's `env_unset` and any inherited `ANVIL_*` worktree variables
+except `ANVIL_RUNTIME_ROOT`), never worktree variables, so two worktrees compute
+the same resource identity unless the command's output depends on variables
+removed by `roles.review.env_unset`. The directory identity cache is
+best-effort: an unreadable cache is ignored (the next `anvil check` run rebuilds it) and a cache that cannot be written
+is reported as a warning, never as an identity failure. Results recorded before this field existed decode with
+`resources: null`.
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
 `locks`, `commands`, `latest` (a result or `null`), `assessment`

@@ -36,6 +36,7 @@ func Assess(result *Result, current Identity) Assessment {
 	add(recorded.ToolchainDigest != current.ToolchainDigest, "toolchain changed")
 	add(recorded.EnvDigest != current.EnvDigest, "environment changed")
 	add(recorded.InputsDigest != current.InputsDigest, "inputs changed")
+	assessment.Reasons = append(assessment.Reasons, resourceReasons(recorded.Resources, current.Resources)...)
 	add(recorded.Platform != current.Platform, "platform changed")
 	assessment.Current = len(assessment.Reasons) == 0 && recorded.Digest == current.Digest
 	if !assessment.Current && len(assessment.Reasons) == 0 {
@@ -43,6 +44,29 @@ func Assess(result *Result, current Identity) Assessment {
 	}
 	assessment.PassingAndCurrent = assessment.Current && result.Status == StatusPassed
 	return assessment
+}
+
+// resourceReasons names each declared shared resource whose identity changed.
+// A resource declared on only one side is covered by "check definition changed".
+func resourceReasons(recorded, current []ResourceIdentity) []string {
+	previous := map[string]ResourceIdentity{}
+	for _, entry := range recorded {
+		previous[entry.Name] = entry
+	}
+	var reasons []string
+	for _, entry := range current {
+		before, ok := previous[entry.Name]
+		switch {
+		case !ok || before == entry:
+		case before.State == ResourceAbsent && entry.State == ResourcePresent:
+			reasons = append(reasons, fmt.Sprintf("shared resource %q appeared", entry.Name))
+		case before.State == ResourcePresent && entry.State == ResourceAbsent:
+			reasons = append(reasons, fmt.Sprintf("shared resource %q disappeared", entry.Name))
+		default:
+			reasons = append(reasons, fmt.Sprintf("shared resource %q changed", entry.Name))
+		}
+	}
+	return reasons
 }
 
 // ArtifactsIntact reports whether every recorded artifact still has its
