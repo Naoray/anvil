@@ -31,7 +31,10 @@ Examples:
   anvil unlink my-project
 
   # Unlink and remove all worktrees
-  anvil unlink --clean`,
+  anvil unlink --clean
+
+  # Preview the cleanup (never prompts, changes nothing)
+  anvil unlink --clean --dry-run`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load global config
@@ -86,7 +89,7 @@ Examples:
 				}
 				if len(entries) > 0 {
 					if clean {
-						if !force {
+						if !force && !dryRun {
 							confirmed, err := ui.Confirm(
 								fmt.Sprintf("Remove %d worktree(s) in %s?", len(entries), projectWorktreeDir),
 							)

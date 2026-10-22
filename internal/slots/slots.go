@@ -194,6 +194,9 @@ type BusyError struct {
 	InUse      int
 	Waited     time.Duration
 	Holders    []Holder
+	// QueueBusy means queue.lock was unavailable at timeout, so Holders are
+	// unavailable; InUse is still probed directly from the slot locks.
+	QueueBusy bool
 }
 
 func (e *BusyError) Error() string {
@@ -411,8 +414,42 @@ func (m *Manager) acquire(ctx context.Context, req Request, once bool) (*Held, e
 		Priority: req.Priority, Weight: req.Weight, EnqueuedAt: start.UTC(), WaitingFor: WaitingForSlot, Heartbeat: start.UTC()}
 	gate := &loadGate{settings: m.Settings, read: m.readLoad, since: start}
 	var last Progress
+	var deadline time.Time
+	if req.Wait > 0 && !once {
+		deadline = start.Add(req.Wait)
+	}
 	for {
-		held, progress, err := m.attempt(ctx, &own, gate, req, warn)
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return nil, m.timedOut(own, last, start)
+		}
+		attemptCtx := ctx
+		cancel := func() {}
+		queueWait := queueLockWait
+		if once {
+			queueWait = 0
+		} else if !deadline.IsZero() {
+			attemptCtx, cancel = context.WithDeadline(ctx, deadline)
+		}
+		held, progress, err := m.attempt(attemptCtx, &own, gate, req, warn, queueWait)
+		cancel()
+		if ctx.Err() != nil {
+			var releaseErr error
+			if held != nil {
+				releaseErr = held.Release()
+			}
+			return nil, errors.Join(ctx.Err(), releaseErr, m.removeTicket(own))
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) &&
+			(held != nil || err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errQueueBusy)) {
+			var releaseErr error
+			if held != nil {
+				releaseErr = held.Release()
+			}
+			if progress.Position == 0 {
+				progress = last
+			}
+			return nil, errors.Join(m.timedOut(own, progress, start), releaseErr)
+		}
 		switch {
 		case errors.Is(err, errQueueBusy):
 			progress = last // retry at the next poll
@@ -428,23 +465,13 @@ func (m *Manager) acquire(ctx context.Context, req Request, once bool) (*Held, e
 			req.Progress(progress)
 		}
 		last = progress
-		if waited := time.Since(start); req.Wait > 0 && waited >= req.Wait {
-			var holders []Holder
-			var inUse int
-			var holdersErr error
-			queueErr := m.withQueue(context.Background(), nil, func(*queueState) (bool, error) {
-				holders, inUse, holdersErr = m.holdersLocked()
-				return false, nil
-			})
-			holdersErr = errors.Join(holdersErr, queueErr)
-			busy := &BusyError{WaitingFor: progress.WaitingFor, Position: progress.Position, Queued: progress.Queued,
-				Capacity: m.Capacity, InUse: inUse, Waited: waited, Holders: holders}
-			if busy.WaitingFor == "" {
-				busy.WaitingFor = WaitingForSlot
+		poll := m.poll()
+		if !deadline.IsZero() {
+			if remaining := time.Until(deadline); remaining < poll {
+				poll = remaining
 			}
-			return nil, errors.Join(busy, holdersErr, m.removeTicket(own))
 		}
-		timer := time.NewTimer(m.poll())
+		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -452,6 +479,54 @@ func (m *Manager) acquire(ctx context.Context, req Request, once bool) (*Held, e
 		case <-timer.C:
 		}
 	}
+}
+
+func (m *Manager) timedOut(own Ticket, progress Progress, start time.Time) error {
+	busy := &BusyError{WaitingFor: progress.WaitingFor, Position: progress.Position, Queued: progress.Queued,
+		Capacity: m.Capacity, Waited: time.Since(start)}
+	if busy.WaitingFor == "" {
+		busy.WaitingFor = WaitingForSlot
+	}
+	var holders []Holder
+	var inUse int
+	var holdersErr error
+	snapshotErr := m.withQueueTimeout(context.Background(), 0, nil, func(state *queueState) (bool, error) {
+		holders, inUse, holdersErr = m.holdersLocked()
+		now := time.Now().UTC()
+		changed := m.prune(state, own.ID, now)
+		ordered := order(state.Tickets, now, m.staleAfter())
+		for i, ticket := range ordered {
+			if ticket.ID == own.ID {
+				busy.Position, busy.Queued = i+1, len(ordered)
+				if ticket.WaitingFor != "" {
+					busy.WaitingFor = ticket.WaitingFor
+				}
+				break
+			}
+		}
+		for i := range state.Tickets {
+			if state.Tickets[i].ID == own.ID {
+				state.Tickets = append(state.Tickets[:i], state.Tickets[i+1:]...)
+				return true, nil
+			}
+		}
+		return changed, nil
+	})
+	if snapshotErr != nil {
+		busy.QueueBusy = true
+		busy.Holders = nil
+		busy.InUse, holdersErr = m.countHeld()
+		if errors.Is(snapshotErr, errQueueBusy) {
+			if own.Seq > 0 {
+				snapshotErr = fmt.Errorf("removing slot ticket: %w (it is discarded once this process exits)", snapshotErr)
+			} else {
+				snapshotErr = nil
+			}
+		}
+		return errors.Join(busy, snapshotErr, holdersErr)
+	}
+	busy.Holders, busy.InUse = holders, inUse
+	return errors.Join(busy, holdersErr)
 }
 
 func newTicketID() (string, error) {
@@ -464,8 +539,8 @@ func newTicketID() (string, error) {
 
 // attempt refreshes the queue (joining it on the first call) and, at its
 // head, tries to take the slots.
-func (m *Manager) attempt(ctx context.Context, own *Ticket, gate *loadGate, req Request, warn func(string)) (held *Held, progress Progress, err error) {
-	err = m.withQueue(ctx, warn, func(state *queueState) (bool, error) {
+func (m *Manager) attempt(ctx context.Context, own *Ticket, gate *loadGate, req Request, warn func(string), queueWait time.Duration) (held *Held, progress Progress, err error) {
+	err = m.withQueueTimeout(ctx, queueWait, warn, func(state *queueState) (bool, error) {
 		now := time.Now().UTC()
 		changed := m.prune(state, own.ID, now)
 		index := -1
@@ -628,7 +703,11 @@ func (m *Manager) removeTicket(own Ticket) error {
 // withQueue runs fn on the queue under its lock and writes changes back. A
 // malformed queue is reset (warned, then rewritten): it only orders waiters.
 func (m *Manager) withQueue(ctx context.Context, warn func(string), fn func(*queueState) (bool, error)) (err error) {
-	lock, err := lockfile.AcquireContext(ctx, filepath.Join(m.Dir, queueLock), queueLockWait)
+	return m.withQueueTimeout(ctx, queueLockWait, warn, fn)
+}
+
+func (m *Manager) withQueueTimeout(ctx context.Context, timeout time.Duration, warn func(string), fn func(*queueState) (bool, error)) (err error) {
+	lock, err := lockfile.AcquireContext(ctx, filepath.Join(m.Dir, queueLock), timeout)
 	if errors.Is(err, lockfile.ErrLocked) {
 		return errQueueBusy
 	}

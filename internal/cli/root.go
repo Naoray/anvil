@@ -198,7 +198,8 @@ Commands:
   open         Open a worktree in your IDE and browser
   sync         Sync current worktree with upstream branch
   remove       Remove a worktree
-  prune        Remove merged worktrees
+  prune        Remove merged worktrees (candidates/apply: evidence-based)
+  adopt        Register Anvil identity for existing worktrees
   scaffold     Run scaffold steps for a worktree
   ensure       Create and idempotently prepare a worktree (--json)
   run          Run a command in a worktree's configured environment
@@ -212,7 +213,7 @@ Commands:
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project
   install      Setup global configuration
-  version      Show anvil version
+  version      Show anvil version (also --version; --json)
   completion   Generate shell completion scripts
 
 Run 'anvil <command> --help' for more information.`
@@ -226,6 +227,7 @@ Run 'anvil <command> --help' for more information.`
 func Execute() error {
 	rootCmd.SilenceUsage = true
 	overrideCompletionSubcommands(rootCmd)
+	configureVersionFlag(rootCmd)
 	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		if ui.IsAbort(err) {
 			return nil

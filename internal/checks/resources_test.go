@@ -124,7 +124,9 @@ func TestSharedResourceIdentityFailuresAreErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if name == "escaping link" {
-				require.NoError(t, os.Symlink("/etc/hostname", filepath.Join(dir, "link")))
+				outside := filepath.Join(t.TempDir(), "outside")
+				writeFile(t, outside, "outside")
+				require.NoError(t, os.Symlink(outside, filepath.Join(dir, "link")))
 			}
 			models := SharedResource{Name: "models", Path: dir, Identity: tc.identity}
 			check := config.CheckConfig{Name: "fast", Commands: cmds("touch ran.marker"), Resources: []string{"models"}}
@@ -368,7 +370,9 @@ func TestTreeDigestLinks(t *testing.T) {
 	_, err = d.digest(context.Background(), dir)
 	require.ErrorContains(t, err, "points outside the resource")
 	require.NoError(t, os.Remove(link))
-	require.NoError(t, os.Symlink("/etc/hostname", link))
+	outside := filepath.Join(t.TempDir(), "outside")
+	writeFile(t, outside, "outside")
+	require.NoError(t, os.Symlink(outside, link))
 	_, err = d.digest(context.Background(), dir)
 	require.ErrorContains(t, err, "points outside the resource")
 	require.NoError(t, os.Remove(link))

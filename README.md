@@ -103,7 +103,7 @@ autoload -Uz compinit && compinit
 ## Quick Start
 
 ```bash
-# Check anvil version
+# Check anvil version (same line as `anvil --version`; `--json` for agents)
 anvil version
 
 # Link an existing project (auto-detects name from git remote)
@@ -142,8 +142,24 @@ anvil list
 # Remove a worktree when done
 anvil remove feature/user-auth
 
-# Clean up merged worktrees
+# Preview a removal: never prompts, needs no --force, changes nothing
+anvil remove feature-user-auth --dry-run
+anvil remove feature-user-auth --dry-run --json   # one anvil.agent/v1 plan document
+
+# Legacy interactive cleanup (merge state and leases only; agents and scripts
+# should use prune candidates/apply instead of --force)
 anvil prune
+
+# Preview every merged worktree without prompting or fetching
+anvil prune --dry-run
+
+# Register Anvil identity for worktrees created outside Anvil (no scaffolding)
+anvil adopt --all
+
+# Evidence-based bulk prune: list candidates, then apply after rechecking
+anvil prune candidates --json --output candidates.json
+anvil prune apply --from candidates.json --dry-run
+anvil prune apply --from candidates.json --force
 
 # Run scaffold steps on an existing worktree
 anvil scaffold main
@@ -421,6 +437,120 @@ when lockfiles change. Toolchain version changes are not detected; use
 
 See [docs/agent-api.md](docs/agent-api.md) for the JSON contract and exit codes.
 
+### `anvil adopt [WORKTREE] [--all]`
+
+Register an Anvil worktree identity for existing Git worktrees of the linked
+project **without** scaffolding or preparing anything:
+
+```bash
+anvil adopt feature-x                       # one worktree (exact folder, branch, path or ID)
+anvil adopt --all --json                    # every registered worktree on disk
+anvil adopt feature-x --lease-owner codex   # also acquire an advisory lease
+anvil adopt --all --dry-run                 # preview; writes nothing
+```
+
+Retrying is safe and keeps existing state exactly as `anvil ensure` would:
+`adopted` (new ID), `unchanged` (identity already matches), `updated` (the
+worktree moved: ID and lease kept, path updated) or `reassigned` (the state was
+copied from another live worktree: new ID, the original's lease and process
+records dropped from the copy). `--all` skips bare entries, missing
+directories and the main checkout (adopt the main checkout by naming it).
+Lease flags (`--lease-owner`, `--lease-ttl`, `--session-id`,
+`--takeover-stale`) behave as on `ensure`: an active lease held by another
+owner is never replaced (`lease_held`, exit 7).
+
+### `anvil prune candidates` / `anvil prune apply`
+
+An auditable alternative to `anvil prune` for one project. Legacy `anvil prune
+--force` only checks merge state and leases (no activity, open-file, unpushed
+or ignored-file evidence), so agents and scripts should use these instead:
+
+```bash
+anvil prune candidates --json --output candidates.json   # read-only
+anvil prune apply --from candidates.json --dry-run        # recheck, change nothing
+anvil prune apply --from candidates.json --force --json   # recheck, then remove
+```
+
+`candidates` lists every worktree with `candidate`, `reasons[]` and
+`blockers[]` plus the evidence: merge state against `origin/<default>` (never
+fetched unless `--fetch`), GitHub PR state through `gh pr list` when available
+(an open PR blocks; an unavailable lookup does not; only a PR merged into the
+default branch counts as merged; `--no-pr` skips it), commits missing from
+every remote, tracked changes, untracked files (node_modules excluded),
+gitignored files, the lease (active blocks, stale warns), protected patterns,
+recent activity and processes holding files open beneath the worktree. Any
+evidence that is missing, failed or unsupported is a blocker. Git runs with
+`--no-optional-locks`, so the read-only scan never rewrites an index. The main
+checkout, bare, detached, locked and missing worktrees and the default branch
+are never candidates, and worktrees without an Anvil identity are blocked
+until adopted.
+
+- **Protected patterns**: `prune.protected` (globs matched against the branch
+  and the folder name) in the global `~/.config/anvil/anvil.yaml` and in the
+  project `anvil.yaml`, plus `--protect GLOB`. The default branch is always
+  protected.
+- **Ignored files**: removing a worktree deletes its gitignored files too
+  (`.env`, SQLite databases, `storage/`, build output). Every ignored path
+  outside `node_modules`, `vendor` and Anvil's `.anvil.local` blocks unless
+  allowed by `--allow-ignored GLOB` or `prune.allow_ignored` (global and
+  project, combined). A pattern matches the path relative to the worktree or
+  one of its parent directories, so `storage` allows everything below it.
+  Typical: `--allow-ignored .env` for scaffolded env files you can recreate.
+
+  ```yaml
+  prune:
+    protected:
+      - release/*
+    allow_ignored:
+      - .env
+      - storage
+  ```
+- **Recent activity** (`--recent`, default `24h`, minimum `10m`; it cannot be
+  disabled): the newest of the HEAD reflog (a missing reflog only warns),
+  tracked, untracked and ignored file modification times (excluding
+  `node_modules`, `vendor` and `.git`), the lease renewal, the latest check
+  result and the preparation record. Running checks always block.
+- **Open files**: on Linux every `/proc/<pid>` is inspected for `cwd`, `root`,
+  `exe`, open descriptors and memory maps beneath the worktree (a shell whose
+  current directory is inside it counts); on macOS `lsof` is used; elsewhere
+  the evidence is unsupported and blocks. Your own processes that cannot be
+  inspected (for example non-dumpable agents such as `ssh-agent`) block unless
+  you vouch for them with `--allow-uninspectable NAME`. That exempts every
+  process with that command name (the kernel's `comm`: truncated to 15
+  characters, and any process of yours can set it) in every worktree, so name
+  only processes that can never use one.
+- **Known gaps**: other users' processes that cannot be inspected only warn
+  by default (Linux counts them as `skipped_other_users`; on macOS they are
+  invisible to `lsof` and reported as `null`). A root-owned container (Docker,
+  Laravel Sail) or another account using the worktree is therefore **not
+  detected** unless you pass `--strict-processes`, which makes them block (on
+  macOS it always blocks, since they cannot be inspected there). The default
+  is permissive here only because system daemons are always uninspectable for
+  non-root users, so blocking would make pruning unusable.
+- **Mount namespaces**: a process in another mount namespace (a container
+  started as your user, snap or flatpak apps) sees namespace-local paths that
+  cannot be mapped to the worktree. Your own such processes block ("runs in
+  another mount namespace"); other users' follow the rule above. Kernel threads
+  are ignored. Containers that share worktrees (Docker, Sail) should hold a
+  lease (`anvil lease acquire`); sandboxed desktop apps may need
+  `--allow-uninspectable NAME`.
+
+`apply` validates the file (schema `anvil.prune-candidates/v1`, the same Git
+common directory as the current project) and, for each entry marked
+`candidate: true`, that it is still a registered worktree at the same
+canonical path with the same worktree ID, branch and HEAD (a file listing a
+path or ID twice is refused). It then collects all
+evidence again, and once more under the exclusive lifecycle gate immediately
+before removal; any blocker skips the entry. Its own `--recent`, `--protect`
+and process flags apply, only ever strengthened by the file's settings
+(ignored paths may be deleted only if both the file and the current
+invocation allow them), so a stale or edited file cannot override current
+checks. Removal goes through the
+same lifecycle as `anvil remove` and requires `--force` unless `--dry-run`
+(never `--ignore-lease`; `--keep-db`
+supported; branches are kept). A process that starts using the worktree outside
+Anvil between the final recheck and `git worktree remove` is not detected.
+
 ### `anvil run [WORKTREE] -- COMMAND`
 
 Run a command in a worktree's configured environment without requiring a
@@ -471,7 +601,7 @@ processes:
 ```bash
 anvil start feature-x --json     # detached, logs in $ANVIL_LOG_DIR
 anvil stop feature-x             # verified PID + start-time identity only
-anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs
+anvil remove feature-x --dry-run # also lists processes, ports and runtime dirs (add --json for a plan)
 ```
 
 Named checks with trustworthy provenance:
@@ -480,8 +610,8 @@ Named checks with trustworthy provenance:
 anvil check fast --json                           # commit, dirty-state digest, toolchain, artifacts
 anvil check --list --json                         # is the latest result still current? why not?
 anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
-anvil check fast --reuse --json                   # in a review worktree: reuse the author's pass at the same content
-anvil check fast --reuse --reuse-exclude-role implementation   # independent review: rerun author results
+anvil check fast --reuse --json                   # reuse a matching author's pass in a review worktree
+anvil check fast --reuse --reuse-exclude-role implementation   # rerun author results for an independent review
 anvil check e2e --allow-expensive --priority 5    # queue for a machine-wide slot, ahead of priority 0
 anvil slots --json                                # slot capacity, load, holders and queue (read-only)
 ```
@@ -529,10 +659,16 @@ anvil ensure feature/x --json --lease-owner codex --task-id SOLO-7   # prepared 
 anvil ensure --review <sha> --json            # independent reviewer worktree pinned to a commit
 anvil context feature-x --json                # environment, components, resources, checks (read-only)
 anvil status feature-x --json                 # readiness, lease, processes, check currency, cleanup preview
+anvil status --all --json                     # every worktree: ready, prepare, lease, managed, role, dirty
 anvil lease release feature-x                 # ANVIL_LEASE_TOKEN; remove refuses active leases
 ```
 
-See [docs/agent-api.md](docs/agent-api.md) for the versioned JSON contract.
+`context`, `status` and each `status --all` entry report the same `lease`
+object (`lease.state`), `ready`, a `prepare` object (`prepare.status`) and
+`worktree.managed` (Anvil holds a valid identity for the path; the main
+checkout and plain `git worktree add` worktrees are unmanaged until
+`anvil ensure`). See [docs/agent-api.md](docs/agent-api.md) for the versioned
+JSON contract.
 
 Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
 `swift`. See [docs/environments.md](docs/environments.md) for the full schema and
@@ -602,19 +738,24 @@ anvil completion powershell > anvil.ps1
 
 Laravel scaffolding migrates and seeds a newly created, owned application
 database. Existing application databases and borrowed/shared application data
-skip migrations by default. Testing databases remain existence-only unless
-explicitly selected. `--force`, CI, quiet mode and `--no-interactive` never
-authorize a reset.
+skip migrations by default. The worktree's own testing database is migrated
+(never seeded) on every scaffold or ensure; rebuilding it with `migrate:fresh`
+is opt-in — see [Test Database Isolation](#test-database-isolation). `--force`,
+CI, quiet mode and `--no-interactive` never authorize a reset.
 
 ```bash
 anvil scaffold feature --db-action application=migrate
 anvil scaffold feature --db-action application=skip --db-action testing=migrate
+anvil scaffold feature --db-action testing=fresh
 anvil scaffold feature --reset-database EXACT_OWNED_NAME
 anvil work feature --borrow-app-db owner-worktree
 ```
 
 `--db-action` accepts `application`, `testing` or an exact database name, with
-`skip` or `migrate`. The same selectors work in target YAML:
+`skip`, `migrate` or `fresh`. `fresh` (`migrate:fresh` without `--seed`) is
+accepted only for the worktree's owned, isolated testing database; any other
+target is rejected before a command runs. The same selectors work in target
+YAML:
 
 ```yaml
 scaffold:
@@ -660,6 +801,13 @@ Removing a borrower drops only its owned resources. An owner with active borrowe
 cannot be removed destructively, even with `--force`; `--keep-db` preserves its
 databases and permits removal. Borrowers retain the binding and never adopt
 ownership. Malformed or unreadable sibling state blocks destructive cleanup.
+A registered sibling whose directory was deleted from disk cannot hold a
+binding: it is skipped with a warning suggesting `git worktree prune` (or
+`git worktree repair` if it was moved). An **unlocked** worktree on an
+unmounted volume looks the same and is treated as deleted, so lock worktrees on
+removable media with `git worktree lock`: a locked worktree that is absent
+blocks destructive cleanup until it is reconnected, or unlocked and pruned. A
+dangling symlink or any other uninspectable sibling path also blocks.
 Prune and `unlink --clean` remove selected borrowers before selected owners.
 `unlink --clean` uses guarded cleanup and preserves unregistered files.
 
@@ -718,14 +866,86 @@ owns worktree-safe naming, collision checks, and `.anvil.local` records.
   is not valid in a user-configured `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
   Laravel's parallel-worker suffixes still fit MySQL/MariaDB's 64 and
-  PostgreSQL's 63 identifier limits), creates it empty — no migrations; your
-  test runner handles schema per run — and re-scaffolds idempotently.
+  PostgreSQL's 63 identifier limits) and re-scaffolds idempotently.
+  `db.create` itself only ensures the database exists; the following
+  `db.migrate` step prepares its schema (below).
 - Custom scaffold steps can reference the name via `{{ .TestDatabaseName }}`.
+
+### Schema-ready testing database
+
+The Laravel preset's `db.migrate` step runs after both `db.create` steps and
+prepares the testing database so `anvil exec php artisan test` finds a schema.
+By default it runs a non-destructive `artisan migrate` (no `--seed`) on the
+worktree's own testing database, whether this run created it (new worktree,
+or dropped on the server since) or it already existed. `db.migrate` runs on
+every `anvil scaffold`, `anvil work` and `anvil ensure`, so the default never
+discards rows — preparation stays safe while `anvil check` or
+`anvil exec php artisan test` use the database.
+
+Each command gets the testing database through its own environment
+(`DB_DATABASE`, `DB_CONNECTION`, host and port), never by editing `.env`. The
+application database keeps its own policy: re-preparing never migrates or
+wipes an existing one.
+
+The testing target must establish ownership and isolation: it is this
+worktree's canonical `role: testing` record in `.anvil.local`, with a
+verified `endpoint`, named `<site>_<suffix>_test` for this worktree's
+`db_suffix`, and ensured by `db.create` in the same run. Borrowing only ever
+shares an application database, never a testing one. Anything else —
+unrecorded databases with the same name, auxiliary records, borrowed or
+shared application databases, legacy records without an `endpoint`, or a
+testing record whose name does not match the worktree suffix — is never
+targeted by default. `laravel-shared-db` has no testing database, so nothing
+is migrated.
+
+Rebuilding the testing database (for example after a branch switch that
+rewrote migrations) is a one-off opt-in: `--db-action testing=fresh` on
+`anvil scaffold`, `work` or `ensure` runs `artisan migrate:fresh` without
+`--seed`, discarding its rows. It is accepted only as that flag:
+`database_actions` in `anvil.yaml` rejects `fresh` with a configuration error,
+because a declaration would rebuild the database on every ensure. `fresh` is
+refused for any other target. Before the command it holds the repository
+database lock and refuses when:
+
+- a check of this worktree is running (`anvil check` may be using the
+  database). If the worktree's identity or runtime directory cannot be
+  resolved, it refuses rather than guess;
+- another registered worktree of the repository records or borrows the same
+  name (unreadable sibling state also refuses).
+
+`anvil exec` sessions (for example a running `anvil exec php artisan test`)
+hold no lock and cannot be detected, and a check started after the guard is
+not blocked: don't run `testing=fresh` while tests use the database.
+
+Overrides: `database_actions: {testing: skip}` (or `--db-action testing=skip`)
+keeps the testing database untouched. `--dry-run` prints the planned line
+(`Database <name> role=testing ... action=migrate|fresh`) and runs nothing. A
+failed migration fails the step: `anvil work`/`scaffold`/`ensure` exit
+non-zero, `anvil status --json` reports `ready: false`, and the error names
+the database, role, action and corrective command, for example
+`database "myapp_swift_runner_test" role=testing action=migrate failed: exit
+status 1; fix the cause and rerun 'anvil scaffold' (or set database_actions:
+{testing: skip} to opt out)`, followed by the command's output.
+
+Custom scaffolds that declare `db.create` with `role: testing` get the same
+behavior only if they also list `db.migrate` after it.
 
 ### `anvil exec`
 
-Runs a command with the worktree's test database exported. Strictly
-read-only: it never creates or modifies databases or `.anvil.local`.
+Runs a command with the worktree's test database exported. Anvil reads
+`.anvil.local` to resolve the database name; it does not create or modify
+databases or contact the database server. The command it launches may contact
+or modify a database, depending on what it runs.
+
+With the Laravel preset, `anvil work` and `anvil scaffold` provision the
+application and testing databases and migrate the testing database.
+
+Supported project test commands run through `anvil exec` (for example
+`anvil exec php artisan test`). A bare `php artisan test` does not use the
+isolated database: it reads `DB_DATABASE` from `phpunit.xml` or `.env`, which
+usually point at a shared test database or the worktree's application
+database, so a bare run can clobber data that another worktree or your
+local application relies on.
 
 ```bash
 # Run the test suite against the worktree's test database
@@ -746,6 +966,16 @@ DB_DATABASE=<test database>                # e.g. myapp_swift_runner_test
 ANVIL_TEST_DB_DATABASE=<test database>
 ANVIL_DB_DATABASE=<application database>   # omitted if unknown
 ```
+
+What `anvil exec` does when state is incomplete:
+
+| Situation | Behavior | Corrective command |
+|-----------|----------|--------------------|
+| No `.anvil.local` in the directory or any parent | exits `1` before running the command | `anvil scaffold` in the worktree (or `anvil work <branch>`) |
+| `.anvil.local` without a `role: testing` record | exits `1` with the pre-1.8 guidance | `anvil work <branch>` for a new worktree, or a scaffold override containing only `db.create` with `role: testing` |
+| Recorded testing database missing on the server, or its schema is behind | runs the command with the recorded name; the test runner then reports the connection or schema error | For Laravel, `anvil scaffold` recreates a missing owned testing database and migrates it, without touching the application database; custom scaffolds need `db.create` and `db.migrate` steps |
+| Testing schema incompatible with the branch (rewritten migrations) | as above | `anvil scaffold --db-action testing=fresh` |
+| Last scaffold failed (`anvil status` not ready) | runs the command with the recorded name | fix the reported failure and rerun `anvil scaffold` |
 
 Exit codes: the child's exit code is passed through (on Unix via `execve`,
 on Windows via typed propagation). `127` means the command was not found,
@@ -789,7 +1019,17 @@ anvil remove feature-x --keep-db
 ```
 
 `--dry-run` prints one `Would drop database: <name>` line per database and
-never drops databases or removes the worktree. `--keep-db` prints the
+never drops databases or removes the worktree. It needs neither confirmation
+nor `--force` and leaves the worktree, branch, `.anvil.local`, runtime
+directory, ports and processes untouched (it still takes the coordination lock
+files). It never starts a database service: parallel-worker databases are
+enumerated only when the service is already running; otherwise the exact
+recorded names are listed with `parallel-worker databases not enumerated:
+service not running`.
+`anvil prune --dry-run` previews every merged worktree without prompting and
+without fetching origin; merge status reflects the current remote-tracking refs
+(it fails if `origin/<default>` has never been fetched).
+`anvil unlink --clean --dry-run` likewise never prompts. `--keep-db` prints the
 preserved names (parallel-worker databases are kept too; drop them manually
 when done). If ownership or sibling state is unreadable or invalid, destructive cleanup
 stops before site unlink or worktree deletion. `--force` does not bypass borrower
@@ -801,7 +1041,8 @@ protection; use `--keep-db` to retain databases when removing a worktree.
   environment and are not detected (a config scanner is deferred).
 - A cached Laravel config (`bootstrap/cache/config.php`) beats the
   environment and is not detected.
-- Bare invocations that bypass `anvil exec` keep today's shared behavior.
+- Bare invocations that bypass `anvil exec` keep today's shared behavior
+  (they use `phpunit.xml`/`.env`, not the isolated testing database).
 - `env -i`, containers without environment forwarding, and `DB_URL`-only
   connections are out of scope.
 - Laravel caches parallel-worker databases between runs; run
@@ -809,8 +1050,19 @@ protection; use `--keep-db` to retain databases when removing a worktree.
   switches.
 - Pre-1.8 worktrees have no recorded testing database: create a new
   worktree, or configure a scaffold override containing ONLY a `db.create`
-  step with `role: testing` and run that. `anvil exec` never creates or
-  modifies databases or `.anvil.local`.
+  step with `role: testing` and run that (add `db.migrate` after it to
+  migrate the new testing database; the policy never touches the unrecorded
+  application database). `anvil exec` never creates or modifies databases or
+  `.anvil.local`.
+- `--db-action testing=fresh` cannot detect running `anvil exec` sessions or
+  checks that start after its guard; only use it while nothing tests against
+  the database.
+- The opt-in `testing=fresh` isolation check sees only worktrees registered in
+  this repository. A legacy worktree of another repository whose migrated
+  `db_suffix` and site name produce the same database name can adopt an
+  existing database without an endpoint record; Anvil cannot detect that
+  sharing. Ownership and the default non-destructive `migrate` limit the
+  impact, so only use `fresh` when you know the database is yours alone.
 - One database server connection per worktree (MySQL, MariaDB, or PostgreSQL).
   SQLite worktrees are per-worktree files and already isolated, so
   `anvil exec` is not needed there.
@@ -1096,6 +1348,18 @@ All steps support template variables that are replaced at runtime:
 - Retries up to 5 times on collision
 - Persists the suffix and every created database to `.anvil.local` for exact
   cleanup
+- Fails closed: when the engine is configured (explicit `type` or a MySQL,
+  MariaDB or PostgreSQL `DB_CONNECTION`) and the database service cannot be
+  reached, the step fails with a hint to start the service or check its
+  connection settings. `anvil work`/`scaffold` then exit non-zero and
+  `anvil status --json` reports `ready: false` with the failed step. `type`
+  is case-insensitive and also accepts `postgres`/`postgresql`; an unsupported
+  `type` is rejected before any step runs. Only a project with neither `type` nor a
+  recognised `DB_CONNECTION` skips the step. SQLite creates a worktree-local
+  file and skips `role: testing`
+- Only ensures the database exists; it never runs migrations. A later
+  `db.migrate` step prepares schemas (see
+  [Schema-ready testing database](#schema-ready-testing-database))
 
 **Multiple databases with shared suffix:**
 

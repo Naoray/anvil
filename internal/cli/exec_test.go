@@ -226,7 +226,8 @@ func TestResolveExecDatabases_LegacyStateFailSafeReadOnly(t *testing.T) {
 	_, _, err = resolveExecDatabases(dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "v1.8")
-	assert.Contains(t, err.Error(), "migrate:fresh")
+	assert.Contains(t, err.Error(), "runs 'migrate' on the testing database")
+	assert.Contains(t, err.Error(), "not run 'migrate:fresh' by default")
 	assert.NotContains(t, err.Error(), "shared database")
 
 	after, err := os.ReadFile(filepath.Join(dir, config.LocalStateFile))

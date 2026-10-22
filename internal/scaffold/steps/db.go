@@ -19,28 +19,12 @@ import (
 // This is shared between DbCreateStep and DbDestroyStep.
 func detectDatabaseEngine(dbType string, ctx *types.ScaffoldContext) (config.DatabaseEngine, error) {
 	if dbType != "" {
-		switch dbType {
-		case string(config.DBEngineMySQL), string(config.DBEnginePgSQL), string(config.DBEngineSQLite):
-			return config.DatabaseEngine(dbType), nil
-		case string(config.DBEngineMariaDB):
-			return config.DBEngineMySQL, nil
-		default:
-			return "", fmt.Errorf("unsupported database type: %s", dbType)
-		}
+		return config.ParseDatabaseType(dbType)
 	}
 
 	env := utils.ReadEnvFile(ctx.WorktreePath, ".env")
-	if conn := env["DB_CONNECTION"]; conn != "" {
-		switch conn {
-		case "mysql":
-			return config.DBEngineMySQL, nil
-		case "mariadb":
-			return config.DBEngineMySQL, nil
-		case "pgsql", "postgres", "postgresql":
-			return config.DBEnginePgSQL, nil
-		case "sqlite":
-			return config.DBEngineSQLite, nil
-		}
+	if engine, ok := config.DatabaseConnectionEngine(env["DB_CONNECTION"]); ok {
+		return engine, nil
 	}
 
 	return "", fmt.Errorf("database type not specified and DB_CONNECTION not found in .env")
@@ -118,7 +102,7 @@ func (args databaseStepArgs) connectionOptions(ctx *types.ScaffoldContext, dbTyp
 	if connection == "" {
 		connection = utils.ReadEnvFile(ctx.WorktreePath, ".env")["DB_CONNECTION"]
 	}
-	if connection == string(config.DBEngineMariaDB) {
+	if config.IsMariaDBType(connection) {
 		options.Service = string(config.DBEngineMariaDB)
 	}
 	return options
@@ -179,6 +163,11 @@ func (s *DbCreateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) (
 		}
 	}
 	if err != nil {
+		// An explicit but unsupported type is a configuration error; only a
+		// project without any engine declaration skips database creation.
+		if s.dbType != "" {
+			return err
+		}
 		if opts.Verbose {
 			fmt.Printf("  %v\n", err)
 		}
@@ -287,6 +276,19 @@ func (s *DbCreateStep) getPrefixOrSiteName(ctx *types.ScaffoldContext, databaseA
 
 const maxDbCreateRetries = 5
 
+// databaseUnavailableError reports that a configured server engine could not
+// be reached. The step fails so scaffolding never reports a worktree ready
+// without the database it declared; the hint stays on the first line because
+// preparation records keep only that line.
+func databaseUnavailableError(engine config.DatabaseEngine, role string, err error) error {
+	const hint = "start the database service or check its connection settings"
+	var managedServiceErr *managedServiceError
+	if errors.As(err, &managedServiceErr) {
+		return fmt.Errorf("preparing managed database service for %s database (%s role; %s): %w", engine, role, hint, err)
+	}
+	return fmt.Errorf("connecting to %s database (%s role; %s): %w", engine, role, hint, err)
+}
+
 type databaseCollisionDecision uint8
 
 const (
@@ -311,14 +313,7 @@ func (s *DbCreateStep) createWithRetry(
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
-		var managedServiceErr *managedServiceError
-		if errors.As(err, &managedServiceErr) {
-			return fmt.Errorf("preparing managed database service: %w", err)
-		}
-		if opts.Verbose {
-			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
-		}
-		return nil
+		return databaseUnavailableError(engine, config.DbRoleApplication, err)
 	}
 
 	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
@@ -418,12 +413,12 @@ func (s *DbCreateStep) createTestDatabase(
 	databaseArgs databaseStepArgs,
 	opts types.StepOptions,
 ) (runErr error) {
+	// Scaffolding assigns a suffix before any step runs, so a missing one is
+	// an inconsistent state rather than an opt-out: skipping would report the
+	// worktree ready without its testing database.
 	suffix := ctx.GetDbSuffix()
 	if suffix == "" {
-		if opts.Verbose {
-			fmt.Printf("  No database suffix found, skipping testing database creation.\n")
-		}
-		return nil
+		return fmt.Errorf("cannot create %s testing database: no database suffix is assigned to this worktree", engine)
 	}
 
 	dbName := words.BuildTestDatabaseName(s.getPrefixOrSiteName(ctx, databaseArgs), suffix)
@@ -434,14 +429,7 @@ func (s *DbCreateStep) createTestDatabase(
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
 	if err := client.Ping(); err != nil {
-		var managedServiceErr *managedServiceError
-		if errors.As(err, &managedServiceErr) {
-			return fmt.Errorf("preparing managed database service: %w", err)
-		}
-		if opts.Verbose {
-			fmt.Printf("  Could not connect to %s database: %v\n", engine, err)
-		}
-		return nil
+		return databaseUnavailableError(engine, config.DbRoleTesting, err)
 	}
 	endpoint, err := verifiedClientEndpoint(client, string(engine), ctx.WorktreePath, nil)
 	if err != nil {
@@ -784,22 +772,19 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 	client, err := s.clientFactory(string(selection.engine), connection)
 	if err != nil {
 		if opts.DryRun {
-			return errors.Join(
-				printDryRunTargets(s.output, selection.exact),
-				writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err),
-			)
+			return s.reportDryRun(ctx, selection.exact, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("creating database cleanup client: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
-	if err := client.Ping(); err != nil {
-		if opts.DryRun {
-			return errors.Join(
-				printDryRunTargets(s.output, selection.exact),
-				writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err),
-			)
+	if opts.DryRun {
+		// A preview never starts a service (Ping may); it enumerates only a
+		// service that is already running.
+		if warning := dryRunServiceWarning(client, "parallel-worker databases"); warning != "" {
+			return s.reportDryRun(ctx, selection.exact, warning)
 		}
+	} else if err := client.Ping(); err != nil {
 		return fmt.Errorf("connecting to %s for database cleanup: %w", selection.engine, err)
 	}
 
@@ -818,7 +803,9 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 		candidates, listErr := client.ListDatabases(pattern)
 		if listErr != nil {
 			if opts.DryRun {
-				if outputErr := writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", listErr); outputErr != nil {
+				warning := fmt.Sprintf("cannot enumerate parallel-worker databases: %v", listErr)
+				ctx.CleanupReport.Warn(warning)
+				if outputErr := writeDatabaseCleanupOutput(s.output, "%s\n", warning); outputErr != nil {
 					runtimeErrors = append(runtimeErrors, outputErr)
 				}
 			} else {
@@ -841,9 +828,9 @@ func (s *DbDestroyStep) destroyOwnedGroup(
 	}
 
 	if opts.DryRun {
-		return errors.Join(append(runtimeErrors, printDryRunTargets(s.output, targets))...)
+		return errors.Join(append(runtimeErrors, s.reportDryRun(ctx, targets, ""))...)
 	}
-	runtimeErrors = append(runtimeErrors, dropDatabaseTargets(client, targets, opts, s.output)...)
+	runtimeErrors = append(runtimeErrors, dropDatabaseTargets(ctx, client, targets, opts, s.output)...)
 	return errors.Join(runtimeErrors...)
 }
 
@@ -860,16 +847,17 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 	)
 	if err != nil {
 		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+			return s.reportDryRun(ctx, nil, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("creating legacy database cleanup client: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, client.Close()) }()
 
-	if err := client.Ping(); err != nil {
-		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+	if opts.DryRun {
+		if warning := dryRunServiceWarning(client, "legacy databases"); warning != "" {
+			return s.reportDryRun(ctx, nil, warning)
 		}
+	} else if err := client.Ping(); err != nil {
 		return fmt.Errorf("connecting to %s for legacy database cleanup: %w", engine, err)
 	}
 
@@ -877,7 +865,7 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 	candidates, err := client.ListDatabases(pattern)
 	if err != nil {
 		if opts.DryRun {
-			return writeDatabaseCleanupOutput(s.output, "cannot enumerate parallel-worker databases: %v\n", err)
+			return s.reportDryRun(ctx, nil, fmt.Sprintf("cannot enumerate parallel-worker databases: %v", err))
 		}
 		return fmt.Errorf("listing legacy databases for suffix %q: %w", suffix, err)
 	}
@@ -888,18 +876,44 @@ func (s *DbDestroyStep) destroyLegacyDatabases(
 		}
 	}
 	if opts.DryRun {
-		return printDryRunTargets(s.output, targets)
+		return s.reportDryRun(ctx, targets, "")
 	}
-	return errors.Join(dropDatabaseTargets(client, targets, opts, s.output)...)
+	return errors.Join(dropDatabaseTargets(ctx, client, targets, opts, s.output)...)
 }
 
-func dropDatabaseTargets(client DatabaseClient, targets []string, opts types.StepOptions, output io.Writer) []error {
+// dryRunServiceWarning probes without starting the service and explains why
+// enumeration is skipped; empty means the service is running.
+func dryRunServiceWarning(client DatabaseClient, what string) string {
+	running, err := client.Running()
+	if err != nil {
+		return fmt.Sprintf("%s not enumerated: cannot check service: %v", what, err)
+	}
+	if !running {
+		return what + " not enumerated: service not running"
+	}
+	return ""
+}
+
+// reportDryRun prints and reports the exact dry-run targets plus an optional
+// warning.
+func (s *DbDestroyStep) reportDryRun(ctx *types.ScaffoldContext, targets []string, warning string) error {
+	ctx.CleanupReport.AddDatabases(targets...)
+	err := printDryRunTargets(s.output, targets)
+	if warning != "" {
+		ctx.CleanupReport.Warn(warning)
+		err = errors.Join(err, writeDatabaseCleanupOutput(s.output, "%s\n", warning))
+	}
+	return err
+}
+
+func dropDatabaseTargets(ctx *types.ScaffoldContext, client DatabaseClient, targets []string, opts types.StepOptions, output io.Writer) []error {
 	var dropErrors []error
 	for _, database := range targets {
 		if err := client.DropDatabase(database); err != nil {
 			dropErrors = append(dropErrors, fmt.Errorf("dropping database %q: %w", database, err))
 			continue
 		}
+		ctx.CleanupReport.AddDatabases(database)
 		if opts.Verbose {
 			if err := writeDatabaseCleanupOutput(output, "  Dropped database: %s\n", database); err != nil {
 				dropErrors = append(dropErrors, err)

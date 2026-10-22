@@ -55,6 +55,27 @@ func TestGatedReuseMissProbesOnceAndReportsOnce(t *testing.T) {
 	require.Len(t, misses, 1)
 }
 
+func TestGatedRunIdentityIncludesDeclaredSharedResources(t *testing.T) {
+	f := newFixture(t)
+	modelsDir := t.TempDir()
+	writeFile(t, filepath.Join(modelsDir, "SUMS"), "first digest\n")
+	models := SharedResource{Name: "models", Path: modelsDir, Identity: config.SharedIdentity{File: "SUMS"}}
+	check := config.CheckConfig{Name: "bench", Expensive: true, Reusable: true, Commands: cmds("true"), Resources: []string{"models"}}
+	request, _ := gatedRequest(f, check, 1)
+	request.Resources = []SharedResource{models}
+
+	first, err := Run(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, first.Identity.Resources, 1)
+
+	request.Reuse = true
+	writeFile(t, filepath.Join(modelsDir, "SUMS"), "changed digest\n")
+	second, err := Run(context.Background(), request)
+	require.NoError(t, err)
+	require.False(t, second.Reused, "a changed declared resource makes the prior result stale")
+	require.NotEqual(t, first.Identity.Resources[0].Digest, second.Identity.Resources[0].Digest)
+}
+
 // TestGatedReuseHitTakesNoSlot: reuse executes nothing, so it never queues.
 func TestGatedReuseHitTakesNoSlot(t *testing.T) {
 	f := newFixture(t)

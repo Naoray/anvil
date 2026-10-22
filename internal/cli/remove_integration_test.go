@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +64,24 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 // binary-level test: `remove --dry-run` through the shipped binary must
 // execute DbDestroyStep.Run live through Herd-managed service binaries, print
 // the exact owned names, exit successfully, avoid dropdb, and mutate nothing.
+// A dry run never starts the service (no `herd services:start`): a running
+// service is enumerated; a stopped one yields the exact recorded names and a
+// warning instead.
 func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
+	t.Run("running service", func(t *testing.T) { testRemoveBinaryDryRun(t, true) })
+	t.Run("stopped service", func(t *testing.T) { testRemoveBinaryDryRun(t, false) })
+}
+
+func testRemoveBinaryDryRun(t *testing.T, running bool) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+	if running {
+		t.Cleanup(func() { require.NoError(t, listener.Close()) })
+	} else {
+		require.NoError(t, listener.Close())
+	}
 	bin := getAnvilBinary(t)
 	base := t.TempDir()
 	fakeBin := filepath.Join(base, "bin")
@@ -98,8 +118,8 @@ func TestRemoveBinary_DryRunLiveEnumerationNoMutation(t *testing.T) {
 	require.NoError(t, config.WriteLocalState(worktreeDir, config.LocalState{
 		DbSuffix: "pg_fixture",
 		Databases: []config.OwnedDatabase{
-			{Name: appDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5432"}, Role: config.DbRoleApplication},
-			{Name: testDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: "5432"}, Role: config.DbRoleTesting},
+			{Name: appDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: port}, Role: config.DbRoleApplication},
+			{Name: testDb, Engine: "pgsql", Endpoint: &config.DatabaseEndpoint{Driver: "herd", Service: "postgresql", Host: "127.0.0.1", Port: port}, Role: config.DbRoleTesting},
 		},
 	}))
 
@@ -125,31 +145,59 @@ projects:
 
 	before := snapshotTree(t, worktreeDir)
 
-	cmd := exec.Command(bin, "remove", "feature-x", "--dry-run", "--force")
-	cmd.Dir = repoDir
-	cmd.Env = subprocessEnv(t,
+	env := subprocessEnv(t,
 		"XDG_CONFIG_HOME="+configHome,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"ANVIL_TEST_HELPER=1",
 		"ANVIL_HELPER_MODE=database-command",
 		"ANVIL_TEST_COMMAND_LOG="+commandLog,
+		"ANVIL_RUNTIME_ROOT="+filepath.Join(base, "runtime"),
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	require.NoError(t, runErr,
-		"remove --dry-run must exit successfully\nstdout: %s\nstderr: %s", stdout.String(), stderr.String())
-	combined := stdout.String() + stderr.String()
+	runAnvil := func(args ...string) (string, string) {
+		cmd := exec.Command(bin, args...)
+		cmd.Dir = repoDir
+		cmd.Env = env
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		require.NoError(t, cmd.Run(),
+			"remove --dry-run must exit successfully\nstdout: %s\nstderr: %s", stdout.String(), stderr.String())
+		return stdout.String(), stderr.String()
+	}
+	stdout, stderr := runAnvil("remove", "feature-x", "--dry-run", "--force")
+	combined := stdout + stderr
 
 	assert.Contains(t, combined, "Would drop database: "+appDb+"\n")
 	assert.Contains(t, combined, "Would drop database: "+testDb+"\n")
 	commands, err := os.ReadFile(commandLog)
-	require.NoError(t, err)
-	assert.Contains(t, string(commands), "herd services:start postgresql\n")
-	assert.Equal(t, 2, strings.Count(string(commands), "psql "))
+	if !errors.Is(err, fs.ErrNotExist) {
+		require.NoError(t, err)
+	}
+	assert.NotContains(t, string(commands), "services:start", "a dry run never starts the service")
 	assert.NotContains(t, string(commands), "dropdb ")
+	notEnumerated := "parallel-worker databases not enumerated: service not running"
+	if running {
+		assert.Equal(t, 2, strings.Count(string(commands), "psql "))
+		assert.NotContains(t, combined, notEnumerated)
+	} else {
+		assert.Zero(t, strings.Count(string(commands), "psql "))
+		assert.Contains(t, combined, notEnumerated)
+	}
+
+	jsonOut, _ := runAnvil("remove", "feature-x", "--dry-run", "--json")
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &envelope), jsonOut)
+	assert.Equal(t, "drop", field(t, envelope, "data", "databases", "action"))
+	assert.Equal(t, []any{appDb, testDb}, field(t, envelope, "data", "databases", "names"))
+	if running {
+		// Enumerated parallel-worker databases are reported too.
+		assert.Equal(t, []any{appDb, testDb, appDb + "_test_1"}, field(t, envelope, "data", "databases", "targets"))
+		assert.Contains(t, combined, "Would drop database: "+appDb+"_test_1\n")
+		assert.NotContains(t, envelope["warnings"], notEnumerated)
+	} else {
+		assert.Equal(t, []any{appDb, testDb}, field(t, envelope, "data", "databases", "targets"))
+		assert.Contains(t, envelope["warnings"], notEnumerated)
+	}
 
 	require.DirExists(t, worktreeDir, "dry-run must not remove the worktree")
 	after := snapshotTree(t, worktreeDir)

@@ -156,6 +156,6 @@ func TestStatusAllReportsUnreadableLeases(t *testing.T) {
 		}
 	}
 	require.NotNil(t, entry)
-	require.Equal(t, "unknown", entry["lease"], "a failed observation is not reported as no lease")
+	require.Equal(t, "unknown", field(t, entry, "lease", "state"), "a failed observation is not reported as no lease")
 	require.NotEmpty(t, field(t, envelope, "warnings"))
 }

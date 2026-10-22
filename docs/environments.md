@@ -344,7 +344,7 @@ interrupted (unlike `--lock-wait 0`). Results record the wait as `queued_ms`;
 `started_at` and `duration_ms` exclude it.
 Slots are lock files inherited by the supervisor, so a killed run frees them
 once its process group is gone; queue tickets of dead or recycled PIDs are
-discarded by the next participant. A `--reuse` hit (including one on another worktree's result) takes no slot.
+discarded by the next participant. A `--reuse` hit takes no slot.
 
 **Reuse and benchmark caching.** `--reuse` returns the latest result instead of
 running only when the check is declared `reusable`, the latest result passed,

@@ -89,6 +89,24 @@ func helperMain() {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	case "hold-file":
+		// Holds ANVIL_HELPER_FILE open from a working directory elsewhere
+		// until stdin closes, so only its descriptor table references it.
+		handle, err := os.Open(os.Getenv("ANVIL_HELPER_FILE"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "opening held file:", err)
+			os.Exit(1)
+		}
+		fmt.Println("ready")
+		if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "waiting for stdin:", err)
+			os.Exit(1)
+		}
+		if err := handle.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "closing held file:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	case "stderr":
 		fmt.Fprint(os.Stderr, os.Getenv("ANVIL_HELPER_STDERR"))
 		os.Exit(0)

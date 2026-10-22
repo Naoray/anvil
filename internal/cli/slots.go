@@ -64,7 +64,7 @@ type checkSlotInfo struct {
 	Weight    int                `json:"weight"`
 	Capacity  int                `json:"capacity"`
 	InUse     int                `json:"in_use"`
-	Queued    int                `json:"queued"`
+	Queued    *int               `json:"queued"`
 	Holders   []slots.Holder     `json:"holders"`
 	Queue     []slots.QueueEntry `json:"queue"`
 	QueueBusy bool               `json:"queue_busy"`
@@ -75,10 +75,11 @@ func newCheckSlotInfo(check config.CheckConfig, status slots.Status) *checkSlotI
 	if weight == 0 {
 		return nil
 	}
-	info := &checkSlotInfo{Weight: weight, Capacity: status.Capacity, InUse: status.InUse, Queued: len(status.Queue),
+	queued := len(status.Queue)
+	info := &checkSlotInfo{Weight: weight, Capacity: status.Capacity, InUse: status.InUse, Queued: &queued,
 		Holders: []slots.Holder{}, Queue: []slots.QueueEntry{}, QueueBusy: status.QueueBusy}
 	if status.QueueBusy {
-		info.Holders, info.Queue = nil, nil // unavailable, not empty
+		info.Queued, info.Holders, info.Queue = nil, nil, nil // unavailable, not empty
 	}
 	for _, holder := range status.Holders {
 		if holder.Check == check.Name {
@@ -98,7 +99,7 @@ func newCheckSlotInfo(check config.CheckConfig, status slots.Status) *checkSlotI
 type worktreeSlots struct {
 	Capacity  int                `json:"capacity"`
 	InUse     int                `json:"in_use"`
-	Queued    int                `json:"queued"`
+	Queued    *int               `json:"queued"`
 	Holders   []slots.Holder     `json:"holders"`
 	Queue     []slots.QueueEntry `json:"queue"`
 	QueueBusy bool               `json:"queue_busy"`
@@ -124,10 +125,11 @@ func describeWorktreeSlots(wenv *worktreeEnv, warnings *[]string) *worktreeSlots
 		}
 		return git.PathsEqual(path, wenv.Worktree.Path)
 	}
-	out := &worktreeSlots{Capacity: status.Capacity, InUse: status.InUse, Queued: len(status.Queue), Holders: []slots.Holder{}, Queue: []slots.QueueEntry{},
+	queued := len(status.Queue)
+	out := &worktreeSlots{Capacity: status.Capacity, InUse: status.InUse, Queued: &queued, Holders: []slots.Holder{}, Queue: []slots.QueueEntry{},
 		QueueBusy: status.QueueBusy}
 	if status.QueueBusy {
-		out.Holders, out.Queue = nil, nil // unavailable, not empty
+		out.Queued, out.Holders, out.Queue = nil, nil, nil // unavailable, not empty
 	}
 	for _, holder := range status.Holders {
 		if mine(holder.WorktreeID, holder.Worktree) {
@@ -221,7 +223,7 @@ func slotRunError(err error) error {
 	case errors.As(err, &busy):
 		return (&agentapi.Error{Code: agentapi.CodeResourceBusy, Message: busy.Error(), Cause: err}).WithDetails(map[string]any{
 			"waiting_for": busy.WaitingFor, "position": busy.Position, "queued": busy.Queued,
-			"capacity": busy.Capacity, "in_use": busy.InUse, "holders": busy.Holders,
+			"capacity": busy.Capacity, "in_use": busy.InUse, "holders": busy.Holders, "queue_busy": busy.QueueBusy,
 		})
 	case errors.As(err, &capErr):
 		return &agentapi.Error{Code: agentapi.CodeConfigInvalid, Message: capErr.Error(), Cause: err}

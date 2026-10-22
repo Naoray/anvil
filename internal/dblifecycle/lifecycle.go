@@ -4,6 +4,7 @@ package dblifecycle
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,15 +30,13 @@ func CommonDir(path string) (string, error) {
 }
 
 func RegisteredPaths(path string) ([]string, error) {
-	out, err := exec.Command("git", "-C", path, "worktree", "list", "--porcelain", "-z").Output()
+	worktrees, err := RegisteredWorktrees(path)
 	if err != nil {
-		return nil, fmt.Errorf("listing registered worktrees: %w", err)
+		return nil, err
 	}
-	var paths []string
-	for _, field := range strings.Split(string(out), "\x00") {
-		if strings.HasPrefix(field, "worktree ") {
-			paths = append(paths, strings.TrimPrefix(field, "worktree "))
-		}
+	paths := make([]string, 0, len(worktrees))
+	for _, worktree := range worktrees {
+		paths = append(paths, worktree.Path)
 	}
 	return paths, nil
 }
@@ -66,7 +65,19 @@ func Lock(path string) (release func() error, err error) {
 }
 
 // CheckCleanup must run under Lock before ANY side effect, and again only under the same holder.
+// Warnings about skipped siblings are discarded; top-level callers use
+// CheckCleanupWithWarnings to report them.
 func CheckCleanup(path string) error {
+	return CheckCleanupWithWarnings(path, nil)
+}
+
+// CheckCleanupWithWarnings is CheckCleanup reporting nonfatal findings to warn
+// (nil discards them). An unlocked registered sibling whose location provably
+// no longer exists is skipped with a warning: it cannot hold a borrow record
+// (an unlocked worktree on an unmounted volume is treated the same way). A
+// locked one is expected to return and fails closed, as does any other
+// failure to inspect a sibling.
+func CheckCleanupWithWarnings(path string, warn func(string)) error {
 	state, err := config.ReadLocalState(path)
 	if err != nil {
 		return err
@@ -80,7 +91,7 @@ func CheckCleanup(path string) error {
 		}
 	}
 
-	paths, err := RegisteredPaths(path)
+	siblings, err := RegisteredWorktrees(path)
 	if err != nil {
 		if _, statErr := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(statErr) {
 			return nil
@@ -91,10 +102,25 @@ func CheckCleanup(path string) error {
 	if err != nil {
 		return err
 	}
-	for _, sibling := range paths {
+	for _, registered := range siblings {
+		sibling := registered.Path
 		siblingPath, err := Canonical(sibling)
 		if err != nil {
-			return fmt.Errorf("cannot inspect sibling %q: %w", sibling, err)
+			missing, missingErr := pathMissing(sibling)
+			if missingErr != nil || !missing {
+				return fmt.Errorf("cannot inspect sibling %q: %w", sibling, errors.Join(err, missingErr))
+			}
+			if registered.Locked {
+				reason := ""
+				if registered.LockReason != "" {
+					reason = " (" + registered.LockReason + ")"
+				}
+				return fmt.Errorf("registered worktree %s is locked%s but absent; reconnect it, or unlock and prune it", sibling, reason)
+			}
+			if warn != nil {
+				warn(fmt.Sprintf("registered worktree %s no longer exists; skipping it (run 'git worktree prune' to unregister it, or 'git worktree repair' if it was moved)", sibling))
+			}
+			continue
 		}
 		if siblingPath == ownPath {
 			continue
@@ -123,4 +149,66 @@ func CheckCleanup(path string) error {
 		}
 	}
 	return nil
+}
+
+// pathMissing reports whether path provably does not exist: Lstat reports
+// ErrNotExist and its nearest existing ancestor is a resolvable directory.
+// A dangling symlink at path or at an ancestor (for example an unmounted
+// volume) is not proof of absence, nor is any other Lstat error.
+func pathMissing(path string) (bool, error) {
+	path = filepath.Clean(path)
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		_, err := os.Lstat(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			if parent := filepath.Dir(dir); parent != dir {
+				continue
+			}
+		}
+		if err != nil {
+			return false, err
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return false, err
+		}
+		if !info.IsDir() {
+			return false, fmt.Errorf("%s is not a directory", dir)
+		}
+		return true, nil
+	}
+}
+
+// RegisteredWorktree is one entry of `git worktree list`.
+type RegisteredWorktree struct {
+	Path       string
+	Locked     bool
+	LockReason string
+}
+
+// RegisteredWorktrees parses `git worktree list --porcelain -z`, including
+// lock state: Git never prunes a locked entry whose directory is absent.
+// Paths are returned in the platform's native form (Git for Windows reports
+// C:/... with forward slashes) so messages and comparisons use one spelling.
+func RegisteredWorktrees(path string) ([]RegisteredWorktree, error) {
+	out, err := exec.Command("git", "-C", path, "worktree", "list", "--porcelain", "-z").Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing registered worktrees: %w", err)
+	}
+	var worktrees []RegisteredWorktree
+	for _, field := range strings.Split(string(out), "\x00") {
+		switch {
+		case strings.HasPrefix(field, "worktree "):
+			worktrees = append(worktrees, RegisteredWorktree{Path: filepath.Clean(filepath.FromSlash(strings.TrimPrefix(field, "worktree ")))})
+		case len(worktrees) == 0:
+		case field == "locked":
+			worktrees[len(worktrees)-1].Locked = true
+		case strings.HasPrefix(field, "locked "):
+			worktrees[len(worktrees)-1].Locked = true
+			worktrees[len(worktrees)-1].LockReason = strings.TrimPrefix(field, "locked ")
+		}
+	}
+	return worktrees, nil
 }

@@ -27,7 +27,8 @@ Options:
     and run that in this worktree.
 anvil exec never creates or modifies databases or .anvil.local.
 Do NOT rerun the full default Laravel scaffold here if this worktree's database
-holds data you care about — it runs 'migrate:fresh' and would wipe it.`
+holds data you care about — it runs 'migrate' on the testing database; it does
+not run 'migrate:fresh' by default.`
 
 const sharedDbExecHint = `this worktree appears to use a shared database; shared-database worktrees do not support 'anvil exec'.`
 
@@ -50,8 +51,17 @@ Exports DB_DATABASE and ANVIL_TEST_DB_DATABASE set to the worktree's testing
 database (and ANVIL_DB_DATABASE set to the application database when known),
 then executes COMMAND. The child's exit code is passed through.
 
-anvil exec is strictly read-only: it never creates or modifies databases or
-.anvil.local.`,
+With the Laravel preset, anvil work and anvil scaffold provision the
+application and testing databases and migrate the testing database. In a
+worktree with a recorded testing database, run project test commands through
+anvil exec, e.g. 'anvil exec php artisan test'. A bare 'php artisan test' uses
+phpunit.xml/.env instead of the isolated database.
+
+Anvil's database lookup is read-only: it reads .anvil.local and does not
+create or modify databases or contact the database server. The child command
+may contact or modify a database, depending on what COMMAND runs. If the
+recorded testing database is missing or its schema is stale, rerun 'anvil scaffold'
+for Laravel; custom scaffolds need a db.migrate step to prepare the schema.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		err := cobra.MinimumNArgs(1)(cmd, args)
 		if err != nil {

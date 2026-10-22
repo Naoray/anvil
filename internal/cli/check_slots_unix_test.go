@@ -257,6 +257,7 @@ func TestCheckSlotWaitReuseCapacityAndInterrupt(t *testing.T) {
 	require.Equal(t, float64(1), details["position"])
 	require.Equal(t, float64(1), details["queued"])
 	require.Len(t, details["holders"], 1)
+	require.Equal(t, false, details["queue_busy"])
 	require.Contains(t, stderr, "waiting for slot (position 1 of 1)")
 	require.Equal(t, 1, countRuns(t, filepath.Join(wt, "bench.count")), "nothing ran")
 	require.Empty(t, f.queued(), "the timed-out ticket is removed")
@@ -281,6 +282,42 @@ func TestCheckSlotWaitReuseCapacityAndInterrupt(t *testing.T) {
 	require.Empty(t, field(t, interrupted, "data", "results"))
 	require.Empty(t, f.queued())
 	require.Equal(t, 1, countRuns(t, filepath.Join(wt, "bench.count")))
+}
+
+func TestCheckSlotTimeoutWithBusyQueueReportsHeldCapacity(t *testing.T) {
+	f, _, wts := slotFixture(t, 1, gatedYAML, "a")
+	wt := wts["a"]
+	slot, err := lockfile.Acquire(filepath.Join(f.runtimeRoot(), "slots", "slot-0.lock"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, slot.Release()) }()
+	queue, err := lockfile.Acquire(filepath.Join(f.runtimeRoot(), "slots", "queue.lock"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, queue.Release()) }()
+
+	start := time.Now()
+	envelope, _, code := f.runJSON(wt, "check", "bench", "--allow-expensive", "--slot-wait", "50ms")
+	require.Equal(t, 7, code)
+	require.Less(t, time.Since(start), 500*time.Millisecond, "queue lock contention stays inside the requested wait")
+	require.Equal(t, "resource_busy", field(t, envelope, "error", "code"))
+	details := field(t, envelope, "error", "details").(map[string]any)
+	require.Equal(t, true, details["queue_busy"])
+	require.Equal(t, float64(1), details["in_use"])
+	require.Nil(t, details["holders"])
+
+	list, _, code := f.runJSON(wt, "check", "--list")
+	require.Equal(t, 0, code)
+	listSlots := field(t, checkEntry(t, list, "bench"), "slots").(map[string]any)
+	require.Equal(t, true, listSlots["queue_busy"])
+	require.Nil(t, listSlots["queued"])
+	require.Nil(t, listSlots["holders"])
+	require.Nil(t, listSlots["queue"])
+
+	status, _, code := f.runJSON(wt, "status")
+	require.Equal(t, 0, code)
+	require.Equal(t, true, field(t, status, "data", "slots", "queue_busy"))
+	require.Nil(t, field(t, status, "data", "slots", "queued"))
+	require.Nil(t, field(t, status, "data", "slots", "holders"))
+	require.Nil(t, field(t, status, "data", "slots", "queue"))
 }
 
 func TestSlotsCommandReportsLoadAndCapacity(t *testing.T) {

@@ -128,6 +128,29 @@ func (c *yerdDatabaseClient) Ping() error {
 	return newManagedServiceError("Yerd service %s is not installed", c.service)
 }
 
+// Running reads Yerd's service state; unlike Ping it never starts it.
+func (c *yerdDatabaseClient) Running() (bool, error) {
+	output, err := c.executor.RunBinary(context.Background(), "", "yerd", []string{"--json", "services"})
+	if err != nil {
+		return false, fmt.Errorf("listing Yerd services: %w\n%s", err, output)
+	}
+	var response struct {
+		Services []struct {
+			Service string `json:"service"`
+			State   string `json:"state"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		return false, fmt.Errorf("parsing Yerd services: %w", err)
+	}
+	for _, service := range response.Services {
+		if service.Service == c.service {
+			return service.State == "running", nil
+		}
+	}
+	return false, nil
+}
+
 func (c *yerdDatabaseClient) CreateDatabase(name string) error {
 	output, err := c.executor.RunBinary(
 		context.Background(),

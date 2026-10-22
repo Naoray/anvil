@@ -130,6 +130,36 @@ func TestCancellationIsPromptWhileQueueLockIsHeld(t *testing.T) {
 	require.Less(t, time.Since(start), 1500*time.Millisecond)
 }
 
+func TestSlotWaitDeadlineIncludesQueueLockContention(t *testing.T) {
+	shortQueueLockWait(t, 250*time.Millisecond)
+	m := testManager(t, 1)
+	holder := mustAcquire(t, m, Request{Weight: 1, Check: "holder"})
+	defer func() { require.NoError(t, holder.Release()) }()
+	queue := holdQueueLock(t, m)
+
+	start := time.Now()
+	_, err := m.Acquire(context.Background(), Request{Weight: 1, Check: "waiter", Wait: 50 * time.Millisecond})
+	var busy *BusyError
+	require.ErrorAs(t, err, &busy)
+	require.Less(t, time.Since(start), 150*time.Millisecond, "queue-lock contention is inside the slot wait bound")
+	require.Equal(t, 1, busy.InUse, "timeout diagnostics still count held slot locks")
+	require.True(t, busy.QueueBusy, "the unavailable queue snapshot is identified")
+
+	require.NoError(t, queue.Release())
+	require.NoError(t, holder.Release())
+}
+
+func TestTryAcquireDoesNotWaitForQueueLock(t *testing.T) {
+	shortQueueLockWait(t, 250*time.Millisecond)
+	m := testManager(t, 1)
+	holdQueueLock(t, m)
+	start := time.Now()
+	held, err := m.TryAcquire(context.Background(), Request{Weight: 1, Check: "try"})
+	require.NoError(t, err)
+	require.Nil(t, held)
+	require.Less(t, time.Since(start), 50*time.Millisecond, "TryAcquire makes one non-blocking queue-lock attempt")
+}
+
 func TestQueueLockTimeoutIsRetried(t *testing.T) {
 	previous := queueLockWait
 	queueLockWait = 30 * time.Millisecond

@@ -54,7 +54,10 @@ security boundary.
 Preparation runs the same scaffold steps as 'anvil scaffold', but skips steps
 whose recorded completion still matches their definition, declared inputs and
 outputs. Database, site-link and store_as steps always run under their own
-safety policies. Each completed step is recorded immediately, so a failed or
+safety policies; db.migrate migrates the owned testing database with a
+non-destructive 'migrate' each time; only the one-off --db-action
+testing=fresh rebuilds it with 'migrate:fresh', refused while a check of the
+worktree runs. Each completed step is recorded immediately, so a failed or
 interrupted run resumes where it stopped. Concurrent ensures of one worktree
 wait for each other.
 
@@ -81,6 +84,7 @@ type prepareSummary struct {
 type ensureData struct {
 	Worktree   worktreeSummary              `json:"worktree"`
 	Created    bool                         `json:"created"`
+	Ready      bool                         `json:"ready"`
 	Metadata   wtstate.Metadata             `json:"metadata"`
 	Lease      *leaseView                   `json:"lease"`
 	Prepare    prepareSummary               `json:"prepare"`
@@ -92,27 +96,19 @@ type ensureOptions struct {
 	ReviewCommit string
 	Role         string
 	Task         wtstate.Task
-	LeaseOwner   string
-	LeaseToken   string
-	LeaseTTL     time.Duration
-	SessionID    string
-	Takeover     bool
+	Lease        leaseOptions
 }
 
 func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, error) {
 	opts := ensureOptions{
-		Role:       mustGetString(cmd, "role"),
-		Task:       wtstate.Task{ID: mustGetString(cmd, "task-id"), URL: mustGetString(cmd, "task-url"), PR: mustGetString(cmd, "pr")},
-		LeaseOwner: mustGetString(cmd, "lease-owner"),
-		LeaseToken: os.Getenv(LeaseTokenEnv),
-		SessionID:  mustGetString(cmd, "session-id"),
-		Takeover:   mustGetBool(cmd, "takeover-stale"),
+		Role: mustGetString(cmd, "role"),
+		Task: wtstate.Task{ID: mustGetString(cmd, "task-id"), URL: mustGetString(cmd, "task-url"), PR: mustGetString(cmd, "pr")},
 	}
-	ttl, err := cmd.Flags().GetDuration("lease-ttl")
+	lease, err := parseLeaseOptions(cmd)
 	if err != nil {
-		return opts, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+		return opts, err
 	}
-	opts.LeaseTTL = ttl
+	opts.Lease = lease
 	if opts.Role != "" && !wtstate.ValidRole(opts.Role) {
 		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--role must be implementation or review")
 	}
@@ -127,9 +123,6 @@ func parseEnsureOptions(cmd *cobra.Command, pc *ProjectContext) (ensureOptions, 
 		opts.ReviewCommit, opts.Role = sha, wtstate.RoleReview
 	} else if opts.Role == wtstate.RoleReview {
 		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "review worktrees are pinned to a commit: use --review COMMIT")
-	}
-	if opts.Takeover && opts.LeaseOwner == "" {
-		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--takeover-stale requires --lease-owner")
 	}
 	return opts, nil
 }
@@ -183,6 +176,17 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 			return agentResult{Data: data, Warnings: warnings}, agentapi.Wrap(agentapi.CodeInternal, err)
 		}
 		data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
+		if data.Prepare.Ready {
+			// Without preparation, readiness is evaluated read-only with
+			// the same semantics as status and context.
+			wenv, err := loadWorktreeEnv(pc, *target, worktreeEnvOptions{Role: opts.Role})
+			if err != nil {
+				warnings = append(warnings, "readiness unavailable: "+err.Error())
+			} else {
+				data.Ready = worktreeReady(statusPrepare{Ready: true}, wenv)
+				warnings = append(warnings, notReadyReasons(wenv)...)
+			}
+		}
 		return agentResult{Data: data, Warnings: warnings}, nil
 	}
 
@@ -298,6 +302,7 @@ func runEnsure(cmd *cobra.Command, args []string) (result agentResult, runErr er
 		return agentResult{Data: data, Warnings: warnings}, prepareFailure(report, runErr)
 	}
 	data.Prepare.Ready = data.Prepare.Status == wtstate.PrepareComplete
+	data.Ready = data.Prepare.Ready
 	return agentResult{Data: data, Warnings: warnings}, nil
 }
 
@@ -360,30 +365,8 @@ func recordEnsureClaims(target *git.Worktree, opts ensureOptions, data *ensureDa
 	} else if data.Metadata, err = wtstate.ReadMetadata(target.Path); err != nil {
 		return agentapi.Wrap(agentapi.CodeInternal, err)
 	}
-	if opts.LeaseOwner == "" {
-		lease, err := wtstate.ReadLease(target.Path)
-		if err != nil {
-			return agentapi.Wrap(agentapi.CodeInternal, err)
-		}
-		data.Lease = newLeaseView(lease, now, "")
-		if lease.State(now) == wtstate.LeaseActive {
-			*warnings = append(*warnings, fmt.Sprintf("worktree is leased by %q (task %q); leases are advisory", lease.Owner, lease.TaskID))
-		}
-		return nil
-	}
-	lease, token, err := wtstate.AcquireLease(target.Path, wtstate.AcquireRequest{
-		WorktreeID: identity.ID, Token: opts.LeaseToken, Owner: opts.LeaseOwner, TaskID: opts.Task.ID,
-		SessionID: opts.SessionID, TTL: opts.LeaseTTL, TakeoverStale: opts.Takeover, Now: now,
-	})
-	if err != nil {
-		return leaseAPIError(err)
-	}
-	issued := ""
-	if token != opts.LeaseToken {
-		issued = token
-	}
-	data.Lease = newLeaseView(lease, now, issued)
-	return nil
+	data.Lease, err = applyLeaseOptions(target.Path, identity.ID, opts.Lease, opts.Task.ID, now, warnings)
+	return err
 }
 
 // prepareFailure names the failed step without copying child output into JSON.
