@@ -111,7 +111,7 @@ func newTestingDBFixtureWithYAML(t *testing.T, anvilYAML string) *testingDBFixtu
 	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "php"), []byte(fakePHPScript), 0o755))
 	fixture := &testingDBFixture{agentFixture: f, yerdState: t.TempDir(), schemaLog: t.TempDir()}
 	f.env = subprocessEnvFrom(append(f.env,
-		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PATH="+fakeBin+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin",
 		"FAKE_YERD_STATE="+fixture.yerdState,
 		"FAKE_SCHEMA_LOG="+fixture.schemaLog,
 	))
