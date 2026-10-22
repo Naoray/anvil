@@ -141,10 +141,28 @@ func TestHeadOfLineBlocksLaterSmallerRequests(t *testing.T) {
 	waitQueued(t, m, 1)
 
 	// One slot is free, but the earlier weight-2 request is at the head.
-	_, err := m.Acquire(context.Background(), Request{Weight: 1, Check: "small", Wait: 60 * time.Millisecond})
-	var busy *BusyError
-	require.ErrorAs(t, err, &busy)
-	require.Equal(t, 2, busy.Position)
+	smallCtx, cancelSmall := context.WithCancel(context.Background())
+	defer cancelSmall()
+	type acquireResult struct {
+		held *Held
+		err  error
+	}
+	smallResult := make(chan acquireResult, 1)
+	go func() {
+		held, err := m.Acquire(smallCtx, Request{Weight: 1, Check: "small"})
+		smallResult <- acquireResult{held: held, err: err}
+	}()
+	waitQueued(t, m, 2)
+
+	status, err := m.Snapshot()
+	require.NoError(t, err)
+	require.Equal(t, "big", status.Queue[0].Check)
+	require.Equal(t, "small", status.Queue[1].Check)
+
+	cancelSmall()
+	small := <-smallResult
+	require.ErrorIs(t, small.err, context.Canceled)
+	require.Nil(t, small.held)
 
 	require.NoError(t, holder.Release())
 	require.NoError(t, <-bigErr)
