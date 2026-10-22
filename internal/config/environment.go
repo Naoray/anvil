@@ -374,7 +374,55 @@ func (c *Config) FindProcess(name string) (*ProcessConfig, bool) {
 
 // RolesConfig declares per-role behavior.
 type RolesConfig struct {
-	Review ReviewRoleConfig `yaml:"review"`
+	Implementation ImplementationRoleConfig `yaml:"implementation"`
+	Review         ReviewRoleConfig         `yaml:"review"`
+}
+
+// Reuse trust levels: which producers' results `anvil check --reuse` may
+// return in a worktree.
+const (
+	// ReuseTrustSameWorktree accepts only results this worktree produced.
+	ReuseTrustSameWorktree = "same-worktree"
+	// ReuseTrustSameRole also accepts results produced by worktrees with
+	// the same role.
+	ReuseTrustSameRole = "same-role"
+	// ReuseTrustAny accepts results from any worktree of the project.
+	ReuseTrustAny = "any"
+)
+
+// ValidReuseTrust reports whether value is a known trust level ("" means default).
+func ValidReuseTrust(value string) bool {
+	switch value {
+	case "", ReuseTrustSameWorktree, ReuseTrustSameRole, ReuseTrustAny:
+		return true
+	}
+	return false
+}
+
+// RoleReuseConfig restricts which producers' check results a worktree of
+// the role reuses. It is a policy for honest agents, not a security boundary.
+type RoleReuseConfig struct {
+	// ReuseTrust is same-worktree, same-role or any (default any).
+	ReuseTrust string `yaml:"reuse_trust"`
+	// ReuseExcludeRoles refuses results produced by other worktrees with
+	// these roles (for example a reviewer excluding implementation results).
+	ReuseExcludeRoles []string `yaml:"reuse_exclude_roles"`
+}
+
+// ImplementationRoleConfig controls implementation (author) worktrees.
+type ImplementationRoleConfig struct {
+	RoleReuseConfig `yaml:",inline"`
+}
+
+// Reuse returns the reuse policy declared for role ("" for none).
+func (r RolesConfig) Reuse(role string) RoleReuseConfig {
+	switch role {
+	case "implementation":
+		return r.Implementation.RoleReuseConfig
+	case "review":
+		return r.Review.RoleReuseConfig
+	}
+	return RoleReuseConfig{}
 }
 
 // ReviewRoleConfig controls review worktrees. Review worktrees prepare
@@ -388,6 +436,8 @@ type ReviewRoleConfig struct {
 	// EnvUnset removes inherited variables (for example production
 	// credentials) from commands Anvil runs in review worktrees.
 	EnvUnset []string `yaml:"env_unset"`
+
+	RoleReuseConfig `yaml:",inline"`
 }
 
 func (c *Config) validateRoles() error {
@@ -400,6 +450,17 @@ func (c *Config) validateRoles() error {
 	for _, name := range c.Roles.Review.EnvUnset {
 		if !IsValidEnvName(name) {
 			problems = append(problems, fmt.Errorf("roles.review.env_unset: invalid variable name %q", name))
+		}
+	}
+	for _, role := range []string{"implementation", "review"} {
+		reuse := c.Roles.Reuse(role)
+		if !ValidReuseTrust(reuse.ReuseTrust) {
+			problems = append(problems, fmt.Errorf("roles.%s.reuse_trust: invalid value %q (use same-worktree, same-role or any)", role, reuse.ReuseTrust))
+		}
+		for _, excluded := range reuse.ReuseExcludeRoles {
+			if excluded != "implementation" && excluded != "review" {
+				problems = append(problems, fmt.Errorf("roles.%s.reuse_exclude_roles: unknown role %q", role, excluded))
+			}
 		}
 	}
 	return errors.Join(problems...)

@@ -20,7 +20,11 @@ import (
 // all differing contents are identical; a dirty tree never shares a digest
 // with its clean HEAD.
 type WorkingState struct {
-	Head       string `json:"head"`
+	Head string `json:"head"`
+	// Tree is HEAD's tree object: the committed content independent of the
+	// commit (two commits with identical content share it). It is not part
+	// of Digest, so it never changes whether earlier results are current.
+	Tree       string `json:"tree,omitempty"`
 	Branch     string `json:"branch,omitempty"`
 	Dirty      bool   `json:"dirty"`
 	DirtyPaths int    `json:"dirty_paths"`
@@ -38,7 +42,11 @@ func ReadWorkingState(worktreePath string) (WorkingState, error) {
 	if err != nil {
 		return WorkingState{}, err
 	}
-	state := WorkingState{Head: head}
+	tree, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", head+"^{tree}").Output()
+	if err != nil {
+		return WorkingState{}, fmt.Errorf("resolving HEAD tree: %w", err)
+	}
+	state := WorkingState{Head: head, Tree: strings.TrimSpace(string(tree))}
 	if branch, err := exec.Command("git", "-C", worktreePath, "symbolic-ref", "--quiet", "--short", "HEAD").Output(); err == nil {
 		state.Branch = strings.TrimSpace(string(branch))
 	}

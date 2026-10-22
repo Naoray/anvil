@@ -120,3 +120,37 @@ func TestQueueTimeIsRecordedSeparately(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, ungated.QueuedMS)
 }
+
+// TestGatedReuseMissWarnsOnce: a queued reuse miss assesses the identity
+// twice, but each nonfatal identity warning is reported once.
+func TestGatedReuseMissWarnsOnce(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.bin"), "a")
+	withoutRacyMargin(t)
+	writeFile(t, filepath.Join(f.root, "cache", "resource-identity"), "not a directory")
+	check := config.CheckConfig{Name: "bench", Expensive: true, Reusable: true, Commands: cmds("true"), Resources: []string{"models"}}
+	request, manager := gatedRequest(f, check, 1)
+	request.Resources = []SharedResource{{Name: "models", Path: dir, Identity: config.SharedIdentity{Directory: true}}}
+	request.Reuse = true
+	var warnings []string
+	request.Warn = func(message string) { warnings = append(warnings, message) }
+	holder, err := manager.Acquire(context.Background(), slots.Request{Weight: 1, Check: "other"})
+	require.NoError(t, err)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		if err := holder.Release(); err != nil {
+			t.Errorf("release: %v", err)
+		}
+	}()
+	result, err := Run(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, StatusPassed, result.Status)
+	require.Greater(t, result.QueuedMS, int64(0), "the miss queued and was reassessed")
+	require.NotEmpty(t, warnings)
+	seen := map[string]bool{}
+	for _, warning := range warnings {
+		require.False(t, seen[warning], "duplicate warning %q in %v", warning, warnings)
+		seen[warning] = true
+	}
+}

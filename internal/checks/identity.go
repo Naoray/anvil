@@ -61,6 +61,18 @@ type Identity struct {
 	ResourcesDigest string             `json:"resources_digest"`
 	Platform        Platform           `json:"platform"`
 	Digest          string             `json:"identity_digest"`
+	// ContentEnvDigest covers only declared and Anvil-set variables (plus
+	// the check's identity_env), with worktree-specific values normalized
+	// (see contentEnvironmentDigest). It is independent of the worktree.
+	ContentEnvDigest string `json:"content_environment_digest,omitempty"`
+	// ContentToolchainDigest hashes the toolchain probes with this worktree's
+	// path, runtime directory and other worktree-specific values normalized
+	// as in the content environment. ToolchainDigest keeps the raw output.
+	ContentToolchainDigest string `json:"content_toolchain_digest,omitempty"`
+	// ContentDigest identifies the checked content independently of the
+	// worktree (see ContentDigest); empty for a dirty checkout, which is
+	// never reused across worktrees.
+	ContentDigest string `json:"content_digest,omitempty"`
 }
 
 // IdentityRequest describes what to identify.
@@ -147,6 +159,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 		toolFields = append(toolFields, probe.Command, probe.Output, fmt.Sprint(probe.ExitCode))
 	}
 	identity.ToolchainDigest = digestFields(toolFields...)
+	identity.ContentToolchainDigest = contentToolchainDigest(req, identity.Toolchain)
 
 	// Resolve exactly the environments execution uses, including inheritance.
 	targets := req.Targets
@@ -156,9 +169,10 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 			return Identity{}, err
 		}
 	}
-	var envFields []string
+	var envFields, contentFields []string
 	names := map[string]bool{}
 	for i, target := range targets {
+		contentFields = append(contentFields, fmt.Sprint(i), contentEnvironmentDigest(req, target))
 		fields := []string{target.Dir}
 		for _, variable := range target.Env.Variables() {
 			names[variable.Name] = true
@@ -176,6 +190,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 	}
 	sort.Strings(identity.EnvNames)
 	identity.EnvDigest = digestFields(envFields...)
+	identity.ContentEnvDigest = digestFields(append([]string{"anvil-check-content-env-v1"}, contentFields...)...)
 
 	paths, err := ResolvePaths(req.WorktreePath, req.RuntimeDir, req.Check.Inputs, envMap)
 	if err != nil {
@@ -201,6 +216,7 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 		fields = append(fields, "resources", identity.ResourcesDigest)
 	}
 	identity.Digest = digestFields(fields...)
+	identity.ContentDigest = ContentDigest(identity)
 	return identity, nil
 }
 
@@ -363,6 +379,8 @@ func fileDigest(path string) (string, int64, error) {
 
 // effectiveEnvironment snapshots inherited values once. Only hashes, names and
 // secret placeholders are persisted; execution uses this same in-memory set.
+// Inherited values are marked workenv.SourceInherited; declared and Anvil-set
+// variables keep their source.
 func effectiveEnvironment(env *workenv.Environment, unset, secrets []string) *workenv.Environment {
 	out := &workenv.Environment{}
 	for _, entry := range env.Environ(os.Environ(), unset, runtime.GOOS == "windows") {
@@ -370,7 +388,7 @@ func effectiveEnvironment(env *workenv.Environment, unset, secrets []string) *wo
 		if !ok {
 			continue
 		}
-		out.Set(workenv.Variable{Name: name, Value: value, Secret: workenv.IsSecretName(name, secrets)})
+		out.Set(workenv.Variable{Name: name, Value: value, Source: workenv.SourceInherited, Secret: workenv.IsSecretName(name, secrets)})
 	}
 	for _, variable := range env.Variables() {
 		variable.Secret = variable.Secret || workenv.IsSecretName(variable.Name, secrets)

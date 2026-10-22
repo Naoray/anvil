@@ -17,6 +17,7 @@ import (
 	"github.com/naoray/anvil/internal/agentapi"
 	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/dblifecycle"
 	"github.com/naoray/anvil/internal/git"
 	"github.com/naoray/anvil/internal/lockfile"
 	"github.com/naoray/anvil/internal/slots"
@@ -43,6 +44,21 @@ Expensive checks require naming them and --allow-expensive. Checks holding
 'locks' take exclusive machine-wide resource locks; a lock held by another
 live process fails fast unless --lock-wait is given. Locks are released only
 by their holder or when it exits, never because time passed.
+
+With --reuse, a check declared 'reusable' returns a current passing result
+instead of running: this worktree's latest, or a clean passing result another
+worktree of the project recorded at the same content identity (HEAD's tree,
+check definition, inputs, toolchain, platform, declared shared resources and
+declared environment; inherited variables count only for a short toolchain
+list (PATH, GOFLAGS, NODE_ENV, RUSTFLAGS, ...) or when named in the check's
+'identity_env', and worktree paths, IDs, ports and database names are
+normalized). Files Git does not track are not part of it: declare lockfiles
+and manifests as 'inputs'. Every result records its producer (worktree, role, lease owner);
+a reused one reports assessment.reused_from and is recorded in this worktree.
+--reuse-trust (same-worktree, same-role or any) and repeatable
+--reuse-exclude-role restrict producers; they default to
+roles.<role>.reuse_trust and reuse_exclude_roles, else any. Dirty checkouts,
+missing or changed artifacts and unregistered producers are never reused.
 
 Expensive checks (and checks declaring 'slots: N') also share a
 machine-wide slot semaphore across every project and worktree (see
@@ -87,7 +103,8 @@ type checkListData struct {
 
 type checkRunEntry struct {
 	*checks.Result
-	Reused bool `json:"reused"`
+	Reused     bool              `json:"reused"`
+	Assessment checks.Assessment `json:"assessment"`
 }
 
 type checkRunData struct {
@@ -291,6 +308,10 @@ func runChecks(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	if err != nil {
 		return agentResult{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
 	}
+	policy, err := checkReusePolicy(cmd, wenv)
+	if err != nil {
+		return agentResult{}, err
+	}
 	var slotWarnings []string
 	slot, err := checkSlotOptions(cmd, wenv, selected, func(warning string) { slotWarnings = append(slotWarnings, warning) })
 	if err != nil {
@@ -301,10 +322,16 @@ func runChecks(cmd *cobra.Command, args []string) (result agentResult, runErr er
 	defer stop()
 	summary, warnings := summarizeWorktree(wenv.Worktree)
 	warnings = append(warnings, wenv.Warnings...)
+	commonDir, err := dblifecycle.CommonDir(wenv.Worktree.Path)
+	if err != nil {
+		warnings = append(warnings, "reuse across worktrees unavailable: "+err.Error())
+		commonDir = ""
+	}
+	run := checkRunOptions{lockWait: lockWait, policy: policy, commonDir: commonDir, producer: checkProducer(wenv), slot: slot}
 	data := checkRunData{Worktree: summary, Results: []checkRunEntry{}}
 	var failure error
 	for _, check := range selected {
-		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, lockWait, slot)
+		entry, warning, err := runOneCheck(ctx, cmd, wenv, check, run)
 		for _, slotWarning := range slotWarnings {
 			warnings = append(warnings, fmt.Sprintf("check %s: %s", check.Name, slotWarning))
 		}
@@ -335,9 +362,57 @@ func checkFailure(result *checks.Result) error {
 		Details: map[string]any{"check": result.Check, "status": result.Status, "run_id": result.RunID}}
 }
 
-func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration, slot checks.SlotOptions) (checkRunEntry, string, error) {
+// checkRunOptions are the per-invocation settings shared by every check run.
+type checkRunOptions struct {
+	lockWait  time.Duration
+	policy    checks.ReusePolicy
+	commonDir string
+	producer  checks.Producer
+	slot      checks.SlotOptions
+}
+
+// checkReusePolicy combines roles.<role>.reuse_trust and reuse_exclude_roles
+// for this worktree's role with the flags: --reuse-trust replaces the
+// configured trust level, --reuse-exclude-role adds to the configured
+// exclusions. The default trusts any worktree of the project.
+func checkReusePolicy(cmd *cobra.Command, wenv *worktreeEnv) (checks.ReusePolicy, error) {
+	declared := wenv.PC.Config.Roles.Reuse(wenv.Metadata.Role)
+	policy := checks.ReusePolicy{Trust: declared.ReuseTrust, ExcludeRoles: append([]string{}, declared.ReuseExcludeRoles...)}
+	if trust := mustGetString(cmd, "reuse-trust"); trust != "" {
+		if !config.ValidReuseTrust(trust) {
+			return checks.ReusePolicy{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "invalid --reuse-trust %q (use same-worktree, same-role or any)", trust)
+		}
+		policy.Trust = trust
+	}
+	excluded, err := cmd.Flags().GetStringArray("reuse-exclude-role")
+	if err != nil {
+		return checks.ReusePolicy{}, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	}
+	for _, role := range excluded {
+		if !wtstate.ValidRole(role) {
+			return checks.ReusePolicy{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "invalid --reuse-exclude-role %q (use implementation or review)", role)
+		}
+		policy.ExcludeRoles = append(policy.ExcludeRoles, role)
+	}
+	if policy.Trust == "" {
+		policy.Trust = checks.TrustAny
+	}
+	return policy, nil
+}
+
+// checkProducer describes this worktree on the results it records.
+func checkProducer(wenv *worktreeEnv) checks.Producer {
+	producer := checks.Producer{WorktreeID: wenv.Identity.ID, Path: wenv.Worktree.Path, Role: wenv.Metadata.Role}
+	if wenv.Lease.State(time.Now()) == wtstate.LeaseActive {
+		producer.LeaseOwner = wenv.Lease.Owner
+	}
+	return producer
+}
+
+func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, run checkRunOptions) (checkRunEntry, string, error) {
 	warning := ""
 	var cacheWarnings []string
+	slot := run.slot
 	if slot.Manager != nil && !mustGetBool(cmd, "quiet") {
 		slot.Progress = slotProgress(check.Name)
 	}
@@ -345,6 +420,9 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		Check:       check,
 		Reuse:       mustGetBool(cmd, "reuse"),
 		ReuseMiss:   func(reason string) { warning = fmt.Sprintf("check %s not reused: %s", check.Name, reason) },
+		Producer:    run.producer,
+		ReusePolicy: run.policy,
+		CommonDir:   run.commonDir,
 		Worktree:    checks.WorktreeRef{ID: wenv.Identity.ID, Path: wenv.Worktree.Path, Branch: wenv.Worktree.Branch},
 		RuntimeDir:  wenv.Directories.Root,
 		RuntimeRoot: wenv.RuntimeRoot,
@@ -353,7 +431,7 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 			return resolveCheckCommand(wenv, command)
 		},
 		Output:       checkOutput(cmd),
-		LockWait:     lockWait,
+		LockWait:     run.lockWait,
 		AnvilVersion: Version,
 		Unset:        wenv.Unset,
 		SecretEnv:    wenv.PC.Config.SecretEnv,
@@ -387,7 +465,14 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 	case err != nil:
 		warning = fmt.Sprintf("check %s: %v", check.Name, err)
 	}
-	return checkRunEntry{Result: result, Reused: result.Reused}, warning, nil
+	return checkRunEntry{Result: result, Reused: result.Reused, Assessment: checks.Assess(result, result.Identity)}, warning, nil
+}
+
+func nonEmptyOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func nonEmpty(values ...string) []string {
@@ -437,7 +522,9 @@ func printCheckHuman(result agentResult) error {
 			state := "never run"
 			if check.Latest != nil {
 				state = check.Latest.Status
-				if check.Assessment.Current {
+				if check.Assessment.Current && check.Assessment.ReusedFrom != nil {
+					state += ", current (reused from " + check.Assessment.ReusedFrom.Path + ")"
+				} else if check.Assessment.Current {
 					state += ", current"
 				} else {
 					state += fmt.Sprintf(", stale: %v", check.Assessment.Reasons)
@@ -452,7 +539,9 @@ func printCheckHuman(result agentResult) error {
 	case checkRunData:
 		for _, entry := range data.Results {
 			label := entry.Status
-			if entry.Reused {
+			if from := entry.Assessment.ReusedFrom; entry.Reused && from != nil && from.WorktreeID != entry.Worktree.ID {
+				label += fmt.Sprintf(" (reused %s from %s, %s)", from.RunID, from.Path, nonEmptyOr(from.Role, "no role"))
+			} else if entry.Reused {
 				label += " (reused " + entry.RunID + ")"
 			}
 			ui.PrintInfo(fmt.Sprintf("%s: %s in %dms", entry.Check, label, entry.DurationMS))
@@ -488,7 +577,9 @@ func init() {
 	checkCmd.Flags().Bool("list", false, "List checks with their latest result and whether it is current (read-only)")
 	checkCmd.Flags().String("worktree", "", "Worktree to check (exact name, branch, path or ID; default: current)")
 	checkCmd.Flags().Bool("allow-expensive", false, "Allow running checks marked expensive")
-	checkCmd.Flags().Bool("reuse", false, "Return a current passing result of a reusable check instead of rerunning")
+	checkCmd.Flags().Bool("reuse", false, "Return a current passing result of a reusable check (this worktree's, or another worktree's at the same content) instead of rerunning")
+	checkCmd.Flags().String("reuse-trust", "", "Producers whose results --reuse accepts: same-worktree, same-role or any (default: roles.<role>.reuse_trust, else any)")
+	checkCmd.Flags().StringArray("reuse-exclude-role", nil, "Refuse results produced by other worktrees with this role (repeatable; adds to roles.<role>.reuse_exclude_roles)")
 	checkCmd.Flags().Duration("lock-wait", 0, "Wait this long for busy resource locks (default: fail immediately)")
 	checkCmd.Flags().Int("priority", 0, "Machine-wide slot queue priority for expensive checks (higher first; FIFO within a priority)")
 	checkCmd.Flags().Duration("slot-wait", 0, "Wait at most this long for a machine-wide check slot (0, the default, waits until interrupted — unlike --lock-wait 0, which fails immediately)")

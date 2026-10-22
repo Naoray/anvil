@@ -137,8 +137,10 @@ func (p *runtimeCleanupPlan) stopProcesses(cfg *config.Config) ([]processStatus,
 }
 
 // release frees ports and deletes the owned runtime directory after the
-// worktree itself has been removed.
-func (p *runtimeCleanupPlan) release() error {
+// worktree itself has been removed. Reuse index entries are removed best
+// effort: a problem there (a busy index lock) goes to warn, never fails the
+// removal, because lookups ignore entries of removed worktrees anyway.
+func (p *runtimeCleanupPlan) release(warn func(string)) error {
 	if p.Skipped != "" || p.WorktreeID == "" {
 		return nil
 	}
@@ -155,6 +157,12 @@ func (p *runtimeCleanupPlan) release() error {
 	if p.RuntimeDir != "" {
 		if _, err := resources.RemoveDirectories(p.root, p.runtimeOwner); err != nil {
 			problems = append(problems, err)
+		}
+	}
+	// Reuse index entries point into the released runtime directory.
+	if p.root != "" {
+		if err := checks.ForgetWorktree(p.root, p.WorktreeID); err != nil && warn != nil {
+			warn(fmt.Sprintf("Warning: reuse index entries were left in place: %v", err))
 		}
 	}
 	return errors.Join(problems...)

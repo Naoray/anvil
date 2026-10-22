@@ -193,6 +193,9 @@ type statusCheck struct {
 	Current           bool     `json:"current"`
 	PassingAndCurrent bool     `json:"passing_and_current"`
 	StaleReasons      []string `json:"stale_reasons"`
+	// ReusedFrom names the producing run when the latest result was reused
+	// from another worktree.
+	ReusedFrom *checks.ReusedFrom `json:"reused_from"`
 }
 
 type cleanupPreview struct {
@@ -310,6 +313,7 @@ func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 				if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check, memo)); err == nil {
 					assessment := checks.Assess(latest, identity)
 					entry.Current, entry.PassingAndCurrent, entry.StaleReasons = assessment.Current, assessment.PassingAndCurrent, assessment.Reasons
+					entry.ReusedFrom = assessment.ReusedFrom
 				} else {
 					warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
 					entry.StaleReasons = []string{"identity unavailable: " + err.Error()}

@@ -610,6 +610,8 @@ Named checks with trustworthy provenance:
 anvil check fast --json                           # commit, dirty-state digest, toolchain, artifacts
 anvil check --list --json                         # is the latest result still current? why not?
 anvil check benchmark --allow-expensive --reuse   # exclusive `locks`, conservative reuse
+anvil check fast --reuse --json                   # reuse a matching author's pass in a review worktree
+anvil check fast --reuse --reuse-exclude-role implementation   # rerun author results for an independent review
 anvil check e2e --allow-expensive --priority 5    # queue for a machine-wide slot, ahead of priority 0
 anvil slots --json                                # slot capacity, load, holders and queue (read-only)
 ```
@@ -631,6 +633,19 @@ checks:
   max_load: 6.0   # also wait while the 1-minute load average exceeds this (optional)
   load_wait: 2m   # ...for at most this long, then proceed with a warning
 ```
+
+`--reuse` on a `reusable: true` check also accepts a clean passing result from
+another worktree of the project at the same *content identity*: HEAD's tree,
+check definition, inputs, toolchain, platform, declared shared resources and
+declared environment (inherited variables such as agent session IDs are
+ignored; a short list of toolchain variables such as `PATH`, `GOFLAGS`,
+`NODE_ENV` and `RUSTFLAGS` and any named in `identity_env` count; worktree
+paths, IDs, ports and database names are normalized). Content outside Git
+(`vendor/`, `node_modules/`, generated `.env`) is not part of it: declare
+lockfiles and manifests as `inputs` and add `toolchain` probes. Results record their `producer` (worktree, role, lease
+owner); a reused result reports `assessment.reused_from`. Restrict producers
+with `--reuse-trust same-worktree|same-role|any` or `roles.<role>.reuse_trust`
+and `reuse_exclude_roles` (default: any).
 
 A check that declares `resources: [models]` records that shared resource's
 `identity` (a manifest `file`, a `command`'s stdout, or a cached `directory`

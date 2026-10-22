@@ -240,6 +240,7 @@ checks:
   benchmark:
     expensive: true          # never implicit; needs --allow-expensive
     reusable: true           # allows --reuse of a current passing result
+    identity_env: [CUDA_VISIBLE_DEVICES]  # inherited values that matter across worktrees
     locks: [gpu]             # exclusive machine-wide resource
     slots: 2                 # weight in the machine-wide slot semaphore (expensive default: 1)
     inputs: ["${ANVIL_ARTIFACTS_DIR}/recordings", eval/contract.yaml]
@@ -356,7 +357,23 @@ A scoring check that declares the recordings and its scoring contract as
 `inputs` gets a new identity whenever either changes, so recordings can be
 rescored under a new contract without re-recording. Anvil does not infer
 compatibility beyond these explicit identities (see `examples/gaze-like`).
-Reuse is per worktree.
+
+**Reuse across worktrees.** When this worktree has no current pass, `--reuse`
+also accepts a clean passing result another worktree of the same repository
+recorded at the same content identity (`identity.content_digest`: HEAD's
+`tree`, the definition, inputs, toolchain, platform, shared resources and the
+declared environment with worktree paths, IDs, ports and database names
+normalized; inherited variables count only for a short toolchain list such as
+`PATH`, `GOFLAGS` and `NODE_ENV`, or when named in `identity_env`). Files Git
+does not track (`vendor/`, `node_modules/`, generated `.env`) are not part of
+it; declare the lockfiles and manifests that determine them as `inputs`. The
+result is revalidated against the producer's records (still registered, same
+identity, clean, intact artifacts) and recorded in this worktree with
+`reused_from`. `roles.<role>.reuse_trust` (`same-worktree`, `same-role`,
+`any`; default `any`) and `roles.<role>.reuse_exclude_roles` restrict
+producers, as do `--reuse-trust` and `--reuse-exclude-role`. See
+[agent-api.md](agent-api.md#reuse-across-worktrees) for the normalization
+rules and index layout.
 
 Check `inputs` and `artifacts` must resolve inside the worktree or its runtime
 directory. Symlinks are rejected, including links to other files inside those

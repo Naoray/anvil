@@ -195,18 +195,21 @@ Run:
       "started_at": "…", "finished_at": "…", "duration_ms": 812, "queued_ms": 0,
       "worktree": {"id": "wt_…", "path": "…", "branch": "feature/x"},
       "identity": {
-        "git": {"head": "<sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
+        "git": {"head": "<sha>", "tree": "<tree sha>", "branch": "feature/x", "dirty": false, "dirty_paths": 0, "state_digest": "<sha256>"},
         "definition_digest": "…", "toolchain": [{"command": "cargo --version", "output": "cargo 1.82.0", "exit_code": 0}],
         "toolchain_digest": "…", "environment_names": ["ANVIL_WORKTREE_ID", "…"], "environment_digest": "…",
         "inputs": [], "inputs_digest": "…",
         "resources": [{"name": "models", "path": "/…/models", "state": "present", "method": "file", "source": "SHA256SUMS", "digest": "…"}],
         "resources_digest": "…", "platform": {"os": "darwin", "arch": "arm64"},
-        "identity_digest": "…"
+        "identity_digest": "…",
+        "content_environment_digest": "…", "content_toolchain_digest": "…", "content_digest": "…"
       },
       "commands": [{"run": "cargo test --lib", "dir": "…", "exit_code": 0, "duration_ms": 800, "log": "…/command-00.log"}],
       "artifacts": [{"path": "…", "sha256": "…", "size": 123}],
       "locks": [], "anvil_version": "…", "run_dir": "…",
-      "reused": false
+      "producer": {"worktree_id": "wt_…", "path": "…", "role": "implementation", "lease_owner": "codex"},
+      "reused": false,
+      "assessment": {"current": true, "passing_and_current": true, "stale_reasons": [], "reused_from": null}
     }
   ]
 }
@@ -246,10 +249,12 @@ is reported as a warning, never as an identity failure. Results recorded before 
 
 List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
 `locks`, `commands`, `latest` (a result or `null`), `assessment`
-(`current`, `passing_and_current`, `stale_reasons[]`), `lock_holders[]` and
+(`current`, `passing_and_current`, `stale_reasons[]`, `reused_from`),
+`lock_holders[]` and
 `slots` (`null` for checks that take no slot, otherwise `{weight, capacity,
 in_use, queued, holders[], queue[], queue_busy}`: machine-wide counts plus this
-check's own slot holders and queue entries, shaped as in `anvil slots`). When
+check's own slot holders and queue entries, shaped as in `anvil slots`). `status`
+reports the same `reused_from` per check. When
 `queue_busy` is true, `queued`, `holders` and `queue` are `null` because the
 snapshot is unavailable.
 
@@ -318,9 +323,143 @@ Keep `checks.slots` and `ANVIL_CHECK_SLOTS` consistent.
 - **Timing.** Results carry `queued_ms`, the slot queue wait (`0` for
   ungated checks); `started_at` and `duration_ms` exclude it.
 
+Every result records its `producer`: the worktree ID and path that recorded
+it, its `role` (when set) and the `owner` of its active lease (when leased).
+Results recorded before producers existed decode with `producer: null`. Roles
+and lease owners are declared metadata, not authentication.
+
+### Reuse across worktrees
+
+`--reuse` returns a passing result instead of running a check declared
+`reusable: true`, from one of two places:
+
+1. This worktree's latest result, when its full identity (`identity_digest`)
+   is current and its artifacts are intact (unchanged since 1.x).
+2. Otherwise, a clean passing result another worktree of the same project
+   (same canonical Git common directory) recorded at the same **content
+   identity** (`identity.content_digest`).
+
+The content identity covers HEAD's `tree` (not the commit, so the same
+content on another commit matches) and a clean checkout, the check definition
+(`definition_digest`: commands, inputs, toolchain and resource declarations),
+`inputs_digest` (paths relative to the worktree or `${ANVIL_RUNTIME_DIR}`),
+`content_toolchain_digest` (toolchain probe output with the worktree path,
+runtime directory and the other values below normalized; the exact
+`toolchain_digest` keeps the raw output), the platform, `resources_digest`
+and `content_environment_digest`. It is empty for a dirty checkout: a dirty
+producer never feeds the index and a dirty consumer never reuses another
+worktree's result. A run whose commands change the working tree (the state
+re-read after the run differs from the recorded one) is not offered to other
+worktrees either; a warning says so.
+
+Content outside Git is **not** part of the identity: ignored or untracked
+dependency trees (`vendor/`, `node_modules/`), generated `.env` files, build
+caches and anything else Git does not track. Declare the files that determine
+them, such as lockfiles and manifests (`composer.lock`, `package-lock.json`,
+`Cargo.lock`, a generated `.env`), as `inputs`, and add `toolchain` probes
+(`node --version`, `php -v`) for tools resolved outside the tree.
+
+`content_environment_digest` covers each command's directory and its
+declared and Anvil-set variables (project, component, resource, database
+and command `env` values). Inherited process variables count only when they
+are in this short default list of toolchain-affecting variables, and are
+set: `PATH` (entries inside the worktree normalized), `GOFLAGS`, `GOOS`,
+`GOARCH`, `CGO_ENABLED`, `NODE_OPTIONS`, `NODE_ENV`, `RUSTFLAGS`,
+`CARGO_BUILD_TARGET`, `PHP_INI_SCAN_DIR` and `CI`. `PATH` must match exactly
+apart from entries inside the worktree, so agents that prepend per-session
+directories to `PATH` do not share results; a miss reporting "no producer
+recorded at this content identity" usually means the environment, `PATH` or
+toolchain differ — compare the `content_*_digest` fields of both identities.
+They change what common
+toolchains build or how test runners behave, while agent and session
+variables (`CLAUDE_SESSION_ID`, terminal and shell state) do not and are
+ignored. A check extends the list with `identity_env: [NAME]`; every other
+inherited variable is ignored, so prefer declaring values in `env` and
+recording tool versions with `toolchain` probes. Secret values stay
+placeholders. Worktree-specific Anvil values are normalized before hashing;
+each one is safe because it names or isolates the worktree rather than
+describing what was validated:
+
+| Value | Placeholder | Matching |
+|-------|-------------|----------|
+| worktree path (`ANVIL_WORKTREE_PATH`, command dirs) | `${ANVIL_WORKTREE}` | at path boundaries; inputs and artifacts are already worktree-relative |
+| runtime directory (`ANVIL_RUNTIME_DIR` and the standard dirs below it) | `${ANVIL_RUNTIME_DIR}` | at path boundaries |
+| `ANVIL_WORKTREE_ID`, `ANVIL_INSTANCE` | `${ANVIL_WORKTREE_ID}`, `${ANVIL_INSTANCE}` | whole identifiers |
+| `ANVIL_WORKTREE_NAME`, `ANVIL_BRANCH` | `${ANVIL_WORKTREE_NAME}`, `${ANVIL_BRANCH}` | that variable only (names are not unique) |
+| each reserved port `ANVIL_PORT_<NAME>` (and its `env` alias) | `${ANVIL_PORT_<NAME>}` | whole numbers, e.g. inside `APP_URL` |
+| `ANVIL_DB_DATABASE`, `ANVIL_TEST_DB_DATABASE` | `${ANVIL_DB_DATABASE}`, `${ANVIL_TEST_DB_DATABASE}` | whole identifiers, so `DB_DATABASE` or DSNs derived from them match |
+
+Only the consumer's own values are rewritten: a declared value naming
+another worktree's path stays literal. `ANVIL_WORKTREE_NAME` and
+`ANVIL_BRANCH` are replaced only as whole variables, so a declared value
+derived from them (`APP_NAME: demo-${ANVIL_WORKTREE_NAME}`) differs between
+worktrees and prevents reuse; derive such values from `${ANVIL_INSTANCE}`
+instead. Database normalization assumes each
+worktree's database comes from the same declared preparation; a check whose
+outcome depends on undeclared database contents must not be `reusable`.
+
+Whenever a reusable check passes on a clean checkout, Anvil writes an index
+entry `<runtime root>/reuse/<sha256(common dir)>/<check>/<content digest>/<worktree id>.json`
+pointing at that run's `result.json`. A lookup revalidates every entry and
+skips it, with a reason, unless: the result lies inside
+`<runtime root>/worktrees/<producer id>/`; it passed, was not itself reused,
+and its recorded identity was clean and recomputes to the same content digest;
+the producer is still a registered worktree of this repository whose
+`.anvil.local` identity has the same ID; the trust policy admits the producer;
+and every recorded artifact still has its digest. A failed validation is a
+miss (a `check <name> not reused: this worktree: …; other worktrees: …`
+warning, then the check runs), never an error; with no entry at all the
+reason is `no producer recorded at this content identity`. An entry whose
+result file no longer exists (pruned run) is removed by the lookup, and
+removing a worktree (`remove`, `prune`, `unlink` runtime cleanup) removes all
+of its entries. Index changes take a per-check index lock (a leaf lock;
+lookups read entries without it because entries are replaced atomically).
+
+Trust model: the index and the results it points at are trusted as written by
+the same user's Anvil processes. Validation guards against stale state and
+honest mistakes, not against a user forging records; roles, lease owners and
+the trust policy below are a coordination aid for honest agents, not a
+security boundary.
+
+A cross-worktree hit runs nothing and writes a record into the consumer's own
+store: the consumer's identity, `status: "passed"`, no `commands`, the
+producer's `artifacts`, the consumer as `producer`, and
+`reused_from: {worktree_id, path, role, lease_owner, run_id, check}` naming the
+producing run. `check --list` and `status` in the consumer therefore report it
+current with `assessment.reused_from`; a later `--reuse` there returns that
+record (if the policy still admits its producer).
+
+Where `reused_from` appears: run output (`check --reuse`) carries
+`assessment.reused_from` whenever `reused` is true, including same-worktree
+reuse, where it names this worktree's own earlier run; it is `null` for
+executed runs. `check --list` and `status` show the stored record, so they
+report `reused_from` only for consumer records reused from another worktree
+(same-worktree reuse writes no new record and shows `null` there).
+
+Trust policy: `--reuse-trust same-worktree|same-role|any` (default
+`roles.<role>.reuse_trust`, else `any` for every role, so a fresh review
+worktree reuses an author's pass) and `--reuse-exclude-role ROLE`
+(repeatable) added to `roles.<role>.reuse_exclude_roles`. `same-role`
+compares the recorded producer role with this worktree's role (unlabelled
+worktrees match each other). Exclusions never apply to a worktree's own
+results. The flag replaces the configured trust level but cannot remove
+configured exclusions. Invalid values return `invalid_arguments`.
+
+```yaml
+roles:
+  review:
+    reuse_trust: any                       # same-worktree | same-role | any
+    reuse_exclude_roles: [implementation]  # independent reviewers rerun author results
+checks:
+  fast:
+    reusable: true
+    identity_env: [RUSTFLAGS]              # inherited values that matter
+```
+
 Check identities fingerprint each resolved command directory and effective
 non-secret environment, including component values, expanded command overrides
-and inherited process variables. Execution receives the same snapshot. Values
+and inherited process variables (the content identity used across worktrees
+excludes inherited variables; see above). Execution receives the same snapshot. Values
 are never stored. Names marked by `secret_env` or Anvil's secret-name heuristic
 contribute a placeholder, so changing only a secret does not invalidate reuse.
 
@@ -349,7 +488,8 @@ worktree and its Git directory. Gate files are never deleted.
 
 Lock order is lifecycle gate → preparation lock → repository database lock →
 check active lock → machine-wide check slots → resource locks sorted by name →
-run lock → `.anvil.local` state lock. A queued check holds no resource lock;
+run lock → `.anvil.local` state lock. The reuse index lock is a leaf lock:
+nothing else is acquired while it is held. A queued check holds no resource lock;
 the slot queue file lock is held only briefly and never while waiting. One
 exception: on a `--reuse` miss a gated check, while still holding its resource
 locks, waits up to 2s for the queue file lock and makes one non-blocking slot

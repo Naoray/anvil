@@ -349,7 +349,7 @@ func runRemoveLifecycle(
 			deps.printInfoMessage(line)
 		}
 	}
-	if err := runtimePlan.release(); err != nil {
+	if err := runtimePlan.release(deps.printInfoMessage); err != nil {
 		return fmt.Errorf("worktree removed, but runtime cleanup failed: %w", err)
 	}
 	return nil

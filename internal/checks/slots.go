@@ -51,15 +51,22 @@ func (r RunRequest) slotGated() bool {
 type reuseAssessment struct {
 	Targets  []CommandTarget
 	Identity Identity
-	// Reused is a current passing result returned instead of running.
+	// Reused is a passing result that stands in for running: this
+	// worktree's own, or another worktree's at the same content identity
+	// (Reused.Worktree differs from the run's; Run then records it here).
 	Reused *Result
-	// Reason explains a miss (only with RunRequest.Reuse).
+	// ReusedFrom names the run that produced Reused.
+	ReusedFrom *ReusedFrom
+	// Reason explains a miss (only with RunRequest.Reuse); it combines this
+	// worktree's and other worktrees' reasons.
 	Reason string
 }
 
 // assessReuse is the single entry point that resolves command targets,
-// computes the identity under the given guards and, with req.Reuse, decides
-// whether a stored result can be returned instead of running.
+// computes the identity under the given guards (including declared shared
+// resources, writing the directory identity cache, and the content identity)
+// and, with req.Reuse, decides through findReusable whether a stored result
+// of this or another worktree can be returned instead of running.
 func assessReuse(ctx context.Context, req RunRequest, store Store, guards []*lockfile.Lock) (reuseAssessment, error) {
 	identityReq := IdentityRequest{Guards: guards, WorktreePath: req.Worktree.Path, RuntimeDir: req.RuntimeDir, Check: req.Check,
 		Env: req.Env, Resolve: req.Resolve, Unset: req.Unset, SecretEnv: req.SecretEnv,
@@ -77,14 +84,12 @@ func assessReuse(ctx context.Context, req RunRequest, store Store, guards []*loc
 	if !req.Reuse {
 		return assessment, nil
 	}
-	reused, reason, err := store.reusable(req.Check, identity)
+	lookup := reuseLookup{Store: store, Index: req.reuseIndex(), Self: *req.producer(), Policy: req.ReusePolicy}
+	reused, from, reason, err := findReusable(ctx, lookup, req.Check, identity)
 	if err != nil {
 		return reuseAssessment{}, fmt.Errorf("assessing reuse: %w", err)
 	}
-	if reused != nil {
-		reused.Reused = true
-	}
-	assessment.Reused, assessment.Reason = reused, reason
+	assessment.Reused, assessment.ReusedFrom, assessment.Reason = reused, from, reason
 	return assessment, nil
 }
 
@@ -128,6 +133,9 @@ func (a *admission) release() error {
 // changed while it waited.
 func admit(ctx context.Context, req RunRequest, store Store, gate, active *lockfile.Lock, runID string) (*admission, error) {
 	a := &admission{}
+	// A queued reuse miss assesses the identity twice; report each nonfatal
+	// identity warning (for example an unwritable resource cache) once.
+	req.Warn = warnOnce(req.Warn)
 	slotReq := slotRequest(req, runID)
 	if req.slotGated() && req.Reuse {
 		locks, err := takeResourceLocks(ctx, req, runID)
@@ -183,24 +191,28 @@ func takeResourceLocks(ctx context.Context, req RunRequest, runID string) (heldL
 // slotRequest describes the run to the slot queue. Warnings repeated by the
 // non-blocking attempt and the queued one are reported once.
 func slotRequest(req RunRequest, runID string) slots.Request {
-	warn := req.Slot.Warn
-	if warn != nil {
-		var mu sync.Mutex
-		seen := map[string]bool{}
-		next := warn
-		warn = func(message string) {
-			mu.Lock()
-			repeated := seen[message]
-			seen[message] = true
-			mu.Unlock()
-			if !repeated {
-				next(message)
-			}
-		}
-	}
+	warn := warnOnce(req.Slot.Warn)
 	return slots.Request{
 		Weight: SlotWeight(req.Check), Priority: req.Slot.Priority, Check: req.Check.Name,
 		Worktree: req.Worktree.Path, WorktreeID: req.Worktree.ID, RunID: runID,
 		Wait: req.Slot.Wait, Progress: req.Slot.Progress, Warn: warn,
+	}
+}
+
+// warnOnce forwards each distinct message to warn once (nil stays nil).
+func warnOnce(warn func(string)) func(string) {
+	if warn == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	return func(message string) {
+		mu.Lock()
+		repeated := seen[message]
+		seen[message] = true
+		mu.Unlock()
+		if !repeated {
+			warn(message)
+		}
 	}
 }

@@ -77,6 +77,13 @@ type Result struct {
 	Locks            []string        `json:"locks"`
 	AnvilVersion     string          `json:"anvil_version"`
 	RunDir           string          `json:"run_dir"`
+	// Producer is the worktree that recorded this result (null for results
+	// recorded before producers were tracked).
+	Producer *Producer `json:"producer"`
+	// ReusedFrom is set on a record that reused another worktree's run
+	// instead of executing: it names the run whose commands produced the
+	// outcome. It is also set, in memory only, on same-worktree reuse.
+	ReusedFrom *ReusedFrom `json:"reused_from,omitempty"`
 }
 
 // Store persists results in a worktree's runtime directory.
