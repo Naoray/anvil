@@ -257,6 +257,7 @@ func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 
 	if wenv.Directories != nil {
 		store := checks.Store{RuntimeDir: wenv.Directories.Root}
+		memo := checks.NewResourceMemo()
 		for _, check := range wenv.PC.Config.Checks {
 			entry := statusCheck{Name: check.Name, Status: "never_run", StaleReasons: []string{}}
 			latest, err := store.Latest(check.Name)
@@ -265,11 +266,12 @@ func runStatus(cmd *cobra.Command, args []string) (agentResult, error) {
 			}
 			if latest != nil {
 				entry.Status, entry.RunID = latest.Status, latest.RunID
-				if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check)); err == nil {
+				if identity, err := checks.ComputeIdentity(cmd.Context(), checkIdentityRequest(wenv, check, memo)); err == nil {
 					assessment := checks.Assess(latest, identity)
 					entry.Current, entry.PassingAndCurrent, entry.StaleReasons = assessment.Current, assessment.PassingAndCurrent, assessment.Reasons
 				} else {
-					warnings = append(warnings, err.Error())
+					warnings = append(warnings, fmt.Sprintf("check %s: %v", check.Name, err))
+					entry.StaleReasons = []string{"identity unavailable: " + err.Error()}
 				}
 			}
 			data.Checks = append(data.Checks, entry)

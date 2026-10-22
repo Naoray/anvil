@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,9 +31,11 @@ var checkCmd = &cobra.Command{
 
 Each result records the commit, whether the tree was dirty (and a digest of
 the exact uncommitted contents), the check definition, toolchain probe output,
-an environment digest, declared inputs, exit status, duration, logs and
-produced artifacts. 'anvil check --list' reports, for the latest result of
-each check, whether it is still current for the checkout and why not.
+an environment digest, declared inputs, the identity of declared shared
+'resources', exit status, duration, logs and produced artifacts. 'anvil
+check --list' reports, for the latest result of each check, whether it is
+still current for the checkout and why not (for example 'shared resource
+"models" changed').
 
 Without CHECK, every check not marked expensive runs in declaration order.
 Expensive checks require naming them and --allow-expensive. Checks holding
@@ -126,15 +129,37 @@ func checkContext(cmd *cobra.Command, mutate bool) (wenv *worktreeEnv, held *loc
 	return wenv, gate, nil
 }
 
-func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig) checks.IdentityRequest {
+// checkIdentityRequest builds a read-only identity request: the directory
+// identity cache is read but never written, and memo shares resource
+// identities between the checks of one invocation.
+func checkIdentityRequest(wenv *worktreeEnv, check config.CheckConfig, memo *checks.ResourceMemo) checks.IdentityRequest {
 	request := checks.IdentityRequest{WorktreePath: wenv.Worktree.Path, Check: check, Env: wenv.Env, Unset: wenv.Unset, SecretEnv: wenv.PC.Config.SecretEnv,
 		Resolve: func(command config.CheckCommand) (checks.CommandTarget, error) {
 			return resolveCheckCommand(wenv, command)
-		}}
+		}, Resources: checkSharedResources(wenv), RuntimeRoot: wenv.RuntimeRoot, Memo: memo}
 	if wenv.Directories != nil {
 		request.RuntimeDir = wenv.Directories.Root
 	}
 	return request
+}
+
+// checkSharedResources pairs declared shared resources with their resolved
+// paths. A path that could not be resolved stays empty and fails identity
+// computation for checks that declare the resource.
+func checkSharedResources(wenv *worktreeEnv) []checks.SharedResource {
+	paths := map[string]string{}
+	for _, status := range wenv.Shared {
+		paths[status.Name] = status.Path
+	}
+	out := make([]checks.SharedResource, 0, len(wenv.PC.Config.Resources.Shared))
+	for _, shared := range wenv.PC.Config.Resources.Shared {
+		resource := checks.SharedResource{Name: shared.Name, Path: paths[shared.Name], Required: shared.Required}
+		if shared.Identity != nil {
+			resource.Identity = *shared.Identity
+		}
+		out = append(out, resource)
+	}
+	return out
 }
 
 func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr error) {
@@ -152,6 +177,7 @@ func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr
 	if err != nil {
 		return agentResult{Data: data}, err
 	}
+	memo := checks.NewResourceMemo()
 	for _, check := range selected {
 		entry := checkSummary{Name: check.Name, Description: check.Description, Expensive: check.Expensive, Reusable: check.Reusable,
 			Locks: append([]string{}, check.Locks...), Commands: []string{}, LockHolders: []*checks.LockHolder{}}
@@ -166,7 +192,7 @@ func runCheckList(cmd *cobra.Command, args []string) (result agentResult, runErr
 		}
 		if entry.Latest == nil {
 			entry.Assessment = checks.Assess(nil, checks.Identity{})
-		} else if identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check)); err != nil {
+		} else if identity, err := checks.ComputeIdentity(ctx, checkIdentityRequest(wenv, check, memo)); err != nil {
 			if ctx.Err() != nil {
 				return agentResult{Data: data, Warnings: warnings}, &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: 130, Message: "check inspection interrupted", Cause: ctx.Err()}
 			}
@@ -273,6 +299,7 @@ func checkFailure(result *checks.Result) error {
 
 func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, check config.CheckConfig, lockWait time.Duration) (checkRunEntry, string, error) {
 	warning := ""
+	var cacheWarnings []string
 	result, err := checks.Run(ctx, checks.RunRequest{
 		Check:       check,
 		Reuse:       mustGetBool(cmd, "reuse"),
@@ -289,8 +316,14 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		AnvilVersion: Version,
 		Unset:        wenv.Unset,
 		SecretEnv:    wenv.PC.Config.SecretEnv,
+		Resources:    checkSharedResources(wenv),
+		Warn:         func(message string) { cacheWarnings = append(cacheWarnings, message) },
 	})
+	if len(cacheWarnings) > 0 {
+		warning = strings.Join(append(nonEmpty(warning), cacheWarnings...), "; ")
+	}
 	var busy *checks.BusyError
+	var resourceErr *checks.ResourceIdentityError
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return checkRunEntry{}, warning, &agentapi.Error{Code: agentapi.CodeCheckFailed, Exit: 130, Message: "check interrupted before execution", Cause: err}
@@ -300,6 +333,9 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 			details["holder"] = busy.Holder
 		}
 		return checkRunEntry{}, warning, (&agentapi.Error{Code: agentapi.CodeResourceBusy, Message: busy.Error(), Cause: err}).WithDetails(details)
+	case errors.As(err, &resourceErr):
+		return checkRunEntry{}, warning, (&agentapi.Error{Code: agentapi.CodeCheckFailed, Message: fmt.Sprintf("check %s not run: identity unavailable: %v", check.Name, resourceErr), Cause: err}).
+			WithDetails(map[string]any{"check": check.Name, "reason": "identity_unavailable", "resource": resourceErr.Resource})
 	case errors.Is(err, checks.ErrAlreadyRunning):
 		return checkRunEntry{}, warning, agentapi.Errorf(agentapi.CodeResourceBusy, "check %s: %v", check.Name, err)
 	case err != nil && result == nil:
@@ -308,6 +344,16 @@ func runOneCheck(ctx context.Context, cmd *cobra.Command, wenv *worktreeEnv, che
 		warning = fmt.Sprintf("check %s: %v", check.Name, err)
 	}
 	return checkRunEntry{Result: result, Reused: result.Reused}, warning, nil
+}
+
+func nonEmpty(values ...string) []string {
+	var out []string
+	for _, value := range values {
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func resolveCheckCommand(wenv *worktreeEnv, command config.CheckCommand) (checks.CommandTarget, error) {

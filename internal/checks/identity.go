@@ -55,8 +55,12 @@ type Identity struct {
 	EnvDigest        string           `json:"environment_digest"`
 	Inputs           []string         `json:"inputs"`
 	InputsDigest     string           `json:"inputs_digest"`
-	Platform         Platform         `json:"platform"`
-	Digest           string           `json:"identity_digest"`
+	// Resources are the shared resources the check declares, sorted by
+	// name; ResourcesDigest is empty when it declares none.
+	Resources       []ResourceIdentity `json:"resources"`
+	ResourcesDigest string             `json:"resources_digest"`
+	Platform        Platform           `json:"platform"`
+	Digest          string             `json:"identity_digest"`
 }
 
 // IdentityRequest describes what to identify.
@@ -70,6 +74,18 @@ type IdentityRequest struct {
 	Unset        []string
 	SecretEnv    []string
 	Guards       []*lockfile.Lock
+	// Resources are all declared shared resources with resolved paths; only
+	// those named by Check.Resources are identified.
+	Resources []SharedResource
+	// RuntimeRoot hosts the machine-wide directory identity cache ("" disables it).
+	RuntimeRoot string
+	// CacheWrite lets directory identities create and update that cache.
+	// Only execution sets it; read-only commands only read an existing cache.
+	CacheWrite bool
+	// Memo shares resource identities within one read-only invocation.
+	Memo *ResourceMemo
+	// Warn receives nonfatal problems (an unwritable identity cache).
+	Warn func(string)
 }
 
 var probeTimeout = 15 * time.Second
@@ -100,8 +116,10 @@ func DefinitionDigest(check config.CheckConfig) string {
 }
 
 // ComputeIdentity reads the working state, probes toolchains and hashes
-// environment values and declared inputs. It runs only the declared
-// toolchain probe commands and writes nothing.
+// environment values, declared inputs and declared shared resources. It runs
+// only the declared toolchain probe and resource identity commands, and
+// writes nothing except the best-effort directory identity cache when
+// req.CacheWrite is set.
 func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identity, err error) {
 	gate, err := lifecycle.AcquireShared(req.WorktreePath)
 	if err != nil {
@@ -170,10 +188,19 @@ func ComputeIdentity(ctx context.Context, req IdentityRequest) (identity Identit
 	if identity.InputsDigest, err = pathsDigest(req.WorktreePath, req.RuntimeDir, paths); err != nil {
 		return Identity{}, fmt.Errorf("inputs: %w", err)
 	}
-	identity.Digest = digestFields(
+	if identity.Resources, identity.ResourcesDigest, err = resourceIdentities(ctx, req); err != nil {
+		return Identity{}, err
+	}
+	fields := []string{
 		"anvil-check-identity-v1", state.Digest, identity.DefinitionDigest, identity.ToolchainDigest,
 		identity.EnvDigest, identity.InputsDigest, identity.Platform.OS, identity.Platform.Arch,
-	)
+	}
+	// Appended only when resources are declared, so checks without them keep
+	// the digest of earlier versions and their stored results stay current.
+	if len(identity.Resources) > 0 {
+		fields = append(fields, "resources", identity.ResourcesDigest)
+	}
+	identity.Digest = digestFields(fields...)
 	return identity, nil
 }
 
