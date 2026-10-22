@@ -476,6 +476,9 @@ func runRemove(cmd *cobra.Command, args []string, deps removeCommandDependencies
 func removeWorktree(cmd *cobra.Command, args []string, deps removeCommandDependencies, report *removeReport) error {
 	force := mustGetBool(cmd, "force")
 	dryRun := mustGetBool(cmd, "dry-run")
+	if report == nil && dryRun && len(args) == 0 {
+		return fmt.Errorf("--dry-run requires a worktree argument because dry runs never prompt")
+	}
 	if report != nil {
 		if len(args) == 0 {
 			return agentapi.Errorf(agentapi.CodeInvalidArguments, "worktree argument required with --json (--json never prompts)")
