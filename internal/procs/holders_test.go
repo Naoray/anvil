@@ -111,11 +111,26 @@ func TestOpenFileSnapshotIgnoresSiblingPrefix(t *testing.T) {
 	}
 }
 
+func TestOpenFileSnapshotMatchesMapsPathsWithEscapedSpaces(t *testing.T) {
+	root := filepath.Join(fixtureRoot(t), "repo with spaces")
+	file := filepath.Join(root, "asset bundle.bin")
+	escaped := strings.ReplaceAll(file, " ", `\040`)
+	snapshot := Snapshot{Method: MethodProcfs, processes: []processPaths{{
+		pid: 7, command: "viewer", paths: map[string][]string{},
+	}}}
+	snapshot.processes[0].add(escaped, "maps")
+
+	got := snapshot.Holders(root)
+	if len(got) != 1 || got[0].PID != 7 || got[0].Path != file {
+		t.Fatalf("holders = %+v, want pid 7 mapped to %q", got, file)
+	}
+}
+
 func TestParseLsofOutput(t *testing.T) {
 	root := fixtureRoot(t)
 	app, home := filepath.Join(root, "app"), filepath.Join(root, "home", "me")
 	output := "p101\ncvim\nfcwd\nn" + app + "\nf3\nn" + filepath.Join(app, "main.go") + "\np202\ncbash\nfcwd\nn" + home + "\n"
-	snapshot, err := parseLsof([]byte(output), 999)
+	snapshot, err := parseLsof([]byte(output))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,18 +141,18 @@ func TestParseLsofOutput(t *testing.T) {
 	if len(snapshot.Holders(home)) != 1 {
 		t.Fatalf("cwd holder missing")
 	}
-	if _, err := parseLsof([]byte("pnotanumber\n"), 999); err == nil {
+	if _, err := parseLsof([]byte("pnotanumber\n")); err == nil {
 		t.Fatal("malformed lsof output must fail closed")
 	}
 }
 
-func TestParseLsofOutputSkipsSelf(t *testing.T) {
+func TestParseLsofOutputIncludesCurrentProcess(t *testing.T) {
 	app := filepath.Join(fixtureRoot(t), "app")
-	snapshot, err := parseLsof([]byte("p5\ncanvil\nn"+app+"\np6\ncvim\nn"+app+"\n"), 5)
+	snapshot, err := parseLsof([]byte("p5\ncanvil\nn" + app + "\np6\ncvim\nn" + app + "\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := snapshot.Holders(app); len(got) != 1 || got[0].PID != 6 {
-		t.Fatalf("own process must be skipped, others kept: %+v", got)
+	if got := snapshot.Holders(app); len(got) != 2 || got[0].PID != 5 || got[1].PID != 6 {
+		t.Fatalf("the current process and other holders must be included: %+v", got)
 	}
 }

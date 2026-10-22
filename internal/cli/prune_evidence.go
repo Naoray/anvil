@@ -606,10 +606,28 @@ func collectPullRequest(enabled bool, repoPath, branch, defaultBranch string) pr
 	if err != nil {
 		return prEvidence{State: "unavailable", Reason: "gh is not installed"}
 	}
+	list := func(state string, limit int) ([]ghPullRequest, error) {
+		return listGitHubPullRequests(gh, repoPath, branch, state, limit)
+	}
+	open, err := list("open", 1)
+	if err != nil {
+		return prEvidence{State: "unavailable", Source: "gh", Reason: err.Error()}
+	}
+	if evidence := selectPullRequest(open, defaultBranch); evidence.State == "open" {
+		return evidence
+	}
+	pulls, err := list("all", 50)
+	if err != nil {
+		return prEvidence{State: "unavailable", Source: "gh", Reason: err.Error()}
+	}
+	return selectPullRequest(pulls, defaultBranch)
+}
+
+func listGitHubPullRequests(gh, repoPath, branch, state string, limit int) ([]ghPullRequest, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
 	defer cancel()
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, gh, "pr", "list", "--head", branch, "--state", "all", "--json", "state,number,mergedAt,headRefOid,baseRefName", "--limit", "50")
+	cmd := exec.CommandContext(ctx, gh, "pr", "list", "--head", branch, "--state", state, "--json", "state,number,mergedAt,headRefOid,baseRefName", "--limit", strconv.Itoa(limit))
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1")
 	cmd.Stderr = &stderr
@@ -622,13 +640,13 @@ func collectPullRequest(enabled bool, repoPath, branch, defaultBranch string) pr
 		if reason == "" {
 			reason = err.Error()
 		}
-		return prEvidence{State: "unavailable", Source: "gh", Reason: reason}
+		return nil, errors.New(reason)
 	}
 	var pulls []ghPullRequest
 	if err := json.Unmarshal(out, &pulls); err != nil {
-		return prEvidence{State: "unavailable", Source: "gh", Reason: "malformed gh output: " + err.Error()}
+		return nil, fmt.Errorf("malformed gh output: %w", err)
 	}
-	return selectPullRequest(pulls, defaultBranch)
+	return pulls, nil
 }
 
 // selectPullRequest reports an open PR (into any base) first, then one

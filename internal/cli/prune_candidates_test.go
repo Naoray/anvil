@@ -2,8 +2,10 @@ package cli
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +69,17 @@ func TestPruneEvaluateSafeWorktreeIsCandidate(t *testing.T) {
 	require.NotEmpty(t, candidate.Reasons)
 }
 
+func TestPruneEvaluateMissingHeadBlocks(t *testing.T) {
+	path := t.TempDir()
+	wt := git.Worktree{Path: path, Branch: "feature/x"}
+	summary := worktreeSummary{ID: "wt_0123456789abcdef", IdentityStatus: "ok", Name: "x", Path: path, Branch: "feature/x"}
+	scan := pruneScan{DefaultBranch: "main", MergeTarget: "origin/main", Settings: pruneSettings{RecentSeconds: 86400}, collectors: safeCollectors()}
+
+	candidate := scan.evaluate(wt, false, summary)
+	require.False(t, candidate.Candidate)
+	require.True(t, hasBlocker(candidate, "evidence unavailable: HEAD"), candidate.Blockers)
+}
+
 func TestPruneEvaluateEvidenceFailureIsABlocker(t *testing.T) {
 	cases := map[string]func(*pruneCollectors){
 		"merge state": func(c *pruneCollectors) {
@@ -107,6 +120,16 @@ func TestPruneEvaluateEvidenceFailureIsABlocker(t *testing.T) {
 			require.True(t, hasBlocker(candidate, "evidence unavailable: "+name), candidate.Blockers)
 		})
 	}
+}
+
+func TestPruneEvaluateUnsupportedOpenFileMethodBlocks(t *testing.T) {
+	collectors := safeCollectors()
+	collectors.openFiles = func(string) openFilesEvidence {
+		return openFilesEvidence{Method: "future-method", Holders: []procs.Holder{}}
+	}
+	candidate := evaluateSafe(t, collectors, pruneSettings{})
+	require.False(t, candidate.Candidate)
+	require.True(t, hasBlocker(candidate, "evidence unavailable: open files: unsupported inspection method"), candidate.Blockers)
 }
 
 func TestPruneEvaluateProcessVisibility(t *testing.T) {
@@ -207,6 +230,21 @@ func TestSelectPullRequest(t *testing.T) {
 	pr = selectPullRequest([]ghPullRequest{{State: "MERGED", Number: 4, HeadRefOid: "abc", BaseRefName: "develop"}}, "main")
 	require.Equal(t, "merged_other_base", pr.State)
 	require.Equal(t, "develop", pr.Base)
+}
+
+func TestCollectPullRequestChecksOpenPRsApartFromLimitedHistory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gh executable uses a POSIX script")
+	}
+	binDir := t.TempDir()
+	gh := filepath.Join(binDir, "gh")
+	script := "#!/bin/sh\ncase \"$*\" in\n  *\"--state open\"*) printf '%s' '[{\"state\":\"OPEN\",\"number\":99,\"headRefOid\":\"abc\",\"baseRefName\":\"main\"}]' ;;\n  *) printf '%s' '[{\"state\":\"CLOSED\",\"number\":1}]' ;;\nesac\n"
+	require.NoError(t, os.WriteFile(gh, []byte(script), 0o755))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	pr := collectPullRequest(true, t.TempDir(), "feature/x", "main")
+	require.Equal(t, "open", pr.State)
+	require.Equal(t, 99, pr.Number)
 }
 
 func TestPruneEvaluateIgnoredFilesBlock(t *testing.T) {

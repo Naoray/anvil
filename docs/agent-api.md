@@ -70,7 +70,7 @@ Codes are stable and never reused for a different meaning.
 | `anvil lease show [WT] --json` | no | Lease state |
 | `anvil remove WT --json` (`--force` or `--dry-run`) | yes | Remove a worktree with cleanup, or preview the plan |
 | `anvil adopt [WT] \| --all --json` | yes (`--dry-run`) | Record identity (and optionally a lease) for existing worktrees without scaffolding |
-| `anvil prune candidates --json [--output FILE]` | no | Per-worktree prune candidacy with reasons, blockers and evidence (never fetches, never rewrites indexes) |
+| `anvil prune candidates --json [--output FILE]` | no | Per-worktree prune candidacy with reasons, blockers and evidence (never fetches unless `--fetch`; never rewrites indexes) |
 | `anvil prune apply --from FILE --json` (`--force` or `--dry-run`) | yes | Recheck and remove the file's candidates |
 | `anvil run [WT] -- CMD` | no (state) | Exec in the worktree environment; child stdio and exit status are the child's own |
 
@@ -103,10 +103,11 @@ key Anvil uses for ownership. Branch names are not unique identifiers.
 ```
 
 `identity_status` is `ok`, `missing` (never prepared), `unknown` (identity
-could not be read, for example a missing directory or a bare entry), `moved` (path changed;
-the ID is kept on the next `ensure` or `adopt`) or `copied` (another directory holds the
-same ID; the copy receives a new ID and drops the original's lease and process
-records on the next `ensure` or `adopt`, and is never treated as their owner).
+could not be read, for example a missing directory or a bare entry), `moved`
+(path changed; the ID is kept on the next `ensure` or `adopt`) or `copied`
+(another directory holds the same ID; the copy receives a new ID and drops the
+original's lease and process records on the next `ensure` or `adopt`, and is
+never treated as their owner).
 
 ## `anvil ensure [WORKTREE] --json` (mutating)
 
@@ -142,7 +143,12 @@ A step that runs again (`--refresh`, changed definition, declared environment,
 inputs or outputs)
 first has its completion record removed, so a failed or interrupted rerun can
 never leave the earlier success in place. `env.read` (which sets template
-variables without `store_as`) always runs, like `store_as` producers. Step
+variables without `store_as`) always runs, like `store_as` producers.
+`db.migrate` runs on every ensure; for the worktree's owned testing database it
+runs a non-destructive `migrate`, never `migrate:fresh` unless the one-off
+`--db-action testing=fresh` flag selects it (`database_actions` in `anvil.yaml`
+rejects `fresh`), so re-ensuring is safe while checks use that database. A
+`fresh` rebuild is refused while a check of the worktree is running. Step
 directories and declared `inputs`/`outputs` must resolve inside the worktree,
 including through symlinks; escapes are refused before any effect.
 
@@ -405,9 +411,9 @@ prompts); otherwise `invalid_arguments` (2) before any effect, also in human
 mode. Each result carries `warnings` from the latest evaluation.
 
 `FILE` is the candidate document or a `prune candidates --json` envelope.
-A wrong schema, malformed file, invalid pattern, a path or worktree ID listed
-twice, a `--recent` below `10m` or a `common_dir` other than the current
-project's is `invalid_arguments` (2) before any effect.
+A wrong schema, malformed file, invalid pattern or recent window, a path or
+worktree ID listed twice, a `--recent` below `10m` or a `common_dir` other than
+the current project's is `invalid_arguments` (2) before any effect.
 
 ```json
 "data": {

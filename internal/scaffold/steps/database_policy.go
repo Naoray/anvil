@@ -3,15 +3,20 @@ package steps
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/naoray/anvil/internal/checks"
 	"github.com/naoray/anvil/internal/config"
+	"github.com/naoray/anvil/internal/dblifecycle"
+	"github.com/naoray/anvil/internal/resources"
 	"github.com/naoray/anvil/internal/scaffold/types"
 	"github.com/naoray/anvil/internal/utils"
+	"github.com/naoray/anvil/internal/wtstate"
 )
 
 type databaseAction struct {
@@ -20,6 +25,9 @@ type databaseAction struct {
 	Owned, Verified                     bool
 	Host, Port                          string
 	Borrowed, Seed                      bool
+	// Unrecorded marks a dry-run identity db.create would create and record;
+	// it never authorizes a real command.
+	Unrecorded bool
 }
 
 func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
@@ -84,7 +92,7 @@ func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
 			if err != nil {
 				return nil, err
 			}
-			targets = append(targets, databaseAction{Name: name, Role: entry.role, Engine: engine, Driver: identity.Driver, Service: identity.Service, Host: identity.Host, Port: identity.Port})
+			targets = append(targets, databaseAction{Name: name, Role: entry.role, Engine: engine, Driver: identity.Driver, Service: identity.Service, Host: identity.Host, Port: identity.Port, Unrecorded: true})
 			ctx.SetVar("UnrecordedDatabase:"+name, "true")
 		}
 	}
@@ -149,6 +157,9 @@ func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
 			return fmt.Errorf("overlapping database selectors %q and %q", previous, selector)
 		}
 		target := &targets[index]
+		if action == "fresh" && !isolatedTestingTarget(ctx, *target) {
+			return fmt.Errorf("database action fresh for %q: fresh is only allowed for this worktree's owned, isolated testing database (its canonical role: testing record with a verified endpoint, named for this worktree's suffix and ensured by db.create in this run)", selector)
+		}
 		if action == "reset" && (target.Borrowed || ctx.GetVar("UnrecordedDatabase:"+target.Name) == "true" || ctx.GetVar("DatabaseNew:"+target.Name) == "true" || (target.Role == "application" && ctx.GetVar("ApplicationDatabaseNew") == "true")) {
 			return fmt.Errorf("reset requires an existing exact owned database; %q is borrowed/shared or newly created", selector)
 		}
@@ -158,8 +169,8 @@ func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
 	}
 	for _, key := range keys {
 		action := ctx.DatabaseActions[key]
-		if action != "skip" && action != "migrate" {
-			return nil, fmt.Errorf("invalid database action %q for %q: use skip or migrate", action, key)
+		if action != "skip" && action != "migrate" && action != "fresh" {
+			return nil, fmt.Errorf("invalid database action %q for %q: use skip, migrate or fresh", action, key)
 		}
 		if err := selectTarget(key, action, false); err != nil {
 			return nil, err
@@ -173,13 +184,17 @@ func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
 	var actions []databaseAction
 	for _, target := range targets {
 		if target.Action == "" {
-			if target.Role != "application" {
-				continue
-			}
-			target.Action = "skip"
-			if !target.Borrowed && ctx.GetVar("ApplicationDatabaseNew") == "true" {
+			switch {
+			case target.Role == "application":
+				target.Action = "skip"
+				if !target.Borrowed && ctx.GetVar("ApplicationDatabaseNew") == "true" {
+					target.Action = "migrate"
+					target.Seed = true
+				}
+			case isolatedTestingTarget(ctx, target):
 				target.Action = "migrate"
-				target.Seed = true
+			default:
+				continue
 			}
 		}
 		if target.Action != "skip" && target.Owned && !target.Verified {
@@ -190,14 +205,52 @@ func planDatabaseActions(ctx *types.ScaffoldContext) ([]databaseAction, error) {
 	return actions, nil
 }
 
+// isolatedTestingTarget reports whether target is this worktree's own testing
+// database: the canonical testing record whose name is this run's
+// TestDatabaseName for the worktree suffix, with a verified endpoint, not
+// borrowed, and ensured by db.create in this run. Only such a target is
+// migrated by default (non-destructive migrate, so preparation is safe to
+// repeat while tests run) and may opt into a destructive fresh rebuild. In a
+// dry-run the identity db.create would create and record also qualifies; it
+// never authorizes a real command.
+func isolatedTestingTarget(ctx *types.ScaffoldContext, target databaseAction) bool {
+	name := ctx.GetVar("TestDatabaseName")
+	suffix := ctx.GetDbSuffix()
+	if target.Role != config.DbRoleTesting || target.Borrowed || name == "" || target.Name != name ||
+		suffix == "" || !strings.HasSuffix(name, "_"+suffix+"_test") {
+		return false
+	}
+	switch ctx.GetVar("DatabaseNew:" + name) {
+	case "true":
+		return target.Owned && target.Verified || target.Unrecorded
+	case "false":
+		return target.Owned && target.Verified
+	}
+	return false
+}
+
 type DbMigrateStep struct{ clientFactory DatabaseClientFactory }
 
 func (*DbMigrateStep) Name() string                                   { return "db.migrate" }
 func (*DbMigrateStep) Condition(*types.ScaffoldContext) (bool, error) { return true, nil }
-func (s *DbMigrateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) error {
+func (s *DbMigrateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) (runErr error) {
 	actions, err := planDatabaseActions(ctx)
 	if err != nil {
 		return err
+	}
+	// A fresh rebuild holds the repository database lock from its isolation
+	// check through the command, so no sibling can bind the name in between.
+	for _, action := range actions {
+		if action.Action != "fresh" || opts.DryRun || ctx.DatabaseLockHeld {
+			continue
+		}
+		release, err := dblifecycle.Lock(ctx.WorktreePath)
+		if err != nil {
+			return fmt.Errorf("locking database local state: %w", err)
+		}
+		ctx.DatabaseLockHeld = true
+		defer func() { ctx.DatabaseLockHeld = false; runErr = errors.Join(runErr, release()) }()
+		break
 	}
 	// Check every selected physical target before running the first command.
 	for i := range actions {
@@ -205,6 +258,19 @@ func (s *DbMigrateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 		plannedNew := opts.DryRun && action.Action != "reset" && (ctx.GetVar("DatabaseNew:"+action.Name) == "true" || ctx.GetVar("DatabaseName") == action.Name && ctx.GetVar("ApplicationDatabaseNew") == "true")
 		if action.Action == "skip" {
 			continue
+		}
+		if action.Unrecorded && action.Role == config.DbRoleTesting && !opts.DryRun {
+			return fmt.Errorf("database %q role=testing is not recorded as owned by this worktree; refusing %s", action.Name, action.Action)
+		}
+		if action.Action == "fresh" {
+			if !opts.DryRun {
+				if err := ensureNoRunningChecks(ctx.WorktreePath, action.Name); err != nil {
+					return err
+				}
+			}
+			if err := ensureUnsharedDatabase(ctx, action.Name); err != nil {
+				return err
+			}
 		}
 		if action.Engine == "sqlite" {
 			if err := (&DbCreateStep{}).createSqlite(ctx, action.Name, types.StepOptions{DryRun: true}); err != nil {
@@ -262,6 +328,8 @@ func (s *DbMigrateStep) Run(ctx *types.ScaffoldContext, opts types.StepOptions) 
 		if action.Action == "reset" {
 			args[1] = "migrate:fresh"
 			args = append(args, "--seed")
+		} else if action.Action == "fresh" {
+			args[1] = "migrate:fresh"
 		} else if action.Seed {
 			args = append(args, "--seed")
 		}
@@ -306,7 +374,100 @@ func runDatabaseAction(ctx *types.ScaffoldContext, action databaseAction, args [
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("database %q %s failed: %w\n%s", action.Name, action.Action, err, output)
+		// The remedy stays on the first line: preparation records keep only it.
+		return fmt.Errorf("database %q role=%s action=%s failed: %w; %s\n%s", action.Name, action.Role, action.Action, err, migrationRemedy(action.Role), output)
 	}
 	return nil
+}
+
+// ensureUnsharedDatabase refuses a destructive rebuild when any other
+// registered worktree records or borrows the same database name. Ownership
+// already proves this worktree created the database; this re-checks isolation
+// against sibling state just before migrate:fresh. Unreadable sibling state
+// fails closed, like destructive cleanup. Outside dry-run the caller holds the
+// repository database lock.
+func ensureUnsharedDatabase(ctx *types.ScaffoldContext, name string) error {
+	if _, err := os.Lstat(filepath.Join(ctx.WorktreePath, ".git")); err != nil {
+		if os.IsNotExist(err) {
+			// Without a Git registry there are no sibling worktrees.
+			return nil
+		}
+		return fmt.Errorf("checking worktree registry before rebuilding database %q: %w", name, err)
+	}
+	paths, err := dblifecycle.RegisteredPaths(ctx.WorktreePath)
+	if err != nil {
+		return fmt.Errorf("checking sibling worktrees before rebuilding database %q: %w", name, err)
+	}
+	own, err := dblifecycle.Canonical(ctx.WorktreePath)
+	if err != nil {
+		return err
+	}
+	for _, sibling := range paths {
+		siblingPath, err := dblifecycle.Canonical(sibling)
+		if errors.Is(err, fs.ErrNotExist) {
+			// A deleted worktree cannot use the database.
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cannot inspect sibling %q before rebuilding database %q: %w", sibling, name, err)
+		}
+		if siblingPath == own {
+			continue
+		}
+		state, err := config.ReadLocalState(siblingPath)
+		if err != nil {
+			return fmt.Errorf("cannot inspect sibling %q before rebuilding database %q: %w", siblingPath, name, err)
+		}
+		for _, db := range state.Databases {
+			if db.Name == name {
+				return fmt.Errorf("database %q is also recorded by worktree %q; refusing migrate:fresh; %s", name, siblingPath, freshRefusalRemedy)
+			}
+		}
+		if borrowed := state.BorrowedApplication; borrowed != nil && borrowed.Name == name {
+			return fmt.Errorf("database %q is also borrowed by worktree %q; refusing migrate:fresh; %s", name, siblingPath, freshRefusalRemedy)
+		}
+	}
+	return nil
+}
+
+const freshRefusalRemedy = "rerun without --db-action testing=fresh for a non-destructive migration, or remove the other worktree's record of it"
+
+// ensureNoRunningChecks refuses a fresh rebuild while any check of this
+// worktree runs, since checks may use the testing database. Checks only hold
+// the shared lifecycle gate, like preparation, so this is the sole guard; a
+// runtime directory that cannot be resolved fails closed. anvil exec sessions
+// hold no lock and cannot be detected.
+func ensureNoRunningChecks(worktreePath, name string) error {
+	const unverified = "cannot verify that no checks are running in this worktree; refusing migrate:fresh of %q: %s"
+	identity, status, err := wtstate.ReadIdentity(worktreePath)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	if identity == nil || status == wtstate.IdentityCopied {
+		return fmt.Errorf(unverified, name, "the worktree has no verified Anvil identity")
+	}
+	root, err := resources.Root()
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	dir, err := resources.WorktreeDir(root, identity.ID)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	running, err := checks.RunningChecks(dir)
+	if err != nil {
+		return fmt.Errorf(unverified, name, err)
+	}
+	if len(running) > 0 {
+		return fmt.Errorf("checks are running in this worktree (%s); refusing migrate:fresh of %q while they may use it — wait for them to finish, then rerun with --db-action testing=fresh", strings.Join(running, ", "), name)
+	}
+	return nil
+}
+
+// migrationRemedy names the corrective command for a failed migration.
+func migrationRemedy(role string) string {
+	if role == config.DbRoleTesting {
+		return "fix the cause and rerun 'anvil scaffold' (or set database_actions: {testing: skip} to opt out)"
+	}
+	return "fix the cause and rerun 'anvil scaffold'"
 }

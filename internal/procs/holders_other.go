@@ -5,7 +5,6 @@ package procs
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -33,5 +32,5 @@ func scanLsof() (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("running lsof: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	return parseLsof(out, os.Getpid())
+	return parseLsof(out)
 }

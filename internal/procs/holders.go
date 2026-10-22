@@ -97,6 +97,9 @@ func (s Snapshot) Holders(dir string) []Holder {
 }
 
 func (p *processPaths) add(path, kind string) {
+	if kind == "maps" {
+		path = unescapeProcMapsPath(path)
+	}
 	path = strings.TrimSuffix(path, " (deleted)")
 	if !filepath.IsAbs(path) {
 		return // sockets, pipes, anon inodes
@@ -110,9 +113,31 @@ func (p *processPaths) add(path, kind string) {
 	p.paths[path] = append(p.paths[path], kind)
 }
 
+// unescapeProcMapsPath decodes the octal escapes used for whitespace,
+// backslashes and other non-printable bytes in /proc/<pid>/maps paths.
+func unescapeProcMapsPath(path string) string {
+	var decoded strings.Builder
+	decoded.Grow(len(path))
+	for i := 0; i < len(path); {
+		if path[i] == '\\' && i+3 < len(path) && isOctal(path[i+1]) && isOctal(path[i+2]) && isOctal(path[i+3]) {
+			value := int(path[i+1]-'0')*64 + int(path[i+2]-'0')*8 + int(path[i+3]-'0')
+			if value <= 255 {
+				decoded.WriteByte(byte(value))
+				i += 4
+				continue
+			}
+		}
+		decoded.WriteByte(path[i])
+		i++
+	}
+	return decoded.String()
+}
+
+func isOctal(value byte) bool { return value >= '0' && value <= '7' }
+
 // parseLsof parses `lsof -Fpcn` output (p<pid>, c<command>, n<name> lines).
 // Malformed output fails closed.
-func parseLsof(output []byte, self int) (Snapshot, error) {
+func parseLsof(output []byte) (Snapshot, error) {
 	snapshot := Snapshot{Method: MethodLsof}
 	var current *processPaths
 	scanner := bufio.NewScanner(bytes.NewReader(output))
@@ -145,12 +170,5 @@ func parseLsof(output []byte, self int) (Snapshot, error) {
 	if err := scanner.Err(); err != nil {
 		return Snapshot{}, fmt.Errorf("reading lsof output: %w", err)
 	}
-	kept := snapshot.processes[:0]
-	for _, process := range snapshot.processes {
-		if process.pid != self {
-			kept = append(kept, process)
-		}
-	}
-	snapshot.processes = kept
 	return snapshot, nil
 }

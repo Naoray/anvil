@@ -371,6 +371,13 @@ func LoadProject(path string) (*Config, error) {
 	if err := yaml.Unmarshal(content, &selectors); err != nil {
 		return nil, fmt.Errorf("parsing database actions: %w", err)
 	}
+	for selector, action := range selectors.Scaffold.DatabaseActions {
+		if action == "fresh" {
+			// A declaration would repeat the destructive rebuild on every
+			// ensure, possibly while checks use the testing database.
+			return nil, fmt.Errorf("invalid scaffold.database_actions %q: fresh is not accepted in anvil.yaml; pass --db-action testing=fresh for a one-off rebuild", selector)
+		}
+	}
 	config.Scaffold.DatabaseActions = selectors.Scaffold.DatabaseActions
 	if len(selectors.Scaffold.Steps) == len(config.Scaffold.Steps) {
 		for i := range config.Scaffold.Steps {

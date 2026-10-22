@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -184,6 +185,9 @@ func runPruneApply(cmd *cobra.Command) (agentResult, error) {
 		return agentResult{}, agentapi.Errorf(agentapi.CodeInvalidArguments, "candidate file belongs to repository %s, not the current project's %s", doc.Repository.CommonDir, repo.CommonDir)
 	}
 	// The file may only strengthen the current safety settings.
+	if err := validateFileRecentWindow(doc.Settings.RecentSeconds); err != nil {
+		return agentResult{}, err
+	}
 	if err := validateFilePatterns(doc.Settings.Protected); err != nil {
 		return agentResult{}, err
 	}
@@ -273,6 +277,15 @@ func validateFilePatterns(patterns []string) error {
 		if _, err := filepath.Match(pattern, ""); err != nil || pattern == "" {
 			return agentapi.Errorf(agentapi.CodeInvalidArguments, "candidate file has an invalid pattern %q", pattern)
 		}
+	}
+	return nil
+}
+
+func validateFileRecentWindow(seconds int64) error {
+	minimum := int64(minimumRecentActivity / time.Second)
+	maximum := int64((1<<63 - 1) / int64(time.Second))
+	if seconds < minimum || seconds > maximum {
+		return agentapi.Errorf(agentapi.CodeInvalidArguments, "candidate file recent_seconds %d is outside the supported range %d..%d", seconds, minimum, maximum)
 	}
 	return nil
 }

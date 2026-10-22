@@ -27,7 +27,8 @@ Options:
     and run that in this worktree.
 anvil exec never creates or modifies databases or .anvil.local.
 Do NOT rerun the full default Laravel scaffold here if this worktree's database
-holds data you care about — it runs 'migrate:fresh' and would wipe it.`
+holds data you care about — it runs 'migrate' on the testing database; it does
+not run 'migrate:fresh' by default.`
 
 const sharedDbExecHint = `this worktree appears to use a shared database; shared-database worktrees do not support 'anvil exec'.`
 

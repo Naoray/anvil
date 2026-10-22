@@ -13,7 +13,7 @@ func TestScanProcfsMountNamespaces(t *testing.T) {
 	uids := map[int]int{10: own, 11: own, 12: other, 13: own, 14: own}
 	namespaces := map[int]string{10: "mnt:[1]", 11: "mnt:[2]", 12: "mnt:[2]"}
 	source := procfsSource{
-		self: 1, euid: own, selfNamespace: "mnt:[1]",
+		euid: own, selfNamespace: "mnt:[1]",
 		pids:         func() ([]int, error) { return []int{10, 11, 12, 13, 14}, nil },
 		kernelThread: func(pid int) bool { return pid == 14 }, // e.g. kdevtmpfs: init's namespace, no user files
 		inspect: func(pid int) (processPaths, int, error) {

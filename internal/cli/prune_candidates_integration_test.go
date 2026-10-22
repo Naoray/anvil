@@ -380,6 +380,27 @@ func TestPruneApplyDryRunMutatesNothingAndCurrentThresholdsWin(t *testing.T) {
 	require.DirExists(t, path)
 }
 
+func TestPruneApplyRejectsOverflowingRecentWindowFromCandidateFile(t *testing.T) {
+	f := newPruneFixture(t)
+	path := f.addGitWorktree("feature/a", "feature-a")
+	_, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	file, doc := generateCandidates(t, f)
+
+	// A recent window far beyond time.Duration's representable range would
+	// wrap negative and turn off the activity check during apply.
+	doc["settings"].(map[string]any)["recent_seconds"] = int64(1<<63 - 1)
+	writeCandidates(t, file, doc)
+	activity := time.Now().Add(-time.Hour)
+	readme := filepath.Join(path, "README.md")
+	require.NoError(t, os.Chtimes(readme, activity, activity))
+
+	envelope, _, code := f.runJSON(f.repo, pruneArgs(t, "prune", "apply", "--from", file, "--recent", "10m", "--dry-run")...)
+	require.Equal(t, 2, code)
+	require.Equal(t, "invalid_arguments", field(t, envelope, "error", "code"))
+	require.DirExists(t, path)
+}
+
 func TestPruneApplyRefusesTamperedFiles(t *testing.T) {
 	f := newPruneFixture(t)
 	paths := map[string]string{}
@@ -618,4 +639,25 @@ func TestPruneCandidatesAdoptionIsNotActivity(t *testing.T) {
 	require.Equal(t, 0, code, stderr)
 	idle := candidateEntries(t, envelope["data"])["feature-idle"]
 	require.Equal(t, true, idle["candidate"], "%v", idle["blockers"])
+}
+
+func TestPruneCandidatesBlocksItsCurrentWorktree(t *testing.T) {
+	f := newPruneFixture(t)
+	path := f.addGitWorktree("feature/current", "feature-current")
+	_, stderr, code := f.runJSON(f.repo, "adopt", "--all")
+	require.Equal(t, 0, code, stderr)
+	backdate(t, f)
+
+	envelope, stderr, code := f.runJSON(path, pruneArgs(t, "prune", "candidates", "--recent", "10m", "--no-pr")...)
+	require.Equal(t, 0, code, stderr)
+	entry := candidateEntries(t, envelope["data"])["feature-current"]
+	require.Equal(t, false, entry["candidate"])
+	requireBlocked(t, entry, "hold files open")
+	holders := field(t, entry, "evidence", "open_files", "holders").([]any)
+	for _, raw := range holders {
+		if field(t, raw, "command") == "anvil" {
+			return
+		}
+	}
+	require.Fail(t, "the anvil process whose cwd is this worktree must be reported as a holder", "%v", holders)
 }

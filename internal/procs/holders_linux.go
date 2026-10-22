@@ -16,7 +16,7 @@ import (
 
 // procfsSource is what a procfs scan reads; tests inject it.
 type procfsSource struct {
-	self, euid    int
+	euid          int
 	selfNamespace string
 	pids          func() ([]int, error)
 	inspect       func(pid int) (processPaths, int, error)
@@ -26,8 +26,9 @@ type procfsSource struct {
 }
 
 // ScanOpenFiles records, for every process this user can inspect, the paths
-// it references through /proc/<pid>/{cwd,root,exe,fd/*,maps}. This process
-// is excluded. A process that exits during the scan is ignored. Paths of a
+// it references through /proc/<pid>/{cwd,root,exe,fd/*,maps}, including this
+// process so a command run from a candidate worktree keeps that worktree from
+// being pruned. A process that exits during the scan is ignored. Paths of a
 // process in another mount namespace are namespace-local and cannot be
 // mapped; such processes are reported instead (ForeignNamespaceOwn, or
 // counted as skipped for other users).
@@ -37,7 +38,7 @@ func ScanOpenFiles() (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("%w: reading /proc/self/ns/mnt: %v", ErrHoldersUnsupported, err)
 	}
 	source := procfsSource{
-		self: os.Getpid(), euid: os.Geteuid(), selfNamespace: selfNamespace,
+		euid: os.Geteuid(), selfNamespace: selfNamespace,
 		pids: listPIDs, inspect: inspectProcess, command: commandName, kernelThread: isKernelThread,
 		namespace: func(pid int) (string, error) { return os.Readlink("/proc/" + strconv.Itoa(pid) + "/ns/mnt") },
 	}
@@ -97,7 +98,7 @@ func (s procfsSource) scan() (Snapshot, error) {
 		}
 	}
 	for _, pid := range pids {
-		if pid == s.self || s.kernelThread(pid) {
+		if s.kernelThread(pid) {
 			continue
 		}
 		process, uid, err := s.inspect(pid)

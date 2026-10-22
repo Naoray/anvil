@@ -14,8 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `anvil prune apply --from FILE --force|--dry-run` removes only the file's candidates after validating them against the current repository and rechecking all evidence, last under the exclusive lifecycle gate; a stale or edited file cannot weaken current checks.
 - `anvil remove --json` emits one `anvil.agent/v1` document describing the removal plan or result (processes, ports, runtime directory, databases, branch). It never prompts: the worktree argument is required and removal needs `--force` unless `--dry-run` is given.
 
+### Changed
+
+- Laravel scaffolding now leaves the worktree's own testing database schema-ready: `db.migrate` runs a non-destructive `artisan migrate` (no seed) on the owned, isolated `role: testing` database on every scaffold/ensure, through a per-command database environment without editing `.env`. Unrecorded, auxiliary, borrowed, shared, legacy and mismatched databases are never targeted. Testing databases are no longer existence-only by default; `database_actions: {testing: skip}` restores that.
+- The one-off `--db-action testing=fresh` flag opts into rebuilding that testing database with `migrate:fresh` (no seed). `database_actions` in `anvil.yaml` rejects `fresh`. The rebuild runs under the repository database lock and is refused for any other target, while a check of the worktree is running (or the worktree's runtime directory cannot be resolved), or when another registered worktree records or borrows the name. Running `anvil exec` sessions cannot be detected.
+- Failed migrations name the database, role, action and the corrective command (`anvil scaffold`, or `testing: skip` to opt out).
+
 ### Fixed
 
+- `db.create` fails closed: a configured MySQL/MariaDB/PostgreSQL engine whose connection or ping fails now fails the step (naming the engine, role and corrective action) instead of reporting the worktree ready without its database. Explicit `type:` accepts the same aliases as `DB_CONNECTION` case-insensitively; an unsupported `type` is rejected before any scaffold step runs.
 - Release notes no longer include the tag's SSH signature block.
 - Removing a worktree is no longer blocked by a sibling worktree whose directory was deleted; it is skipped with a warning suggesting `git worktree prune`. Locked siblings that are absent (for example on unmounted removable media) still block database cleanup.
 - Dry runs of `remove`, `prune` and `unlink --clean` never prompt or require `--force`, and never start database services. `prune --dry-run` no longer fetches origin.

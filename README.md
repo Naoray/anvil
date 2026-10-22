@@ -146,8 +146,8 @@ anvil remove feature/user-auth
 anvil remove feature-user-auth --dry-run
 anvil remove feature-user-auth --dry-run --json   # one anvil.agent/v1 plan document
 
-# Clean up merged worktrees interactively (merge state and leases only;
-# agents and scripts should use prune candidates/apply instead of --force)
+# Legacy interactive cleanup (merge state and leases only; agents and scripts
+# should use prune candidates/apply instead of --force)
 anvil prune
 
 # Preview every merged worktree without prompting or fetching
@@ -509,9 +509,7 @@ until adopted.
   disabled): the newest of the HEAD reflog (a missing reflog only warns),
   tracked, untracked and ignored file modification times (excluding
   `node_modules`, `vendor` and `.git`), the lease renewal, the latest check
-  result, the preparation record and the `.anvil.local` modification time (so
-  a just-ensured worktree nobody has entered yet is kept). Running checks
-  always block.
+  result and the preparation record. Running checks always block.
 - **Open files**: on Linux every `/proc/<pid>` is inspected for `cwd`, `root`,
   `exe`, open descriptors and memory maps beneath the worktree (a shell whose
   current directory is inside it counts); on macOS `lsof` is used; elsewhere
@@ -694,19 +692,24 @@ anvil completion powershell > anvil.ps1
 
 Laravel scaffolding migrates and seeds a newly created, owned application
 database. Existing application databases and borrowed/shared application data
-skip migrations by default. Testing databases remain existence-only unless
-explicitly selected. `--force`, CI, quiet mode and `--no-interactive` never
-authorize a reset.
+skip migrations by default. The worktree's own testing database is migrated
+(never seeded) on every scaffold or ensure; rebuilding it with `migrate:fresh`
+is opt-in — see [Test Database Isolation](#test-database-isolation). `--force`,
+CI, quiet mode and `--no-interactive` never authorize a reset.
 
 ```bash
 anvil scaffold feature --db-action application=migrate
 anvil scaffold feature --db-action application=skip --db-action testing=migrate
+anvil scaffold feature --db-action testing=fresh
 anvil scaffold feature --reset-database EXACT_OWNED_NAME
 anvil work feature --borrow-app-db owner-worktree
 ```
 
 `--db-action` accepts `application`, `testing` or an exact database name, with
-`skip` or `migrate`. The same selectors work in target YAML:
+`skip`, `migrate` or `fresh`. `fresh` (`migrate:fresh` without `--seed`) is
+accepted only for the worktree's owned, isolated testing database; any other
+target is rejected before a command runs. The same selectors work in target
+YAML:
 
 ```yaml
 scaffold:
@@ -817,9 +820,69 @@ owns worktree-safe naming, collision checks, and `.anvil.local` records.
   is not valid in a user-configured `db.create` step.
 - `role: testing` derives `<site>_<suffix>_test` (capped at 54 characters so
   Laravel's parallel-worker suffixes still fit MySQL/MariaDB's 64 and
-  PostgreSQL's 63 identifier limits), creates it empty — no migrations; your
-  test runner handles schema per run — and re-scaffolds idempotently.
+  PostgreSQL's 63 identifier limits) and re-scaffolds idempotently.
+  `db.create` itself only ensures the database exists; the following
+  `db.migrate` step prepares its schema (below).
 - Custom scaffold steps can reference the name via `{{ .TestDatabaseName }}`.
+
+### Schema-ready testing database
+
+The Laravel preset's `db.migrate` step runs after both `db.create` steps and
+prepares the testing database so `anvil exec php artisan test` finds a schema.
+By default it runs a non-destructive `artisan migrate` (no `--seed`) on the
+worktree's own testing database, whether this run created it (new worktree,
+or dropped on the server since) or it already existed. `db.migrate` runs on
+every `anvil scaffold`, `anvil work` and `anvil ensure`, so the default never
+discards rows — preparation stays safe while `anvil check` or
+`anvil exec php artisan test` use the database.
+
+Each command gets the testing database through its own environment
+(`DB_DATABASE`, `DB_CONNECTION`, host and port), never by editing `.env`. The
+application database keeps its own policy: re-preparing never migrates or
+wipes an existing one.
+
+The testing target must establish ownership and isolation: it is this
+worktree's canonical `role: testing` record in `.anvil.local`, with a
+verified `endpoint`, named `<site>_<suffix>_test` for this worktree's
+`db_suffix`, and ensured by `db.create` in the same run. Borrowing only ever
+shares an application database, never a testing one. Anything else —
+unrecorded databases with the same name, auxiliary records, borrowed or
+shared application databases, legacy records without an `endpoint`, or a
+testing record whose name does not match the worktree suffix — is never
+targeted by default. `laravel-shared-db` has no testing database, so nothing
+is migrated.
+
+Rebuilding the testing database (for example after a branch switch that
+rewrote migrations) is a one-off opt-in: `--db-action testing=fresh` on
+`anvil scaffold`, `work` or `ensure` runs `artisan migrate:fresh` without
+`--seed`, discarding its rows. It is accepted only as that flag:
+`database_actions` in `anvil.yaml` rejects `fresh` with a configuration error,
+because a declaration would rebuild the database on every ensure. `fresh` is
+refused for any other target. Before the command it holds the repository
+database lock and refuses when:
+
+- a check of this worktree is running (`anvil check` may be using the
+  database). If the worktree's identity or runtime directory cannot be
+  resolved, it refuses rather than guess;
+- another registered worktree of the repository records or borrows the same
+  name (unreadable sibling state also refuses).
+
+`anvil exec` sessions (for example a running `anvil exec php artisan test`)
+hold no lock and cannot be detected, and a check started after the guard is
+not blocked: don't run `testing=fresh` while tests use the database.
+
+Overrides: `database_actions: {testing: skip}` (or `--db-action testing=skip`)
+keeps the testing database untouched. `--dry-run` prints the planned line
+(`Database <name> role=testing ... action=migrate|fresh`) and runs nothing. A
+failed migration fails the step: `anvil work`/`scaffold`/`ensure` exit
+non-zero, `anvil status --json` reports `ready: false`, and the error names
+the database, role, action and corrective command, for example
+`database "myapp_swift_runner_test" role=testing action=migrate failed: exit
+status 1; fix the cause and rerun 'anvil scaffold' (or set database_actions:
+{testing: skip} to opt out)`, followed by the command's output.
+
+Custom scaffolds that declare `db.create` with `role: testing` get the same
+behavior only if they also list `db.migrate` after it.
 
 ### `anvil exec`
 
@@ -918,8 +981,19 @@ protection; use `--keep-db` to retain databases when removing a worktree.
   switches.
 - Pre-1.8 worktrees have no recorded testing database: create a new
   worktree, or configure a scaffold override containing ONLY a `db.create`
-  step with `role: testing` and run that. `anvil exec` never creates or
-  modifies databases or `.anvil.local`.
+  step with `role: testing` and run that (add `db.migrate` after it to
+  migrate the new testing database; the policy never touches the unrecorded
+  application database). `anvil exec` never creates or modifies databases or
+  `.anvil.local`.
+- `--db-action testing=fresh` cannot detect running `anvil exec` sessions or
+  checks that start after its guard; only use it while nothing tests against
+  the database.
+- The opt-in `testing=fresh` isolation check sees only worktrees registered in
+  this repository. A legacy worktree of another repository whose migrated
+  `db_suffix` and site name produce the same database name can adopt an
+  existing database without an endpoint record; Anvil cannot detect that
+  sharing. Ownership and the default non-destructive `migrate` limit the
+  impact, so only use `fresh` when you know the database is yours alone.
 - One database server connection per worktree (MySQL, MariaDB, or PostgreSQL).
   SQLite worktrees are per-worktree files and already isolated, so
   `anvil exec` is not needed there.
@@ -1205,6 +1279,18 @@ All steps support template variables that are replaced at runtime:
 - Retries up to 5 times on collision
 - Persists the suffix and every created database to `.anvil.local` for exact
   cleanup
+- Fails closed: when the engine is configured (explicit `type` or a MySQL,
+  MariaDB or PostgreSQL `DB_CONNECTION`) and the database service cannot be
+  reached, the step fails with a hint to start the service or check its
+  connection settings. `anvil work`/`scaffold` then exit non-zero and
+  `anvil status --json` reports `ready: false` with the failed step. `type`
+  is case-insensitive and also accepts `postgres`/`postgresql`; an unsupported
+  `type` is rejected before any step runs. Only a project with neither `type` nor a
+  recognised `DB_CONNECTION` skips the step. SQLite creates a worktree-local
+  file and skips `role: testing`
+- Only ensures the database exists; it never runs migrations. A later
+  `db.migrate` step prepares schemas (see
+  [Schema-ready testing database](#schema-ready-testing-database))
 
 **Multiple databases with shared suffix:**
 

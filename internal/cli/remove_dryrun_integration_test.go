@@ -213,6 +213,14 @@ func TestRemoveDryRunIsNonInteractiveAndMutatesNothing(t *testing.T) {
 	require.NoError(t, err, "dry runs never stop processes")
 }
 
+func TestRemoveDryRunRequiresExplicitWorktree(t *testing.T) {
+	f := newRemoveFixture(t)
+
+	stdout, stderr, code := f.run(f.repo, "remove", "--dry-run")
+	require.NotEqual(t, 0, code, stdout+stderr)
+	require.Contains(t, stdout+stderr, "--dry-run requires a worktree argument because dry runs never prompt")
+}
+
 // databases.suffix appears only when legacy suffix-based cleanup applies: a
 // db_suffix, no exact records and a db.destroy step that would act.
 func TestRemoveJSONReportsSuffixOnlyForLegacyCleanup(t *testing.T) {

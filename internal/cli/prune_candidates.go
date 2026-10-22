@@ -160,6 +160,9 @@ func (s pruneScan) evaluate(wt git.Worktree, isMain bool, summary worktreeSummar
 	case summary.IdentityStatus != string(wtstate.IdentityOK) || summary.ID == "":
 		block("worktree identity is %s (run 'anvil adopt %s')", summary.IdentityStatus, c.Worktree.Name)
 	}
+	if summary.Head == "" {
+		block("evidence unavailable: HEAD commit could not be read")
+	}
 
 	ev := &pruneEvidence{
 		Merge:     s.collectors.merge(wt.Branch),
@@ -256,6 +259,10 @@ func (s pruneScan) assessOpenFiles(c *pruneCandidate, ev openFilesEvidence) {
 	block := func(format string, args ...any) { c.Blockers = append(c.Blockers, fmt.Sprintf(format, args...)) }
 	if ev.Error != "" {
 		block("evidence unavailable: open files: %s", ev.Error)
+		return
+	}
+	if ev.Method != procs.MethodProcfs && ev.Method != procs.MethodLsof {
+		block("evidence unavailable: open files: unsupported inspection method %q", ev.Method)
 		return
 	}
 	var unknown, allowed []string
