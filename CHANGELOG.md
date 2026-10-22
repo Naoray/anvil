@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `anvil adopt [WORKTREE] | --all` records Anvil identity (and, with `--lease-owner`, a lease) for existing worktrees without scaffolding; safe to retry, keeps moved/copied semantics of `ensure`, never replaces another owner's active lease; `--dry-run` and `--json`.
+- `anvil prune candidates` (read-only) reports per-worktree prune candidacy with reasons, blockers and evidence: merge and GitHub PR state, unpushed commits, tracked/untracked/ignored files, leases, protected patterns (`prune.protected`, `--protect`), recent activity (minimum 10m window) and processes holding files open (procfs on Linux including mount namespaces, lsof on macOS). Missing evidence blocks.
+- `anvil prune apply --from FILE --force|--dry-run` removes only the file's candidates after validating them against the current repository and rechecking all evidence, last under the exclusive lifecycle gate; a stale or edited file cannot weaken current checks.
 - `anvil remove --json` emits one `anvil.agent/v1` document describing the removal plan or result (processes, ports, runtime directory, databases, branch). It never prompts: the worktree argument is required and removal needs `--force` unless `--dry-run` is given.
 - Shared resources can declare an `identity` (`file` digest, `command` stdout, or a `directory` tree digest with a machine-wide stat cache), and checks declare the `resources:` they depend on. A changed declared resource makes the check stale with a reason naming it (`shared resource "models" changed`/`appeared`/`disappeared`); undeclared resources never affect a check. If a declared resource cannot be identified, the check fails before running or reusing anything (`check_failed` with `details.reason: "identity_unavailable"`).
 

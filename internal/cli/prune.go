@@ -38,13 +38,25 @@ func newPruneCommand(deps pruneCommandDependencies) *cobra.Command {
 		Short: "Remove merged worktrees across all linked projects",
 		Long: `Fetches origin and removes merged worktrees for every linked project.
 
+This legacy command only checks merge state and leases: it does not look at
+recent activity, open files, unpushed commits or ignored files. Agents and
+scripts should use 'prune candidates' and 'prune apply' instead of
+'anvil prune --force'.
+
 Lists all worktrees across all anvil-linked projects, identifies merged ones
 against origin/<default-branch>, and provides an interactive review before removal.
 
 --dry-run previews every merged worktree without prompting, without --force
 and without fetching: merge status is checked against the current
 remote-tracking refs, and nothing is removed (coordination lock files are
-still taken).`,
+still taken).
+
+For an auditable, evidence-based workflow use the subcommands:
+  anvil prune candidates --json --output FILE   (read-only)
+  anvil prune apply --from FILE --force         (rechecks everything; or --dry-run)`,
+		// Unknown words are refused rather than ignored, so a mistyped
+		// subcommand never runs a bulk removal.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, deps)
 		},
@@ -336,5 +348,6 @@ func pruneProjectWithDependencies(
 }
 
 func init() {
+	pruneCmd.AddCommand(newPruneCandidatesCommand(), newPruneApplyCommand())
 	rootCmd.AddCommand(pruneCmd)
 }

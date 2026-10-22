@@ -97,6 +97,9 @@ type removeLifecycleOptions struct {
 	IgnoreLease bool
 	// Report, when set, collects the plan and warnings for `remove --json`.
 	Report *removeReport
+	// Recheck, when set, runs under the exclusive lifecycle gate after the
+	// lease check and before any effect; an error aborts removal.
+	Recheck func() error
 }
 
 var removeAgentCommand = agentCommand{Name: "remove", Mutating: true, DryRun: true}
@@ -269,6 +272,11 @@ func runRemoveLifecycle(
 	}
 	if err := checkRemovalLease(worktree.Path, options.IgnoreLease, func(message string) { options.Report.note(deps, message) }); err != nil {
 		return err
+	}
+	if options.Recheck != nil {
+		if err := options.Recheck(); err != nil {
+			return err
+		}
 	}
 	if options.Report != nil {
 		options.Report.recordRuntime(runtimePlan)

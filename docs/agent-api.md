@@ -69,6 +69,9 @@ Codes are stable and never reused for a different meaning.
 | `anvil lease acquire\|renew\|release\|break [WT] --json` | yes | Advisory leases |
 | `anvil lease show [WT] --json` | no | Lease state |
 | `anvil remove WT --json` (`--force` or `--dry-run`) | yes | Remove a worktree with cleanup, or preview the plan |
+| `anvil adopt [WT] \| --all --json` | yes (`--dry-run`) | Record identity (and optionally a lease) for existing worktrees without scaffolding |
+| `anvil prune candidates --json [--output FILE]` | no | Per-worktree prune candidacy with reasons, blockers and evidence (never fetches unless `--fetch`; never rewrites indexes) |
+| `anvil prune apply --from FILE --json` (`--force` or `--dry-run`) | yes | Recheck and remove the file's candidates |
 | `anvil run [WT] -- CMD` | no (state) | Exec in the worktree environment; child stdio and exit status are the child's own |
 
 Read-only commands never write `.anvil.local`, allocate ports or create
@@ -101,10 +104,12 @@ key Anvil uses for ownership. Branch names are not unique identifiers.
 }
 ```
 
-`identity_status` is `ok`, `missing` (never prepared), `moved` (path changed;
-the ID is kept on the next `ensure`) or `copied` (another directory holds the
-same ID; the copy receives a new ID and drops the original's lease and process
-records on the next `ensure`, and is never treated as their owner).
+`identity_status` is `ok`, `missing` (never prepared), `unknown` (identity
+could not be read, for example a missing directory or a bare entry), `moved`
+(path changed; the ID is kept on the next `ensure` or `adopt`) or `copied`
+(another directory holds the same ID; the copy receives a new ID and drops the
+original's lease and process records on the next `ensure` or `adopt`, and is
+never treated as their owner).
 
 ## `anvil ensure [WORKTREE] --json` (mutating)
 
@@ -319,6 +324,155 @@ preparation running, a borrower, unreadable or malformed state, a locked
 worktree, a locked registered worktree that is absent). An unlocked registered
 sibling whose directory no longer exists is skipped with a warning suggesting
 `git worktree prune` or `git worktree repair`.
+
+## `anvil adopt [WORKTREE] --json` / `--all` (mutating)
+
+Records the Anvil identity of existing worktrees without any scaffolding or
+preparation, exactly as `ensure` would (`EnsureIdentity` semantics), and with
+`--lease-owner` acquires or renews a lease through the same code as `ensure`.
+`--dry-run` predicts every action and lease conflict and writes nothing.
+
+```json
+"data": {
+  "dry_run": false,
+  "worktrees": [
+    {"worktree": { }, "action": "adopted", "reason": "identity recorded", "lease": {"state": "none"}},
+    {"worktree": { }, "action": "skipped", "reason": "main checkout (name it explicitly to adopt it)", "lease": null},
+    {"worktree": { }, "action": "unchanged", "reason": "…", "lease": { }, "error": {"code": "lease_held", "message": "…"}}
+  ]
+}
+```
+
+`action` is `adopted` (no identity → new ID), `unchanged` (identity matches),
+`updated` (moved: ID and lease kept), `reassigned` (copied: new ID; the
+original's `lease` and `processes` records are dropped from the copy) or
+`skipped` (bare, missing directory, or the main checkout with `--all`).
+An active lease of another owner is never replaced: the entry carries
+`error`, and the command fails with `lease_held` (7; `lease_stale` without
+`--takeover-stale`), `details.lease` naming the holder. With several failures
+the first one's code is used. `--all` together with `WORKTREE` is
+`invalid_arguments`.
+
+## `anvil prune candidates --json` (read-only)
+
+`data` is the candidate document (also written to `--output FILE`):
+
+```json
+"data": {
+  "schema": "anvil.prune-candidates/v1",
+  "generated_at": "2026-10-21T12:00:00Z",
+  "repository": {"common_dir": "/src/app/.git", "project": "app", "project_path": "/src/app", "default_branch": "main", "merge_target": "origin/main"},
+  "settings": {"recent_seconds": 86400, "protected": ["release/*"], "fetched": false, "pr_lookup": true, "strict_processes": false, "allow_uninspectable": [], "allow_ignored": [".env"]},
+  "worktrees": [
+    {
+      "worktree": { },
+      "kind": "branch",
+      "candidate": false,
+      "reasons": ["branch merged into origin/main", "all commits exist on a remote"],
+      "blockers": ["1 tracked change(s)"],
+      "warnings": [],
+      "evidence": {
+        "merge": {"state": "merged", "target": "origin/main"},
+        "pr": {"state": "merged", "number": 42, "base": "main", "merged_at": "…", "head_oid": "…", "source": "gh"},
+        "remote": {"state": "pushed", "unpushed_commits": 0},
+        "tracked": {"count": 1},
+        "untracked": {"count": 0, "sample": [], "excluded": ["node_modules"]},
+        "ignored": {"count": 1, "allowed": 1, "sample": ["storage/"], "newest_at": "…", "excluded": ["node_modules", "vendor", ".anvil.local"]},
+        "lease": {"state": "none"},
+        "protected": {"protected": false},
+        "activity": {"state": "idle", "latest_at": "…", "latest_source": "files", "threshold_seconds": 86400,
+                     "sources": {"head_reflog": "…", "files": "…", "lease_renewed": "…", "check_result": "…", "ignored_files": "…"},
+                     "running_checks": [], "warnings": []},
+        "open_files": {"method": "procfs", "holders": [{"pid": 4242, "command": "vim", "via": ["fd"], "path": "…"}],
+                       "skipped_other_users": 0, "uninspectable_own": [], "foreign_namespace_own": []}
+      }
+    }
+  ]
+}
+```
+
+`kind` is `branch`, `main`, `bare`, `detached`, `locked`, `missing` or
+`default_branch`; only `branch` worktrees get `evidence` and can be candidates.
+`candidate` is `true` only when `blockers` is empty. Every evidence `error`,
+`unknown` state or unsupported method is a blocker
+(`evidence unavailable: <what>: …`), never proof of inactivity. Git runs with
+`--no-optional-locks`, so the scan never rewrites an index. `merge.state`
+is `merged`, `not_merged` or `unknown`; `not_merged` is accepted only when the
+PR is `merged` and its `head_oid` equals the local branch tip (squash/rebase
+merges). `pr.state` is `open` (blocker, any base), `merged` (into the default
+branch), `merged_other_base` (never treated as merged), `closed`, `none` or
+`unavailable` (`reason`; not a blocker). `ignored` lists gitignored paths
+(ignored directories collapsed, e.g. `storage/`) outside `node_modules`,
+`vendor` and `.anvil.local`; `count` paths not allowed by `--allow-ignored` or
+`prune.allow_ignored` (a glob matching the relative path or a parent
+directory) block, `allowed` counts the rest. `remote.state` is `pushed`,
+`unpushed` (blocker) or `unknown`. `activity.state` is `recent` (blocker),
+`idle` or `unknown`; `--recent` must be at least `10m` (`invalid_arguments`
+otherwise), so the check cannot be disabled. A missing HEAD reflog adds
+`activity.warnings` ("reflog unavailable") and does not block. `open_files.method` is `procfs` (Linux:
+`/proc/<pid>/{cwd,root,exe,fd/*,maps}`), `lsof` (macOS) or `unsupported`.
+Own processes that cannot be inspected (`uninspectable_own`) block unless named
+by `--allow-uninspectable NAME`, which exempts every process with that command
+name (`comm`, truncated to 15 characters and settable by the same user) in
+every worktree. **Known gap:** other users' processes that cannot be inspected
+only warn by default: `skipped_other_users` counts them on Linux and is `null`
+on macOS, where `lsof` cannot see them at all (a warning is emitted on every
+scan). A root-owned container (Docker, Sail) or another account using the
+worktree is therefore not detected unless `--strict-processes` is given, which
+blocks on them (always on macOS: "other users' processes cannot be inspected on
+this platform"). The permissive default exists because system daemons are
+always uninspectable for non-root users. Processes in another mount namespace
+(containers, snap/flatpak apps) cannot have their paths mapped: own ones are
+listed in `foreign_namespace_own` and block ("runs in another mount
+namespace") unless named by `--allow-uninspectable`; other users' are counted
+in `skipped_other_users`; kernel threads are ignored. Containers sharing a
+worktree should hold a lease. Activity sources also include `preparation`
+(the preparation record's start/finish); rewriting `.anvil.local` (adopting,
+lease bookkeeping) is not activity. Agents should use `prune candidates`/`prune apply` rather than legacy
+`anvil prune --force`, which only checks merge state and leases. Nothing is fetched unless `--fetch`. Worktrees without an `ok` identity
+are blocked until `anvil adopt`.
+
+## `anvil prune apply --from FILE --json` (mutating)
+
+Without `--dry-run`, `--force` is required (like `remove --json`; it never
+prompts); otherwise `invalid_arguments` (2) before any effect, also in human
+mode. Each result carries `warnings` from the latest evaluation.
+
+`FILE` is the candidate document or a `prune candidates --json` envelope.
+A wrong schema, malformed file, invalid pattern or recent window, a path or
+worktree ID listed twice, a `--recent` below `10m` or a `common_dir` other than
+the current project's is `invalid_arguments` (2) before any effect.
+
+```json
+"data": {
+  "dry_run": false,
+  "from": "candidates.json",
+  "repository": { },
+  "settings": { },
+  "results": [
+    {"worktree": { }, "outcome": "removed"},
+    {"worktree": { }, "outcome": "skipped", "code": "blocked", "reason": "blocked by current evidence: …", "blockers": ["active lease by \"codex\" (task \"\") until …"]},
+    {"worktree": { }, "outcome": "skipped", "code": "target_mismatch", "reason": "… is not a registered worktree of this repository"}
+  ]
+}
+```
+
+`outcome` is `removed`, `would_remove` (`--dry-run`), `skipped` or `failed`.
+Skip codes: `not_candidate` (the file did not mark it), `target_mismatch`
+(path not absolute or not canonical, not a registered worktree of this
+repository, or worktree ID differs), `changed` (branch or HEAD changed since
+generation), `blocked` (current evidence has blockers), `lease_held` /
+`cleanup_blocked` (refused by the removal lifecycle before any effect).
+Evidence is collected again before removal and once more under the exclusive
+lifecycle gate (after the lease check, before stopping processes or running
+cleanup steps). Settings are this invocation's flags, strengthened by the
+file's (`protected` combined, the larger `recent_seconds`, `strict_processes`
+if either, `allow_ignored` only where both allow it); `allow_uninspectable` is
+never taken from the file.
+`--ignore-lease` is never applied. If any removal `failed`, the command fails
+with the first failure's code. Residual race: a non-Anvil process that starts
+using the worktree after the final recheck and before `git worktree remove`
+is not detected; Anvil's own users are excluded by the lifecycle gate.
 
 ## Leases
 

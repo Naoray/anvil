@@ -198,7 +198,8 @@ Commands:
   open         Open a worktree in your IDE and browser
   sync         Sync current worktree with upstream branch
   remove       Remove a worktree
-  prune        Remove merged worktrees
+  prune        Remove merged worktrees (candidates/apply: evidence-based)
+  adopt        Register Anvil identity for existing worktrees
   scaffold     Run scaffold steps for a worktree
   ensure       Create and idempotently prepare a worktree (--json)
   run          Run a command in a worktree's configured environment

@@ -71,6 +71,64 @@ func addLeaseFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("takeover-stale", false, "Replace a stale lease (its holder stopped renewing)")
 }
 
+// leaseOptions are the lease flags shared by ensure and adopt.
+type leaseOptions struct {
+	Owner     string
+	Token     string
+	TTL       time.Duration
+	SessionID string
+	Takeover  bool
+}
+
+// parseLeaseOptions reads the flags registered by addLeaseFlags; the token
+// comes only from ANVIL_LEASE_TOKEN.
+func parseLeaseOptions(cmd *cobra.Command) (leaseOptions, error) {
+	opts := leaseOptions{
+		Owner:     mustGetString(cmd, "lease-owner"),
+		Token:     os.Getenv(LeaseTokenEnv),
+		SessionID: mustGetString(cmd, "session-id"),
+		Takeover:  mustGetBool(cmd, "takeover-stale"),
+	}
+	ttl, err := cmd.Flags().GetDuration("lease-ttl")
+	if err != nil {
+		return opts, agentapi.Wrap(agentapi.CodeInvalidArguments, err)
+	}
+	opts.TTL = ttl
+	if opts.Takeover && opts.Owner == "" {
+		return opts, agentapi.Errorf(agentapi.CodeInvalidArguments, "--takeover-stale requires --lease-owner")
+	}
+	return opts, nil
+}
+
+// applyLeaseOptions acquires (or, with the holder's token, renews) the
+// requested lease. Without --lease-owner it only reports the current lease,
+// warning when another agent holds it. An active lease of another owner is
+// never replaced (lease_held).
+func applyLeaseOptions(path, worktreeID string, opts leaseOptions, taskID string, now time.Time, warnings *[]string) (*leaseView, error) {
+	if opts.Owner == "" {
+		lease, err := wtstate.ReadLease(path)
+		if err != nil {
+			return nil, agentapi.Wrap(agentapi.CodeInternal, err)
+		}
+		if lease.State(now) == wtstate.LeaseActive {
+			*warnings = append(*warnings, fmt.Sprintf("worktree is leased by %q (task %q); leases are advisory", lease.Owner, lease.TaskID))
+		}
+		return newLeaseView(lease, now, ""), nil
+	}
+	lease, token, err := wtstate.AcquireLease(path, wtstate.AcquireRequest{
+		WorktreeID: worktreeID, Token: opts.Token, Owner: opts.Owner, TaskID: taskID,
+		SessionID: opts.SessionID, TTL: opts.TTL, TakeoverStale: opts.Takeover, Now: now,
+	})
+	if err != nil {
+		return nil, leaseAPIError(err)
+	}
+	issued := ""
+	if token != opts.Token {
+		issued = token
+	}
+	return newLeaseView(lease, now, issued), nil
+}
+
 func leaseToken(cmd *cobra.Command) (string, error) {
 	token := mustGetString(cmd, "token")
 	if token == "" {
