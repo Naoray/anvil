@@ -768,8 +768,20 @@ behavior only if they also list `db.migrate` after it.
 
 ### `anvil exec`
 
-Runs a command with the worktree's test database exported. Strictly
-read-only: it never creates or modifies databases or `.anvil.local`.
+Runs a command with the worktree's test database exported. Anvil reads
+`.anvil.local` to resolve the database name; it does not create or modify
+databases or contact the database server. The command it launches may contact
+or modify a database, depending on what it runs.
+
+With the Laravel preset, `anvil work` and `anvil scaffold` provision the
+application and testing databases and migrate the testing database.
+
+Supported project test commands run through `anvil exec` (for example
+`anvil exec php artisan test`). A bare `php artisan test` does not use the
+isolated database: it reads `DB_DATABASE` from `phpunit.xml` or `.env`, which
+usually point at a shared test database or the worktree's application
+database, so a bare run can clobber data that another worktree or your
+local application relies on.
 
 ```bash
 # Run the test suite against the worktree's test database
@@ -790,6 +802,16 @@ DB_DATABASE=<test database>                # e.g. myapp_swift_runner_test
 ANVIL_TEST_DB_DATABASE=<test database>
 ANVIL_DB_DATABASE=<application database>   # omitted if unknown
 ```
+
+What `anvil exec` does when state is incomplete:
+
+| Situation | Behavior | Corrective command |
+|-----------|----------|--------------------|
+| No `.anvil.local` in the directory or any parent | exits `1` before running the command | `anvil scaffold` in the worktree (or `anvil work <branch>`) |
+| `.anvil.local` without a `role: testing` record | exits `1` with the pre-1.8 guidance | `anvil work <branch>` for a new worktree, or a scaffold override containing only `db.create` with `role: testing` |
+| Recorded testing database missing on the server, or its schema is behind | runs the command with the recorded name; the test runner then reports the connection or schema error | For Laravel, `anvil scaffold` recreates a missing owned testing database and migrates it, without touching the application database; custom scaffolds need `db.create` and `db.migrate` steps |
+| Testing schema incompatible with the branch (rewritten migrations) | as above | `anvil scaffold --db-action testing=fresh` |
+| Last scaffold failed (`anvil status` not ready) | runs the command with the recorded name | fix the reported failure and rerun `anvil scaffold` |
 
 Exit codes: the child's exit code is passed through (on Unix via `execve`,
 on Windows via typed propagation). `127` means the command was not found,
@@ -855,7 +877,8 @@ protection; use `--keep-db` to retain databases when removing a worktree.
   environment and are not detected (a config scanner is deferred).
 - A cached Laravel config (`bootstrap/cache/config.php`) beats the
   environment and is not detected.
-- Bare invocations that bypass `anvil exec` keep today's shared behavior.
+- Bare invocations that bypass `anvil exec` keep today's shared behavior
+  (they use `phpunit.xml`/`.env`, not the isolated testing database).
 - `env -i`, containers without environment forwarding, and `DB_URL`-only
   connections are out of scope.
 - Laravel caches parallel-worker databases between runs; run

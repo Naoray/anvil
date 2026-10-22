@@ -323,3 +323,18 @@ func TestDbActionFreshRefusedWhileCheckRuns(t *testing.T) {
 	require.Equal(t, 0, code, stdout+stderr)
 	require.Equal(t, "mysql migrate:fresh --no-interaction", f.migrations(t, testing)[1])
 }
+
+// exec failures name the corrective command without contacting the server.
+func TestExecMissingTestingRecordNamesCorrectiveCommand(t *testing.T) {
+	bin := getAnvilBinary(t)
+	dir := t.TempDir()
+	endpoint := &config.DatabaseEndpoint{Driver: "yerd", Service: "mysql", Host: "127.0.0.1", Port: "3306"}
+	require.NoError(t, config.WriteLocalState(dir, config.LocalState{DbSuffix: "brave_otter", Databases: []config.OwnedDatabase{{Name: "demo_brave_otter", Engine: "mysql", Role: config.DbRoleApplication, Endpoint: endpoint}}}))
+	f := &agentFixture{t: t, env: subprocessEnv(t, "ANVIL_TEST_HELPER=1", "ANVIL_HELPER_MODE=env"), bin: bin}
+	stdout, stderr, code := f.run(dir, "exec", helperSelf(t))
+	require.Equal(t, 1, code, stdout+stderr)
+	require.Empty(t, stdout, "the child never runs without a testing database")
+	require.Contains(t, stderr, "no testing database is recorded in .anvil.local")
+	require.Contains(t, stderr, "anvil work <branch>")
+	require.Contains(t, stderr, "role: testing")
+}
