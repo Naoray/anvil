@@ -248,8 +248,10 @@ List: `data.checks[]` has `name`, `description`, `expensive`, `reusable`,
 `locks`, `commands`, `latest` (a result or `null`), `assessment`
 (`current`, `passing_and_current`, `stale_reasons[]`), `lock_holders[]` and
 `slots` (`null` for checks that take no slot, otherwise `{weight, capacity,
-in_use, queued, holders[], queue[]}`: machine-wide counts plus this check's own
-slot holders and queue entries, shaped as in `anvil slots`).
+in_use, queued, holders[], queue[], queue_busy}`: machine-wide counts plus this
+check's own slot holders and queue entries, shaped as in `anvil slots`). When
+`queue_busy` is true, `queued`, `holders` and `queue` are `null` because the
+snapshot is unavailable.
 
 ### Machine-wide check slots
 
@@ -283,7 +285,7 @@ Keep `checks.slots` and `ANVIL_CHECK_SLOTS` consistent.
 - **Waiting.** `--slot-wait D` bounds the whole wait; the default `0` waits
   until interrupted. This differs from `--lock-wait`, whose `0` fails
   immediately. On timeout nothing runs: `resource_busy` (exit 7) with
-  `details.{waiting_for, position, queued, capacity, in_use, holders[]}`.
+  `details.{waiting_for, position, queued, capacity, in_use, holders[], queue_busy}`. If the queue lock is unavailable at timeout, `queue_busy` is true, `holders` is null, and `in_use` is still counted from the slot locks.
   Ctrl-C or SIGTERM while queued removes the ticket and behaves like any
   interruption before execution (`check_failed`, exit 130, no result).
   While queued, `check NAME: waiting for slot (position 2 of 3)` lines go to
@@ -629,9 +631,9 @@ unavailable, and `load.error` then says why (omitted otherwise). `queue` is in a
 recycled PIDs; only position 1 can be `waiting_for: "load"`. Holders are
 reported only while their slot lock is held. The view creates nothing.
 `queue_busy: true` (with a warning) means the queue lock stayed busy: `in_use`
-is still exact, probed from the slot locks, but `holders` and `queue` are
-`null` (unavailable), never reported as empty. The `slots` objects of
-`check --list` and `status` carry the same `queue_busy` flag.
+is still exact, probed from the slot locks, but `queued`, `holders` and
+`queue` are `null` (unavailable), never reported as empty. The `slots` objects
+of `check --list` and `status` carry the same `queue_busy` flag.
 
 ## `anvil status --json`
 
