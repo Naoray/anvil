@@ -96,6 +96,13 @@ func readCalls(t *testing.T, root string) string {
 	return string(data)
 }
 
+func physicalPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	require.NoError(t, err)
+	return resolved
+}
+
 var trustedRebuild = config.WarmNodeModulesConfig{TrustInstallScripts: true, Rebuild: "npm rebuild"}
 
 func TestTrustedNativeWarmRebuildsDestination(t *testing.T) {
@@ -194,7 +201,7 @@ func TestTrustedNativeWarmRebuildFailureRemovesDestination(t *testing.T) {
 	require.NotEmpty(t, readDependencyStamp(t, source)["tree"])
 	gypi, readErr := os.ReadFile(filepath.Join(source, "node_modules", "native-dep", "build", "config.gypi"))
 	require.NoError(t, readErr)
-	require.Equal(t, source, strings.TrimSpace(string(gypi)))
+	require.Equal(t, physicalPath(t, source), strings.TrimSpace(string(gypi)))
 
 	// A retry without the failure installs cold and cleanly.
 	t.Setenv("FAKE_REBUILD_FAIL", "")
@@ -269,7 +276,7 @@ func TestTrustedNativeWarmRetryAfterKilledRebuildInstallsCold(t *testing.T) {
 	require.Equal(t, "ci\n", readCalls(t, target), "the normal installer replaces the unverified tree")
 	gypi, err := os.ReadFile(filepath.Join(partial, "config.gypi"))
 	require.NoError(t, err)
-	require.Equal(t, target, strings.TrimSpace(string(gypi)))
+	require.Equal(t, physicalPath(t, target), strings.TrimSpace(string(gypi)))
 	record := readDependencyStamp(t, target)
 	require.NotEmpty(t, record["tree"])
 	require.Nil(t, record["source"], "a cold install records no warm source")

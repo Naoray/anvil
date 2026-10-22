@@ -325,15 +325,24 @@ func (i *Install) fingerprint() (string, error) {
 				return "", err
 			}
 		}
-		if n == 0 && i.policy.TrustInstallScripts && i.policy.Rebuild == "" {
-			// Warm hits never run root lifecycle scripts, whose effects
-			// (e.g. codegen outside node_modules) only a rebuild reproduces.
-			scripts, err := manifestScripts(data, false)
+		if n == 0 && i.tree == "node_modules" {
+			gyp, err := hasBindingGyp(i.root)
+			if err != nil {
+				return "", err
+			}
+			scripts, _, _, err := manifestScripts(data, gyp)
 			if err != nil {
 				return "", err
 			}
 			if len(scripts) > 0 {
-				return "", fmt.Errorf("root lifecycle scripts require a warm rebuild command")
+				if !i.policy.TrustInstallScripts {
+					return "", fmt.Errorf("root lifecycle scripts require trusted warm reuse")
+				}
+				// Warm hits never run root lifecycle scripts, whose effects
+				// (e.g. codegen outside node_modules) only a rebuild reproduces.
+				if i.policy.Rebuild == "" {
+					return "", fmt.Errorf("root lifecycle scripts require a warm rebuild command")
+				}
 			}
 		}
 		hashText(h, "%s\x00%o\x00%d\x00", name, info.Mode().Perm(), len(data))
@@ -466,6 +475,13 @@ func (i *Install) record() (stamp, error) {
 // identities that cannot be verified clear the record instead.
 func (i *Install) trustStamp(record stamp) stamp {
 	if !i.policy.TrustInstallScripts {
+		if i.tree != "node_modules" {
+			return record
+		}
+		scripts, packages, err := scriptIdentities(i.root, filepath.Join(i.root, i.tree))
+		if err != nil || len(scripts) > 0 || len(packages) > 0 {
+			return stamp{}
+		}
 		return record
 	}
 	scripts, packages, err := scriptIdentities(i.root, filepath.Join(i.root, i.tree))

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,7 +54,11 @@ func scriptIdentities(project, tree string) ([]ScriptIdentity, []string, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	rootScripts, err := manifestScripts(root, false)
+	rootGyp, err := hasBindingGyp(project)
+	if err != nil {
+		return nil, nil, err
+	}
+	rootScripts, _, _, err := manifestScripts(root, rootGyp)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,19 +105,17 @@ func scriptIdentities(project, tree string) ([]ScriptIdentity, []string, error) 
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, nil, err
 		}
-		scripts, err := manifestScripts(manifest, gyp)
+		scripts, hasExplicitInstallScript, implicitGyp, err := manifestScripts(manifest, gyp)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", path, err)
 		}
-		hasInstall := false
 		for name, text := range scripts {
 			identities = append(identities, identity(path, name, text))
-			hasInstall = hasInstall || slices.Contains(installScripts, name)
 		}
-		if hasInstall != lock.Packages[path].HasInstallScript {
+		if hasExplicitInstallScript != lock.Packages[path].HasInstallScript {
 			return nil, nil, fmt.Errorf("lockfile install-script metadata disagrees with installed %s", path)
 		}
-		if hasInstall {
+		if hasExplicitInstallScript || implicitGyp || len(scripts) > 0 {
 			flagged = append(flagged, path)
 		}
 	}
@@ -125,16 +128,16 @@ func scriptIdentities(project, tree string) ([]ScriptIdentity, []string, error) 
 	return identities, flagged, nil
 }
 
-// manifestScripts returns the lifecycle scripts of one package.json. A
-// package with binding.gyp and no install script gets npm's implicit
-// "node-gyp rebuild" install script.
-func manifestScripts(data []byte, gyp bool) (map[string]string, error) {
+// manifestScripts returns lifecycle scripts, whether package-lock.json should
+// mark an explicit install script, and whether npm adds an implicit node-gyp
+// install script for a binding.gyp package.
+func manifestScripts(data []byte, gyp bool) (map[string]string, bool, bool, error) {
 	var manifest struct {
 		Scripts map[string]any `json:"scripts"`
 		Gypfile *bool          `json:"gypfile"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	scripts := map[string]string{}
 	for _, name := range lifecycleScripts {
@@ -144,14 +147,33 @@ func manifestScripts(data []byte, gyp bool) (map[string]string, error) {
 		}
 		text, ok := value.(string)
 		if !ok {
-			return nil, fmt.Errorf("script %s is not a string", name)
+			return nil, false, false, fmt.Errorf("script %s is not a string", name)
 		}
 		scripts[name] = text
 	}
-	if gyp && (manifest.Gypfile == nil || *manifest.Gypfile) && scripts["install"] == "" && scripts["preinstall"] == "" {
+	hasExplicitInstallScript := false
+	for _, name := range installScripts {
+		if scripts[name] != "" {
+			hasExplicitInstallScript = true
+			break
+		}
+	}
+	implicitGyp := gyp && (manifest.Gypfile == nil || *manifest.Gypfile) && scripts["install"] == "" && scripts["preinstall"] == ""
+	if implicitGyp {
 		scripts["install"] = "node-gyp rebuild"
 	}
-	return scripts, nil
+	return scripts, hasExplicitInstallScript, implicitGyp, nil
+}
+
+func hasBindingGyp(packagePath string) (bool, error) {
+	_, err := os.Lstat(filepath.Join(packagePath, "binding.gyp"))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func identity(pkg, script, text string) ScriptIdentity {
@@ -162,11 +184,18 @@ func identity(pkg, script, text string) ScriptIdentity {
 // trustedScriptsMatch verifies the script identities of tree (resolved
 // against project's manifest and lockfile) against the stamped provenance.
 func (i *Install) trustedScriptsMatch(expected stamp, project, tree string) bool {
-	if !i.policy.TrustInstallScripts {
+	if i.tree != "node_modules" {
 		return true
 	}
 	scripts, packages, err := scriptIdentities(project, tree)
-	return err == nil && slices.Equal(scripts, expected.TrustedScripts) && slices.Equal(packages, expected.InstallScriptPackages)
+	if err != nil {
+		return false
+	}
+	if !i.policy.TrustInstallScripts {
+		return !expected.TrustInstallScripts && len(expected.TrustedScripts) == 0 &&
+			len(expected.InstallScriptPackages) == 0 && len(scripts) == 0 && len(packages) == 0
+	}
+	return slices.Equal(scripts, expected.TrustedScripts) && slices.Equal(packages, expected.InstallScriptPackages)
 }
 
 // Rebuild returns the post-warm command to run in the destination ("" for
@@ -260,14 +289,13 @@ func sourceNeedles(paths []string, goos string) []string {
 	var out []string
 	if goos == "windows" {
 		for _, path := range paths {
-			slash := strings.ReplaceAll(path, `\`, "/")
-			out = append(out, path, slash, strings.ReplaceAll(path, `\`, `\\`))
-			if len(slash) >= 3 && slash[1] == ':' && slash[2] == '/' {
-				out = append(out, "/"+slash[:1]+slash[2:])
+			for _, variant := range []string{path, strings.ToLower(path), strings.ToUpper(path)} {
+				slash := strings.ReplaceAll(variant, `\`, "/")
+				out = append(out, variant, slash, strings.ReplaceAll(variant, `\`, `\\`))
+				if len(slash) >= 3 && slash[1] == ':' && slash[2] == '/' {
+					out = append(out, "/"+slash[:1]+slash[2:])
+				}
 			}
-		}
-		for n := range out {
-			out[n] = string(foldASCII([]byte(out[n])))
 		}
 	} else {
 		out = append(out, paths...)
@@ -280,6 +308,18 @@ func sourceNeedles(paths []string, goos string) []string {
 		}
 	}
 	for _, path := range slices.Clone(out) {
+		if strings.HasPrefix(path, "file:") {
+			continue
+		}
+		encoded := fileURL(path, goos)
+		out = append(out, encoded, lowercasePercentEscapes(encoded))
+	}
+	if goos == "windows" {
+		for n := range out {
+			out[n] = string(foldASCII([]byte(out[n])))
+		}
+	}
+	for _, path := range slices.Clone(out) {
 		if strings.Contains(path, " ") {
 			out = append(out, strings.ReplaceAll(path, " ", `\ `))
 		}
@@ -287,6 +327,43 @@ func sourceNeedles(paths []string, goos string) []string {
 	out = slices.DeleteFunc(out, func(path string) bool { return path == "" })
 	sort.Strings(out)
 	return slices.Compact(out)
+}
+
+func fileURL(path, goos string) string {
+	if goos == "windows" {
+		slash := strings.ReplaceAll(path, "\\", "/")
+		if strings.HasPrefix(slash, "//") {
+			rest := strings.TrimPrefix(slash, "//")
+			host, suffix, found := strings.Cut(rest, "/")
+			if found {
+				return (&url.URL{Scheme: "file", Host: host, Path: "/" + suffix}).String()
+			}
+			return (&url.URL{Scheme: "file", Host: host}).String()
+		}
+		if len(slash) >= 3 && slash[1] == ':' && slash[2] == '/' {
+			slash = "/" + slash
+		} else if !strings.HasPrefix(slash, "/") {
+			slash = "/" + slash
+		}
+		return (&url.URL{Scheme: "file", Path: slash}).String()
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
+}
+
+func lowercasePercentEscapes(value string) string {
+	data := []byte(value)
+	for n := 0; n+2 < len(data); n++ {
+		if data[n] != '%' {
+			continue
+		}
+		for offset := 1; offset <= 2; offset++ {
+			if data[n+offset] >= 'A' && data[n+offset] <= 'F' {
+				data[n+offset] += 'a' - 'A'
+			}
+		}
+		n += 2
+	}
+	return string(data)
 }
 
 // foldsCase reports whether goos compares paths case-insensitively for

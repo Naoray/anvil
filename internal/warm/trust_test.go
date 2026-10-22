@@ -237,7 +237,7 @@ func TestTrustedLockfileScriptMetadataMustMatchInstalledTree(t *testing.T) {
 
 func TestTrustedImplicitNodeGypInstallIsAnIdentity(t *testing.T) {
 	root := t.TempDir()
-	writeTrustedInputs(t, root, `{"name":"fixture"}`, trustedLock)
+	writeTrustedInputs(t, root, "{\"name\":\"fixture\"}", "{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"fixture\"},\"node_modules/native-dep\":{\"version\":\"1.0.0\",\"integrity\":\"sha512-fixture\",\"hasInstallScript\":false}}}")
 	i, err := prepareWithPolicy(root, "node_modules", "toolchain", []string{"ci"}, trust)
 	require.NoError(t, err)
 	installNative(t, root, `{"name":"native-dep","version":"1.0.0"}`)
@@ -247,6 +247,70 @@ func TestTrustedImplicitNodeGypInstallIsAnIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, stored.Inputs)
 	require.Equal(t, []ScriptIdentity{{Package: "node_modules/native-dep", Script: "install", SHA256: digestText("node-gyp rebuild")}}, stored.TrustedScripts)
+	require.Equal(t, []string{"node_modules/native-dep"}, stored.InstallScriptPackages)
+}
+
+func TestDefaultPolicyKeepsImplicitNodeGypColdWithoutAddonOutput(t *testing.T) {
+	src := t.TempDir()
+	writeTrustedInputs(t, src, "{\"name\":\"fixture\"}", "{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"fixture\"},\"node_modules/native-dep\":{\"version\":\"1.0.0\",\"integrity\":\"sha512-fixture\",\"hasInstallScript\":false}}}")
+	i, err := prepareWithPolicy(src, "node_modules", "toolchain", []string{"ci"}, Policy{})
+	require.NoError(t, err)
+	require.NotNil(t, i)
+	dep := filepath.Join(src, "node_modules", "native-dep")
+	require.NoError(t, os.MkdirAll(dep, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "package.json"), []byte("{\"name\":\"native-dep\",\"version\":\"1.0.0\"}"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "binding.gyp"), []byte("{}"), 0644))
+	require.NoError(t, i.Record())
+	stored, err := readStamp(src, "node_modules")
+	require.NoError(t, err)
+	require.Empty(t, stored.Inputs, "implicit node-gyp install stays cold without the opt-in")
+}
+
+func TestDefaultReuseRejectsLegacyStampForImplicitNodeGyp(t *testing.T) {
+	src := t.TempDir()
+	writeTrustedInputs(t, src, "{\"name\":\"fixture\"}", "{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"fixture\"},\"node_modules/native-dep\":{\"version\":\"1.0.0\",\"integrity\":\"sha512-fixture\",\"hasInstallScript\":false}}}")
+	source, err := prepareWithPolicy(src, "node_modules", "toolchain", []string{"ci"}, Policy{})
+	require.NoError(t, err)
+	require.NotNil(t, source)
+	dep := filepath.Join(src, "node_modules", "native-dep")
+	require.NoError(t, os.MkdirAll(dep, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "package.json"), []byte("{\"name\":\"native-dep\",\"version\":\"1.0.0\"}"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dep, "binding.gyp"), []byte("{}"), 0644))
+	tree, err := treeDigest(filepath.Join(src, "node_modules"), source.digestOptions())
+	require.NoError(t, err)
+	require.NoError(t, writeStamp(src, "node_modules", stamp{Inputs: source.inputs, Tree: tree}))
+
+	target := trustedTarget(t, src, Policy{})
+	result, err := target.Reuse(src, "copy")
+	require.NoError(t, err)
+	require.Equal(t, Cold, result, "old stamps cannot attest implicit install scripts")
+	requireNoTree(t, target.root)
+}
+
+func TestRootImplicitNodeGypRequiresTrustedRebuild(t *testing.T) {
+	root := t.TempDir()
+	writeTrustedInputs(t, root, "{\"name\":\"fixture\"}", "{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"fixture\"}}}")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "binding.gyp"), []byte("{}"), 0644))
+
+	for name, policy := range map[string]Policy{
+		"default":               {},
+		"trust without rebuild": {TrustInstallScripts: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			install, err := prepareWithPolicy(root, "node_modules", "toolchain", []string{"ci"}, policy)
+			require.NoError(t, err)
+			require.Nil(t, install, "the root node-gyp hook must not be skipped")
+		})
+	}
+
+	install, err := prepareWithPolicy(root, "node_modules", "toolchain", []string{"ci"}, trust)
+	require.NoError(t, err)
+	require.NotNil(t, install)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "node_modules"), 0755))
+	require.NoError(t, install.Record())
+	stored, err := readStamp(root, "node_modules")
+	require.NoError(t, err)
+	require.Contains(t, stored.TrustedScripts, ScriptIdentity{Package: "", Script: "install", SHA256: digestText("node-gyp rebuild")})
 }
 
 func TestTrustedSourcePathRequiresRebuildAndDetachedDestination(t *testing.T) {
@@ -455,9 +519,12 @@ func TestSourceNeedlesSpellings(t *testing.T) {
 		{"darwin", []string{"/var/wt/feature"}, "/var/wt/feature-2/build", false},
 		{"linux", []string{"/home/u/wt/feature", "/srv/wt/feature"}, `"/srv/wt/feature/node_modules"`, true},
 		{"linux", []string{"/home/u/wt/feature"}, "/HOME/U/WT/FEATURE", false},
+		{"linux", []string{"/wt/my space"}, "file:///wt/my%20space/node_modules", true},
 		{"linux", []string{"/wt/my feature"}, `/wt/my\ feature/build`, true},
 		// Windows tools write native, forward-slash, JSON-escaped and MSYS
 		// spellings, in any case, of either the 8.3 or the long name.
+		{"windows", []string{"C:\\wt\\my space"}, "file:///C:/wt/my%20space/node_modules", true},
+		{"windows", []string{"C:\\Users\\JosÉ\\wt\\feature"}, "C:\\users\\josé\\wt\\feature\\node_modules", true},
 		{"windows", []string{short, long}, short + `\build\config.gypi`, true},
 		{"windows", []string{short, long}, `C:/Users/RUNNER~1/AppData/Local/Temp/wt/feature/node_modules`, true},
 		{"windows", []string{short, long}, `{"nodedir":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\wt\\feature\\x"}`, true},
