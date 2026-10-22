@@ -103,7 +103,7 @@ autoload -Uz compinit && compinit
 ## Quick Start
 
 ```bash
-# Check anvil version
+# Check anvil version (same line as `anvil --version`; `--json` for agents)
 anvil version
 
 # Link an existing project (auto-detects name from git remote)
@@ -624,10 +624,16 @@ anvil ensure feature/x --json --lease-owner codex --task-id SOLO-7   # prepared 
 anvil ensure --review <sha> --json            # independent reviewer worktree pinned to a commit
 anvil context feature-x --json                # environment, components, resources, checks (read-only)
 anvil status feature-x --json                 # readiness, lease, processes, check currency, cleanup preview
+anvil status --all --json                     # every worktree: ready, prepare, lease, managed, role, dirty
 anvil lease release feature-x                 # ANVIL_LEASE_TOKEN; remove refuses active leases
 ```
 
-See [docs/agent-api.md](docs/agent-api.md) for the versioned JSON contract.
+`context`, `status` and each `status --all` entry report the same `lease`
+object (`lease.state`), `ready`, a `prepare` object (`prepare.status`) and
+`worktree.managed` (Anvil holds a valid identity for the path; the main
+checkout and plain `git worktree add` worktrees are unmanaged until
+`anvil ensure`). See [docs/agent-api.md](docs/agent-api.md) for the versioned
+JSON contract.
 
 Capabilities: `node`, `rust`, `python` (uv/poetry/pip), `go`, `php`, `tauri`,
 `swift`. See [docs/environments.md](docs/environments.md) for the full schema and

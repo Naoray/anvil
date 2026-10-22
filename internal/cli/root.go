@@ -212,7 +212,7 @@ Commands:
   pull-config  Copy anvil.yaml from default branch worktree
   repair       Repair git configuration for existing project
   install      Setup global configuration
-  version      Show anvil version
+  version      Show anvil version (also --version; --json)
   completion   Generate shell completion scripts
 
 Run 'anvil <command> --help' for more information.`
@@ -226,6 +226,7 @@ Run 'anvil <command> --help' for more information.`
 func Execute() error {
 	rootCmd.SilenceUsage = true
 	overrideCompletionSubcommands(rootCmd)
+	configureVersionFlag(rootCmd)
 	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		if ui.IsAbort(err) {
 			return nil
