@@ -283,7 +283,7 @@ func validateFilePatterns(patterns []string) error {
 
 func validateFileRecentWindow(seconds int64) error {
 	minimum := int64(minimumRecentActivity / time.Second)
-	maximum := int64((1<<63 - 1) / int64(time.Second))
+	maximum := (1<<63 - 1) / int64(time.Second)
 	if seconds < minimum || seconds > maximum {
 		return agentapi.Errorf(agentapi.CodeInvalidArguments, "candidate file recent_seconds %d is outside the supported range %d..%d", seconds, minimum, maximum)
 	}
