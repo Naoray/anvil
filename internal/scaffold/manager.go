@@ -309,6 +309,7 @@ func (m *ScaffoldManager) RunScaffoldWithOptions(request ScaffoldRequest) (repor
 	opts := m.stepOptionsFromFlags(request.DryRun, request.Verbose, request.Quiet)
 	opts.WarmSource = request.Warm.Source
 	opts.CopyMode = request.Warm.CopyMode
+	opts.WarmNodeModules = cfg.Warm.NodeModules
 
 	plan, planDigest := buildPlan(stepConfigs, request.Env)
 	recorder := &prepareRecorder{

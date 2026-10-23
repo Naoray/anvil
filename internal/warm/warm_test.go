@@ -137,14 +137,46 @@ func TestStagedMutationAndIOFailureNeverPublish(t *testing.T) {
 	}
 }
 func TestCollisionPreserved(t *testing.T) {
+	// An unstamped node_modules (e.g. left by a killed warm rebuild) is never
+	// reused or certified: it goes cold and the normal installer replaces it.
 	src, _ := fixture(t)
 	i := target(t, src)
 	require.NoError(t, os.Mkdir(filepath.Join(i.root, "node_modules"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(i.root, "node_modules", "mine"), []byte("keep"), 0644))
-	_, err := i.Reuse(src, "auto")
-	require.Error(t, err)
-	_, err = os.Stat(filepath.Join(i.root, "node_modules", "mine"))
+	result, err := i.Reuse(src, "auto")
 	require.NoError(t, err)
+	require.Equal(t, ColdUnverified, result)
+	require.True(t, IsCold(result))
+	data, err := os.ReadFile(filepath.Join(i.root, "node_modules", "mine"))
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(data))
+	stored, err := readStamp(i.root, "node_modules")
+	require.NoError(t, err)
+	require.Empty(t, stored.Inputs)
+
+	// A stamped (verified) destination tree is still a collision.
+	stamped := target(t, src)
+	require.NoError(t, os.Mkdir(filepath.Join(stamped.root, "node_modules"), 0755))
+	require.NoError(t, stamped.Record())
+	recorded, err := readStamp(stamped.root, "node_modules")
+	require.NoError(t, err)
+	require.NotEmpty(t, recorded.Inputs)
+	_, err = stamped.Reuse(src, "auto")
+	require.Error(t, err)
+
+	// Composer trees keep refusing any existing destination.
+	for _, name := range []string{"composer.json", "composer.lock"} {
+		require.NoError(t, os.WriteFile(filepath.Join(src, name), []byte(`{}`), 0644))
+	}
+	vendorRoot := t.TempDir()
+	for _, name := range []string{"composer.json", "composer.lock"} {
+		require.NoError(t, os.WriteFile(filepath.Join(vendorRoot, name), []byte(`{}`), 0644))
+	}
+	vendor, err := prepare(vendorRoot, "vendor", "toolchain", []string{"install"})
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(vendorRoot, "vendor"), 0755))
+	_, err = vendor.Reuse(src, "auto")
+	require.Error(t, err)
 }
 func TestUnverifiableInstallsNotStamped(t *testing.T) {
 	for _, content := range []string{`{"scripts":{"postinstall":"custom"}}`, `{"workspaces":["packages/*"]}`, `{"dependencies":{"local":"file:../local"}}`} {

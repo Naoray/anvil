@@ -386,11 +386,70 @@ steps still run.
 Eligibility is deliberately narrow: plain `npm ci` with complete v2/v3 lockfile
 integrity metadata, or scriptless `composer install`. Additional installer
 arguments, install hooks, plugins, local/workspace dependencies, native node
-addons, and nonstandard Composer paths stay cold. Any `npm-shrinkwrap.json` or
+addons, and nonstandard Composer paths stay cold by default (npm scripts and
+addons can opt in, below). Any `npm-shrinkwrap.json` or
 alternate manifest selected through `COMPOSER` stays cold. Normal Laravel
 Composer scripts therefore keep Composer cold while npm may still warm.
 Composer root versions and source refs must also match; compatible hits rebuild
 target autoload files with plugins and scripts disabled.
+
+#### Trusting npm install scripts and native addons
+
+Projects whose dependencies run install scripts or build native addons can opt
+in for `node_modules` in the committed `anvil.yaml`:
+
+```yaml
+warm:
+  node_modules:
+    trust_install_scripts: true
+    rebuild: npm rebuild   # optional; runs in the destination after a warm hit
+```
+
+With the opt-in, root and dependency `preinstall`/`install`/`postinstall`/
+`prepare` scripts and `.node` addons no longer force a cold install. Reuse
+still requires the same lockfile, manifests, Node (`process.versions`) and npm
+versions, platform and architecture, plus identical script identities: for the
+root `package.json` and every installed lockfile dependency, Anvil records the
+package path, script name and SHA-256 of the script text (a `binding.gyp`
+without an install script counts as npm's implicit `node-gyp rebuild`). The
+lockfile's `hasInstallScript` flags must agree with the installed packages.
+Identities are checked on the source tree and again on the staged copy; any
+difference, or changing or removing the `warm` section, reinstalls cold. Other
+restrictions (workspaces, local dependencies, shrinkwrap, missing integrity)
+still apply.
+
+A warm hit never runs `npm ci` and therefore never re-runs the root project's
+lifecycle scripts. When the root `package.json` declares any of them (for
+example `postinstall` or `prepare` codegen outside `node_modules`), the project
+is eligible only with a `rebuild` command, which must reproduce their effects
+(for example `npm rebuild && npm run postinstall`); without one it stays cold.
+Dependency scripts need no rebuild unless their output embeds paths (below).
+A dependency `binding.gyp` counts as an implicit install unless the package
+declares `"gypfile": false`.
+
+Files that embed the source worktree path (for example node-gyp `build/`
+directories) are reusable only when `rebuild` is configured. The rebuild runs
+with the step's environment in the destination worktree; its output is shown
+only on failure or with `--verbose`. Afterwards no file in the destination
+`node_modules` may still reference the source worktree (including its
+`/private` alias on macOS and Makefile-escaped spaces), no symlink may be
+absolute or leave the destination tree, and the rebuilt tree must still pass
+the same verification as a recorded install. If the rebuild fails or any check
+fails, `anvil work` fails, the warmed `node_modules` is removed and
+no provenance is recorded, so a retry installs cold. If Anvil is killed before
+it can clean up, a retry with `--warm-from` reports
+`node_modules: cold (existing unverified tree)` for the unstamped leftover and
+runs the normal installer, which replaces it. Without `rebuild`, such
+trees stay cold.
+
+Trusted provenance in `.anvil.local` (`dependency_installs.node_modules`) adds
+`trust_install_scripts`, `trusted_scripts` (package, script, sha256),
+`install_script_packages`, `rebuild` and, for warm hits, the `source` worktree.
+Script texts and secrets are never stored. Warm trees are always independent
+copies or filesystem clones; writes in one worktree's `node_modules`, including
+rebuilt addons, never affect another. Only enable trust for projects whose
+install scripts are deterministic for the same inputs; scripts that download or
+generate machine-specific state outside these inputs should keep the default.
 
 Provenance lives in the target's `.anvil.local`, alongside its own database state.
 Warm copies contain no Git metadata, environment files, ownership or borrowed
